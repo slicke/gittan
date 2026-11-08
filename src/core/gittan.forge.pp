@@ -1769,7 +1769,8 @@ end;
 
 function ReviewNoteNamesAsked(const APull: TGittanForgePull): boolean;
 begin
-  Result := (Length(APull.RequestedOf) = 1) and
+  { A draft's chip says Draft, not who was asked. }
+  Result := (Length(APull.RequestedOf) = 1) and not APull.IsDraft and
     not (APull.ReviewDecision in [rdApproved, rdChangesRequested]);
 end;
 
@@ -2288,7 +2289,10 @@ begin
     FReviewPulls := nil;
   if Terminated then
     Exit;
-  if (FLogin = '') and (Length(FReviewPulls) > 0) and AskLogin(Asked) then
+  { Also with no requests: the menu leaves Approve and Request Changes
+    off the user's own pull requests by it (PullActionFits). }
+  if (FLogin = '') and ((Length(FReviewPulls) > 0) or (Length(FPulls) > 0)) and
+    AskLogin(Asked) then
     FLogin := Asked;
   FReviewPulls := WithoutReviewed(FReviewPulls, FLogin);
   if not Terminated then

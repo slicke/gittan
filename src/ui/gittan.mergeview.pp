@@ -550,17 +550,42 @@ end;
 
 procedure TGittanMergeView.SetShowBase(AValue: boolean);
 var
-  TopRow: integer;
+  TopRow, Chunk, Offset, First, Last, i: integer;
 begin
   if AValue = FShowBase then
     Exit;
   FShowBase := AValue;
   if FMerge = nil then
     Exit;
-  { The rows change their padding with the base; the panes stay on the
-    same chunk, as close as the new rows allow. }
+  { The rows change their padding with the base, so a later chunk's
+    rows move: the panes stay on the same chunk, as far into it as its
+    new rows allow. }
   TopRow := FEditMine.LineTop;
+  Chunk := -1;
+  Offset := 0;
+  if (TopRow >= 0) and (TopRow <= High(FRows)) then
+  begin
+    Chunk := FRows[TopRow].Chunk;
+    First := TopRow;
+    while (First > 0) and (FRows[First - 1].Chunk = Chunk) do
+      Dec(First);
+    Offset := TopRow - First;
+  end;
   FillPanes;
+  First := -1;
+  Last := -1;
+  if Chunk >= 0 then
+    for i := 0 to High(FRows) do
+      if FRows[i].Chunk = Chunk then
+      begin
+        if First < 0 then
+          First := i;
+        Last := i;
+      end
+      else if First >= 0 then
+        Break;
+  if First >= 0 then
+    TopRow := Min(First + Offset, Last);
   FEditMine.LineTop := Min(TopRow, Max(0, High(FRows)));
   FEditMine.Update;
   EditScroll(FEditMine);

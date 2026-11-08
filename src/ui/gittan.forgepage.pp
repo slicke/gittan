@@ -758,7 +758,25 @@ end;
 
 procedure TGittanForgePage.SetPulls(const AMine, AReview: TGittanForgePulls;
   const AError: string; ALoading: boolean);
+var
+  Shown: TGittanForgePulls;
+  SelRepo: string;
+  SelNumber, i: integer;
 begin
+  { The keyboard's card stays on its pull request when a new answer
+    sorts the list again, or leaves it when the pull is gone, so Return
+    never acts on another one. }
+  SelRepo := '';
+  SelNumber := 0;
+  if FSel >= 0 then
+  begin
+    Shown := ShownPulls;
+    if FSel <= High(Shown) then
+    begin
+      SelRepo := Shown[FSel].Repo;
+      SelNumber := Shown[FSel].Number;
+    end;
+  end;
   FMine := Copy(AMine);
   FReview := Copy(AReview);
   FError := AError;
@@ -768,6 +786,18 @@ begin
   FPhase := 0;
   FPulse.Enabled := ALoading;
   Layout;
+  { Layout filters and sorts what is shown. }
+  if FSel >= 0 then
+  begin
+    FSel := -1;
+    Shown := ShownPulls;
+    for i := 0 to High(Shown) do
+      if (Shown[i].Number = SelNumber) and (Shown[i].Repo = SelRepo) then
+      begin
+        FSel := i;
+        Break;
+      end;
+  end;
   Invalidate;
 end;
 

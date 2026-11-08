@@ -912,7 +912,9 @@ var
     res^ := JS_ThrowError(ctx, 'Gittan.ui.message: ' + AWhy);
   end;
 
-  function IndexOf(const AKey: string; ADefault: integer; out AIndex: integer): boolean;
+  { AMin is 0 for default, which a button always is, -1 for cancel,
+    which may be none. }
+  function IndexOf(const AKey: string; ADefault, AMin: integer; out AIndex: integer): boolean;
   var
     V: TJSONData;
     Count: integer;
@@ -927,11 +929,13 @@ var
       Exit(True);
     end;
     Result := (V.JSONType = jtNumber) and (Frac(V.AsFloat) = 0) and
-      (V.AsFloat >= -1) and (V.AsFloat < Count);
+      (V.AsFloat >= AMin) and (V.AsFloat < Count);
     if Result then
       AIndex := V.AsInteger
+    else if AMin < 0 then
+      Fail(AKey + ' is the index of a button, or -1')
     else
-      Fail(AKey + ' is the index of a button, or -1');
+      Fail(AKey + ' is the index of a button');
   end;
 
 begin
@@ -995,9 +999,16 @@ begin
           Fail('a button''s label is a text that is not empty');
           Exit;
         end;
+        { AskDlg would take these for its flags, not a caption. }
+        if SameText(Buttons[i], 'IsDefault') or SameText(Buttons[i], 'IsCancel') or
+          SameText(Buttons[i], 'NoCancel') then
+        begin
+          Fail('"' + Buttons[i] + '" cannot be a button''s label');
+          Exit;
+        end;
       end;
     end;
-    if not IndexOf('default', 0, Default) or not IndexOf('cancel', -1, Cancel) then
+    if not IndexOf('default', 0, 0, Default) or not IndexOf('cancel', -1, -1, Cancel) then
       Exit;
     res^ := JS_NewInt32(ctx, ExtHost.Message(Eng.ExtensionNameForContext(ctx),
       Title, Text, Kind, Buttons, Default, Cancel));

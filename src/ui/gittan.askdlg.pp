@@ -666,7 +666,9 @@ begin
     F.Fit;
     F.FNoCancel := NoCancel;
     Result := F.ShowModal;
-    if Result = mrNone then
+    { The close box gives mrCancel (on Windows and GTK), whatever the
+      buttons are: it presses the cancel button, as Escape does. }
+    if (Result = mrNone) or ((Result = mrCancel) and not F.FPressed) then
       Result := F.FCancelResult;
     if Box <> nil then
       AChecked := Box.Checked;

@@ -379,11 +379,12 @@ end;
   summary when that is gone. }
 procedure TRepoFrame.NavReturn;
 var
-  Shown: boolean;
+  Shown, Tried: boolean;
 begin
   if FRepo.Root = '' then
     Exit;
   Shown := False;
+  Tried := FNavValid;
   if FNavValid then
   begin
     FNavBusy := True;
@@ -400,6 +401,12 @@ begin
     ShowSummary;
     FNavValid := False;
     NavSync;
+    { As NavStep: the summary on top of Back is the place shown now,
+      which Back would only show again. }
+    if FNavValid then
+      FNavHistory.Settled(FNavPlace);
+    if Tried then
+      StatusNote(rsNavGone);
   end;
   NavUpdateItems;
 end;

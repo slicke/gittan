@@ -922,6 +922,14 @@ begin
     FinishExtRun(rsExtAccountChanged);
   { The job first, as in Shown. }
   StartJob;
+  { Without a forge no job runs to render the tab again (JobDone), and
+    it would wait for one for ever. }
+  if not Assigned(FForge) and FExtTabStale then
+  begin
+    FExtTabStale := False;
+    if FExtPage.Visible then
+      RenderExtTabSoon;
+  end;
   UpdatePage;
   UserChanged;
 end;
@@ -1515,13 +1523,19 @@ begin
     FMineLeft := Job.MineLeft;
     FReviewLeft := Job.ReviewLeft;
   end
-  else if FRestored then
+  else if FRestored or (Assigned(FForge) and FForge.NeedsLogin(FError)) then
   begin
     { The kept user is not shown as the forge's when the forge could not
-      say who it is; the file stays for the next start. }
+      say who it is, nor the old one when it is logged out, with their
+      pull requests and the count of those waiting; the file stays for
+      the next start. }
     FLogin := '';
     FAvatarUrl := '';
     FAvatar := '';
+    FMine := nil;
+    FReview := nil;
+    FMineLeft := 0;
+    FReviewLeft := 0;
   end;
   FRestored := False;
   UpdatePage;

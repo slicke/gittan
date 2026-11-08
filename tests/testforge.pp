@@ -418,6 +418,10 @@ begin
   AssertEquals('the chip names chef already', '', PullReviewers(Pull));
   AssertTrue(ReviewNoteNamesAsked(Pull));
   AssertTrue(WaitsForReview(Pull));
+  Pull.IsDraft := True;
+  AssertFalse('a draft''s chip names nobody', ReviewNoteNamesAsked(Pull));
+  AssertEquals('waiting for chef', PullReviewers(Pull));
+  Pull.IsDraft := False;
   SetLength(Pull.RequestedOf, 2);
   Pull.RequestedOf[1] := 'core';
   AssertEquals('Waiting for 2 reviewers', PullReviewNote(Pull));
