@@ -842,7 +842,7 @@ jobs:
   # workspace in and copies it back after `run`, as trndi-cli's leg does.
   # 15.1, since the committed x86_64-freebsd QuickJS libraries were built
   # there and an older FreeBSD may refuse them. FreeBSD's fpc package
-  # (3.2.2) is used as it is; its Lazarus is older than 5.0RC1, which is
+  # (on 15.1 a 3.3.1 snapshot of FPC main) is used as it is; its Lazarus is older than 5.0RC1, which is
   # built from its source tarball as on Haiku and kept in the cache
   # (lazarus-freebsd/, a folder of the workspace so it is synced into the
   # VM). gtk3, as on Linux. No arm64: FreeBSD's fpc package is amd64 only.
@@ -905,7 +905,12 @@ jobs:
               rm lazarus.tar.gz
               (cd lazarus-freebsd && gmake lazbuild LCL_PLATFORM=gtk3)
             fi
-            LAZBUILD="$PWD/lazarus-freebsd/lazbuild"
+            # lazbuild does not find its own folder here ("Invalid Lazarus
+            # directory"), as on Haiku, and the Makefile quotes $(LAZBUILD),
+            # so a wrapper passes --lazarusdir.
+            printf '#!/bin/sh\nexec "%s/lazarus-freebsd/lazbuild" --lazarusdir="%s/lazarus-freebsd" "$@"\n' "$PWD" "$PWD" > lazbuild-freebsd
+            chmod +x lazbuild-freebsd
+            LAZBUILD="$PWD/lazbuild-freebsd"
             "$LAZBUILD" --version
             for LPK in $VENDOR_PACKAGES; do "$LAZBUILD" --add-package-link "$LPK"; done
             gmake LAZBUILD="$LAZBUILD"
