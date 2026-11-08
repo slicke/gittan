@@ -62,6 +62,7 @@ type
     FEdited, FFilling, FSyncing, FShowBase: boolean;
     FKindMine, FKindTheirs, FKindBase, FKindMarker, FKindFiller, FKindHeader: integer;
     FBack, FText, FDim, FLine, FAccent: TColor;
+    FConflict, FPill, FPillText, FBorder: TColor;
     FMineTitle, FTheirsTitle, FBaseTitle, FResultTitle: string;
     FHeaderText, FEditedText, FResolvedText, FNoLinesText: string;
     FOnPicked, FOnEdited: TNotifyEvent;
@@ -85,6 +86,8 @@ type
     function BandRect(AEd: TATSynEdit): TRect;
     procedure Toggle(AEd: TATSynEdit; ARow: integer);
     procedure EditDraw(Sender: TObject; C: TCanvas; const ARect: TRect);
+    procedure DrawHeader(AEd: TATSynEdit; C: TCanvas; ATop: integer;
+      const ATitle, AName: string; AEmpty: boolean);
     procedure EditClickGutter(Sender: TObject; ABand, ALine: integer; var AHandled: boolean);
     procedure EditMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: integer);
     procedure EditScroll(Sender: TObject);
@@ -126,10 +129,14 @@ type
       gives each editor its colors itself. }
     procedure Restyle(AFrom: TATSynEdit; AScrollTheme: PATScrollbarTheme);
     procedure SetColors(ABack, AText, ADim, ALine, AAccent: TColor);
+    {** The colors of the conflicts' headers: the conflict's (the fork
+      and the bar down the band), and the pill with the side's name. }
+    procedure SetHeaderColors(AConflict, APill, APillText, ABorder: TColor);
     {** The bookmark kinds the rows take, which the form colors. }
     procedure SetKinds(AMine, ATheirs, ABase, AMarker, AFiller, AHeader: integer);
     {** The titles: the panes' captions and the conflict headers
-      (Format with the number, the count and the side's name), the
+      (Format with the number and the count; the side's name follows as
+      a pill), the
       note of a result edited by hand, the count of the resolved (with
       the resolved and the count), and what a header says of a side
       without lines. }
@@ -226,11 +233,15 @@ begin
   FDim := clGrayText;
   FLine := clGrayText;
   FAccent := clHighlight;
+  FConflict := clPurple;
+  FPill := clBtnFace;
+  FPillText := clBtnText;
+  FBorder := clGrayText;
   FMineTitle := 'Mine';
   FTheirsTitle := 'Theirs';
   FBaseTitle := 'Base';
   FResultTitle := 'Result';
-  FHeaderText := 'Conflict %d of %d · %s';
+  FHeaderText := 'Conflict %d of %d';
   FEditedText := 'edited by hand';
   FResolvedText := '%d of %d resolved';
   FNoLinesText := 'no lines';
@@ -395,6 +406,17 @@ begin
   FTheirsCap.SetColors(ABack, AText, ADim, ALine);
   FResultCap.SetColors(ABack, AText, ADim, ALine);
   Invalidate;
+end;
+
+procedure TGittanMergeView.SetHeaderColors(AConflict, APill, APillText, ABorder: TColor);
+begin
+  FConflict := AConflict;
+  FPill := APill;
+  FPillText := APillText;
+  FBorder := ABorder;
+  FEditMine.Invalidate;
+  FEditBase.Invalidate;
+  FEditTheirs.Invalidate;
 end;
 
 procedure TGittanMergeView.SetKinds(AMine, ATheirs, ABase, AMarker, AFiller, AHeader: integer);
@@ -1052,6 +1074,75 @@ begin
   FGoneTop := FEditMine.LineTop;
 end;
 
+{ A conflict's header row, painted over the empty line the editor drew
+  for it, the way the change view paints a run of hidden lines: a fork
+  (two branches into one) in the conflict's color, the title in the
+  window's font a size under the editor's, the side's name as a pill
+  and, for a side without lines, a note saying so in the dim color. The
+  row's tint is its bookmark kind's. The editor's font is put back. }
+procedure TGittanMergeView.DrawHeader(AEd: TATSynEdit; C: TCanvas; ATop: integer;
+  const ATitle, AName: string; AEmpty: boolean);
+var
+  CharH, TextH, TextY, X, Cx, Cy, R, PadX, PillH, W, Right: integer;
+begin
+  CharH := AEd.TextCharSize.Y;
+  C.Font.Assign(Font);
+  C.Font.Style := [];
+  if AEd.OptScaleFont > 0 then
+    C.Font.Size := Max(8, AEd.Font.Size * AEd.OptScaleFont div 100 - 1)
+  else
+    C.Font.Size := Max(8, ATEditorScaleFont(AEd.Font.Size) - 1);
+  TextH := C.TextHeight('Xg');
+  while (TextH + Px(2) > CharH) and (C.Font.Size > 8) do
+  begin
+    C.Font.Size := C.Font.Size - 1;
+    TextH := C.TextHeight('Xg');
+  end;
+  TextY := ATop + (CharH - TextH) div 2;
+  Right := AEd.RectMain.Right - Px(6);
+  X := AEd.RectMain.Left + Max(Px(6), CharH div 2);
+  Cx := X + CharH div 2;
+  Cy := ATop + CharH div 2;
+  R := Max(3, (CharH - 6) div 2);
+  C.Pen.Style := psSolid;
+  C.Pen.Width := Max(1, R div 3);
+  C.Pen.Color := FConflict;
+  C.Line(Cx - R, Cy - R, Cx, Cy);
+  C.Line(Cx + R, Cy - R, Cx, Cy);
+  C.Line(Cx, Cy, Cx, Cy + R + 1);
+  C.Pen.Width := 1;
+  Inc(X, CharH + Px(4));
+  C.Brush.Style := bsClear;
+  C.Font.Color := FText;
+  C.TextOut(X, TextY, ATitle);
+  Inc(X, C.TextWidth(ATitle) + Px(8));
+  if AName <> '' then
+  begin
+    PillH := Min(CharH - Px(2), TextH + Px(4));
+    PadX := Max(Px(6), PillH div 2);
+    W := C.TextWidth(AName) + 2 * PadX;
+    if X + W <= Right then
+    begin
+      C.Pen.Color := FBorder;
+      C.Brush.Style := bsSolid;
+      C.Brush.Color := FPill;
+      C.RoundRect(X, ATop + (CharH - PillH) div 2, X + W, ATop + (CharH - PillH) div 2 + PillH,
+        PillH, PillH);
+      C.Brush.Style := bsClear;
+      C.Font.Color := FPillText;
+      C.TextOut(X + PadX, TextY, AName);
+      Inc(X, W + Px(8));
+    end;
+  end;
+  if AEmpty and (X + C.TextWidth(FNoLinesText) <= Right) then
+  begin
+    C.Font.Color := FDim;
+    C.TextOut(X, TextY, FNoLinesText);
+  end;
+  C.Font.Assign(AEd.Font);
+  C.Brush.Style := bsSolid;
+end;
+
 { The band's boxes: on a header row one for the side as a whole (a dash
   when some of its lines are ticked), on each line of a conflict one
   for the line; dimmed while the result is edited by hand. The header
@@ -1139,34 +1230,30 @@ begin
         Continue;
       Cx := (Band.Left + Band.Right) div 2;
       Cy := Y + CharH div 2;
+      { The bar down the band's left edge, the conflict's color from
+        its header to its last row. }
+      C.Pen.Style := psClear;
+      C.Brush.Style := bsSolid;
+      C.Brush.Color := FConflict;
+      C.FillRect(Band.Left + 1, Y, Band.Left + 4, Y + CharH);
       if FRows[Row].Header then
       begin
+        Title := Format(FHeaderText, [ConflictNumber(FRows[Row].Chunk), Count]);
         { The base's header names what git wrote after its marker, and
           has no box: the base is picked from neither side. }
         if IsBase then
         begin
           if Chunk.BaseName <> '' then
-            Title := Format(FHeaderText, [ConflictNumber(FRows[Row].Chunk), Count, Chunk.BaseName])
+            DrawHeader(Ed, C, Y, Title, Chunk.BaseName, Length(Chunk.Base) = 0)
           else
-            Title := Format(FHeaderText, [ConflictNumber(FRows[Row].Chunk), Count, FBaseTitle]);
-          if Length(Chunk.Base) = 0 then
-            Title := Title + ' · ' + FNoLinesText;
+            DrawHeader(Ed, C, Y, Title, FBaseTitle, Length(Chunk.Base) = 0);
         end
         else
         begin
           State := FMerge.PickState(FRows[Row].Chunk, Side);
           DrawBox(State);
-          Title := Format(FHeaderText, [ConflictNumber(FRows[Row].Chunk), Count, Chunk.Names[Side]]);
-          if Length(Chunk.Sides[Side]) = 0 then
-            Title := Title + ' · ' + FNoLinesText;
+          DrawHeader(Ed, C, Y, Title, Chunk.Names[Side], Length(Chunk.Sides[Side]) = 0);
         end;
-        C.Brush.Style := bsClear;
-        C.Font.Assign(Ed.Font);
-        C.Font.Size := Ed.Font.Size;
-        C.Font.Style := [fsBold];
-        C.Font.Color := Ed.Colors.GutterFont;
-        C.TextOut(Ed.RectMain.Left + Px(4), Y + (CharH - C.TextHeight('Ag')) div 2, Title);
-        C.Font.Style := [];
         Continue;
       end;
       if IsBase then

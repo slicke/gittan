@@ -3478,7 +3478,7 @@ resourcestring
   rsMergeTheirs = 'Theirs';
   rsMergePaneBase = 'Base';
   rsMergeResult = 'Result';
-  rsMergeHeader = 'Conflict %d of %d · %s';
+  rsMergeHeader = 'Conflict %d of %d';
   rsMergeNoLines = 'no lines';
   rsMergeEdited = 'edited by hand: the boxes are off until Reset';
   rsMergeResolvedCount = '%d of %d conflicts resolved';
@@ -5172,6 +5172,7 @@ begin
   FBandFill := P.Accent;
   FWelcome.SetAccent(P.Accent);
   FMergeView.SetColors(P.Shade, P.Text, P.Dim, P.Line, P.Accent);
+  FMergeView.SetHeaderColors(KindColor(ckConflict), P.Pill, P.PillText, P.Border);
   RestyleMergeView;
   if FDark then
   begin
