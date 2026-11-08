@@ -40,6 +40,13 @@ function AskDlgCheck(const ATitle, AMsg: string; AKind: TMsgDlgType;
   const AButtons: array of const; const ACheckCaption: string;
   var AChecked: boolean): TModalResult;
 
+{** AskDlg asked by someone other than Gittan: AFrom, after a puzzle
+  piece in the dim color, at the left of the buttons (an extension's
+  "From the extension <name>"), so the dialog cannot pass for Gittan's
+  own while ATitle is the asker's. }
+function AskDlgFrom(const ATitle, AMsg: string; AKind: TMsgDlgType;
+  const AButtons: array of const; const AFrom: string): TModalResult;
+
 {** AskDlg with QuestionDlg's help context or keyword, which it does not
   use, so a call to QuestionDlg changes in its name alone. }
 function AskDlg(const ATitle, AMsg: string; AKind: TMsgDlgType;
@@ -71,7 +78,7 @@ function AskText(const ATitle, APrompt: string; var AValue: string;
 implementation
 
 uses
-  Math, Types, LCLType, gittan.dialogicon, gittan.pathfield
+  Math, Types, LCLType, gittan.dialogicon, gittan.pathfield, gittan.puzzle
   {$IFDEF LCLCocoa}, gittan.titlebar{$ENDIF};
 
 resourcestring
@@ -97,6 +104,9 @@ const
   IconGap = 18;
   ButtonMinWidth = 84;
   ButtonGap = 8;
+  { The puzzle piece before AskDlgFrom's line, and its gap to the text. }
+  FromPiece = 12;
+  FromGap = 6;
   FieldGap = 10;
   { The space over the first line of text and the icon. On macOS the
     hidden title bar's strip is over it already, and the title is the
@@ -134,6 +144,7 @@ type
     FError: TLabel;
     FOk: TButton;
     FButtonRow: TPanel;
+    FFrom: TLabel;
     FCheck: TGittanAskCheck;
     FOptional: boolean;
     FPathField: integer;
@@ -145,6 +156,8 @@ type
     procedure AddText(const AText: string; ABold: boolean; AGap: integer = FieldGap);
     procedure AddButtons(const AButtons: array of TAskButton; ADefault, ACancel: integer);
     procedure ButtonClick(Sender: TObject);
+    procedure AddFrom(const AText: string);
+    procedure RowPaint(Sender: TObject);
   protected
     procedure KeyDown(var Key: word; Shift: TShiftState); override;
     procedure Paint; override;
@@ -321,6 +334,35 @@ begin
     FCancelResult := AButtons[ACancel].Result;
 end;
 
+{ AText at the left of the buttons, under the icon's left edge, after
+  the room of the puzzle piece RowPaint draws; a long one is cut at the
+  buttons. }
+procedure TAskForm.AddFrom(const AText: string);
+begin
+  FFrom := TLabel.Create(Self);
+  FFrom.ShowAccelChar := False;
+  FFrom.Caption := AText;
+  FFrom.Hint := AText;
+  FFrom.ShowHint := True;
+  FFrom.Font.Color := clGrayText;
+  FFrom.Layout := tlCenter;
+  FFrom.Align := alClient;
+  FFrom.BorderSpacing.Left := Scale96ToScreen(IconLeft - Margin + FromPiece + FromGap);
+  FFrom.Parent := FButtonRow;
+  FButtonRow.OnPaint := @RowPaint;
+end;
+
+procedure TAskForm.RowPaint(Sender: TObject);
+var
+  S: integer;
+begin
+  if FFrom = nil then
+    Exit;
+  S := Scale96ToScreen(FromPiece);
+  PaintPuzzle(FButtonRow.Canvas, FFrom.Left - Scale96ToScreen(FromGap) - S,
+    (FButtonRow.ClientHeight - S) div 2, S, clGrayText);
+end;
+
 { Escape answers the cancel button's result, mrCancel without one; a
   cancel button takes the key itself. Under 'NoCancel' it does nothing. }
 procedure TAskForm.KeyDown(var Key: word; Shift: TShiftState);
@@ -467,9 +509,10 @@ end;
   The calls
   --------------------------------------------------------------------------- }
 
-{ AskDlg, with a check box under the text when ACheckCaption is given. }
+{ AskDlg, with a check box under the text when ACheckCaption is given and
+  AFrom at the left of the buttons when it is. }
 function AskWith(const ATitle, AMsg: string; AKind: TMsgDlgType;
-  const AButtons: array of const; const ACheckCaption: string;
+  const AButtons: array of const; const ACheckCaption, AFrom: string;
   var AChecked: boolean): TModalResult;
 var
   F: TAskForm;
@@ -540,6 +583,8 @@ begin
       Box.Parent := F;
     end;
     F.AddButtons(Buttons, Default, Cancel);
+    if AFrom <> '' then
+      F.AddFrom(AFrom);
     F.FNoCancel := NoCancel;
     Result := F.ShowModal;
     if Result = mrNone then
@@ -557,14 +602,23 @@ var
   Unused: boolean;
 begin
   Unused := False;
-  Result := AskWith(ATitle, AMsg, AKind, AButtons, '', Unused);
+  Result := AskWith(ATitle, AMsg, AKind, AButtons, '', '', Unused);
+end;
+
+function AskDlgFrom(const ATitle, AMsg: string; AKind: TMsgDlgType;
+  const AButtons: array of const; const AFrom: string): TModalResult;
+var
+  Unused: boolean;
+begin
+  Unused := False;
+  Result := AskWith(ATitle, AMsg, AKind, AButtons, '', AFrom, Unused);
 end;
 
 function AskDlgCheck(const ATitle, AMsg: string; AKind: TMsgDlgType;
   const AButtons: array of const; const ACheckCaption: string;
   var AChecked: boolean): TModalResult;
 begin
-  Result := AskWith(ATitle, AMsg, AKind, AButtons, ACheckCaption, AChecked);
+  Result := AskWith(ATitle, AMsg, AKind, AButtons, ACheckCaption, '', AChecked);
 end;
 
 function AskDlg(const ATitle, AMsg: string; AKind: TMsgDlgType;

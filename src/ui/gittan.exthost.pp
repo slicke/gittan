@@ -62,7 +62,8 @@ resourcestring
   rsExtMessage = 'Extension';
   rsExtQuestion = 'Extension question';
   rsExtOK = 'OK';
-  rsExtNamed = 'Extension "%s"';
+  rsExtFrom = 'From the extension %s';
+  rsExtFromSome = 'From an extension';
   rsExtError = 'Extension error';
   rsExtPermTitle = 'An extension asks for permissions';
   rsExtPermText = '%s' + LineEnding + LineEnding + 'File: %s' + LineEnding;
@@ -90,23 +91,38 @@ begin
     Result := FWindow.ShownFrame;
 end;
 
-procedure TGittanExtUIHost.Alert(const AName, AText: string);
+{ The line at the left of an extension's dialog's buttons, with the
+  puzzle piece (AskDlgFrom), so it cannot pass for one of Gittan's own. }
+function FromLine(const AName: string): string;
 begin
   if AName <> '' then
-    TellDlg(Format(rsExtNamed, [AName]), AText, mtInformation)
+    Result := Format(rsExtFrom, [AName])
   else
-    TellDlg(rsExtMessage, AText, mtInformation);
+    Result := rsExtFromSome;
+end;
+
+{ alert and confirm have no title of their own: the extension's name
+  heads the text. }
+procedure TGittanExtUIHost.Alert(const AName, AText: string);
+var
+  Title: string;
+begin
+  Title := AName;
+  if Title = '' then
+    Title := rsExtMessage;
+  AskDlgFrom(Title, AText, mtInformation, [mrOK, 'IsDefault', 'IsCancel'],
+    FromLine(AName));
 end;
 
 function TGittanExtUIHost.Confirm(const AName, AText: string): boolean;
 var
   Title: string;
 begin
-  if AName <> '' then
-    Title := Format(rsExtNamed, [AName])
-  else
+  Title := AName;
+  if Title = '' then
     Title := rsExtQuestion;
-  Result := AskDlg(Title, AText, mtConfirmation, [mrYes, mrNo]) = mrYes;
+  Result := AskDlgFrom(Title, AText, mtConfirmation, [mrYes, mrNo],
+    FromLine(AName)) = mrYes;
 end;
 
 function TGittanExtUIHost.Prompt(const ACaption, AText, ADefault: string;
@@ -118,9 +134,9 @@ begin
     AValue := '';
 end;
 
-{ The window's title names the extension, as alert's does, so a message
-  cannot pass for one of Gittan's own; the extension's title heads the
-  text. A button's modal result is ButtonBase plus its index, above the
+{ The extension's title heads the text (its name when it gives none, as
+  alert's), and the line at the left of the buttons names the extension,
+  so a message cannot pass for one of Gittan's own. A button's modal result is ButtonBase plus its index, above the
   LCL's own, so Escape and the close box without a cancel button
   (mrCancel) answer -1. }
 function TGittanExtUIHost.Message(const AName, ATitle, AText: string;
@@ -164,14 +180,18 @@ var
   end;
 
 begin
-  if AName <> '' then
-    Caption := Format(rsExtNamed, [AName])
-  else
+  Caption := ATitle;
+  Text := AText;
+  if Text = '' then
+  begin
+    { A title alone is the text, under the name as alert's. }
+    Text := Caption;
+    Caption := '';
+  end;
+  if Caption = '' then
+    Caption := AName;
+  if Caption = '' then
     Caption := rsExtMessage;
-  Text := ATitle;
-  if (Text <> '') and (AText <> '') then
-    Text := Text + LineEnding + LineEnding;
-  Text := Text + AText;
   { The labels are kept in Labels while Args points at them. }
   Labels := nil;
   Args := nil;
@@ -195,7 +215,7 @@ begin
     if i = ACancel then
       PutStr('IsCancel');
   end;
-  Pressed := AskDlg(Caption, Text, Kinds[AKind], Args);
+  Pressed := AskDlgFrom(Caption, Text, Kinds[AKind], Args, FromLine(AName));
   n := Pressed - ButtonBase;
   if (n >= 0) and (n <= High(Labels)) then
     Result := n

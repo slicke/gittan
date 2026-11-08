@@ -107,7 +107,7 @@ var i = Gittan.ui.message({
 });
 ```
 
-`message` gives the index of the button pressed, or -1 when the dialog was closed without one (no `cancel`). Without `buttons` it has OK alone, and `Gittan.ui.message("text")` is the same as `{text: "text"}`. It takes up to six buttons, each with a label; a shape it cannot show (an unknown kind, an empty label, an index that is no button's) throws instead of opening the dialog. The dialog's title says which extension it is from, Extension "name", and `title` heads the text. The buttons are placed the way the system places them, so the default one may not be where it is in the list.
+`message` gives the index of the button pressed, or -1 when the dialog was closed without one (no `cancel`). Without `buttons` it has OK alone, and `Gittan.ui.message("text")` is the same as `{text: "text"}`. It takes up to six buttons, each with a label; a shape it cannot show (an unknown kind, an empty label, an index that is no button's) throws instead of opening the dialog. `title` heads the text (the extension's name when there is none), and a dim line beside the buttons, with a puzzle piece, says which extension it is from. The buttons are placed the way the system places them, so the default one may not be where it is in the list.
 
 A card sits under the line in the change view, like the AI review's, while the work tree is what is compared. It goes to the shown repository; a command that answers later gives `repo: ctx.repo` to `addCard` and `clearCards`, so the card lands in the repository it ran in even after another tab was picked. `clearCards()` without one clears every repository's.
 
