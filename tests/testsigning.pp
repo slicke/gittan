@@ -83,15 +83,21 @@ begin
   begin
     {$IFDEF WINDOWS}
     Result := RunTool('ssh-keygen', FDir, ['-q', '-t', 'ed25519', '-N', '', '-f', Name], [], [],
-      Output, Error, Status, nil) and (Status = 0);
+      Output, Error, Status, nil);
     {$ELSE}
     Result := RunTool('/bin/sh', FDir, ['-c', 'ssh-keygen -q -t ed25519 -N "" -f ' + Name],
-      [], [], Output, Error, Status, nil) and (Status = 0);
-    if Result then
-      FpChmod(FDir + PathDelim + Name, &600);
+      [], [], Output, Error, Status, nil);
     {$ENDIF}
+    { Not there at all: the tests that need it are skipped. }
     if not Result then
       Exit;
+    { There, but no key made: what it said fails the test. }
+    if (Status <> 0) or not FileExists(FDir + PathDelim + Name + '.pub') then
+      Fail(Format('ssh-keygen made no %s.pub (exit %d): %s %s', [Name, Status, Trim(Output),
+        Trim(Error)]));
+    {$IFNDEF WINDOWS}
+    FpChmod(FDir + PathDelim + Name, &600);
+    {$ENDIF}
   end;
 end;
 

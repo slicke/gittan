@@ -5269,6 +5269,8 @@ begin
     Exit;
   Lines := TStringList.Create;
   try
+    { LF on Windows too, as git writes a message. }
+    Lines.LineBreak := #10;
     Lines.Text := Result;
     { Whether the last paragraph is trailers alone. }
     Last := Lines.Count - 1;

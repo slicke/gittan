@@ -2676,7 +2676,48 @@ function SetEnvironmentVariableW(AName, AValue: PWideChar): LongBool; stdcall;
 {$else}
 function setenv(AName, AValue: PChar; AOverwrite: longint): longint; cdecl;
   external 'c';
+function unsetenv(AName: PChar): longint; cdecl;
+  external 'c';
 {$endif}
+
+{ Whether the test's environment has AName at all, empty or not. }
+function HasTestVariable(const AName: string): boolean;
+var
+  Env: string;
+begin
+  Result := False;
+  for Env in EnvironmentStrings do
+    if Pos(UpperCase(AName) + '=', UpperCase(Env)) = 1 then
+      Exit(True);
+end;
+
+{ Takes AName out of the test's environment, as SetTestVariable puts it
+  in: libc's and envp, or Windows' one. }
+procedure UnsetTestVariable(const AName: string);
+{$ifndef windows}
+var
+  i, j: integer;
+{$endif}
+begin
+  {$ifdef windows}
+  SetEnvironmentVariableW(PWideChar(UnicodeString(AName)), nil);
+  {$else}
+  unsetenv(PChar(AName));
+  i := 0;
+  while envp[i] <> nil do
+    if StrLComp(envp[i], PChar(AName + '='), Length(AName) + 1) = 0 then
+    begin
+      j := i;
+      while envp[j] <> nil do
+      begin
+        envp[j] := envp[j + 1];
+        Inc(j);
+      end;
+    end
+    else
+      Inc(i);
+  {$endif}
+end;
 procedure SetTestVariable(const AName, AValue: string);
 {$ifndef windows}
 var
@@ -2737,8 +2778,12 @@ const
   Name = {$ifdef windows}'TEMP'{$else}'TMPDIR'{$endif};
 var
   Old, Dir, Temp: string;
+  Had: boolean;
 begin
   Old := EnvironmentVariable(Name);
+  { Unset is not empty: git takes an empty TMPDIR for the root, where
+    no file can be made, and every later signing test failed. }
+  Had := HasTestVariable(Name);
   Dir := FDir + PathDelim + 'Björn';
   AssertTrue(Dir, CreateDir(Dir));
   SetTestVariable(Name, Dir);
@@ -2750,7 +2795,10 @@ begin
     AssertTrue(Temp, FileExists(Temp));
     DeleteFile(Temp);
   finally
-    SetTestVariable(Name, Old);
+    if Had then
+      SetTestVariable(Name, Old)
+    else
+      UnsetTestVariable(Name);
   end;
 end;
 
