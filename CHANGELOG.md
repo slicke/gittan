@@ -20,6 +20,7 @@
 - What an action on a pull request in the GitHub view did shows in a banner over the page ("Merged #12"), and a failure shows GitHub's words there rather than in a dialog.
 
 ### Fixed
+- On macOS the shown tab is filled all through, so the line where the sidebar's shade meets the editor's no longer shows across it.
 - The GitHub view says when GitHub has more pull requests than the fifty last changed it lists, rather than leaving the rest out without a word.
 - Your own pull requests no longer offer Approve and Request Changes, which GitHub refuses for the author; Comment is still there.
 - Go to Symbol, Go to Symbol in Repository and Changed Symbols open their list under the file header, or under the title bar over the summary, instead of over the tabs.

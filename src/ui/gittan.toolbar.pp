@@ -975,10 +975,13 @@ begin
       Hover := (i = FHot) and not Shown;
       if Shown or Hover then
       begin
+        { The shown tab is opaque, as on the other widgetsets: the
+          sidebar's color and the main area's meet under it, and a
+          see-through fill showed the seam across the tab. }
         if Shown and Dark then
-          Fill := NSColor.whiteColor.colorWithAlphaComponent(0.13)
+          Fill := NSColor.colorWithCalibratedWhite_alpha(0.235, 1)
         else if Shown then
-          Fill := NSColor.whiteColor.colorWithAlphaComponent(0.85)
+          Fill := NSColor.whiteColor
         else
           Fill := NSColor.labelColor.colorWithAlphaComponent(0.06);
         Fill.setFill;
