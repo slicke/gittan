@@ -22,7 +22,8 @@ on:
 #                      Gittan-linux-aarch64.rpm
 # Two legs the release does not wait for, added to it when they make it:
 #   - Windows (arm64): Gittan-windows-arm64.zip  (Gittan.exe + lexlib/, FPC 3.3.1)
-#   - Haiku (x86_64):  Gittan-haiku-x86_64.tar.gz (qt6, built in a QEMU VM)
+#   - Haiku (x86_64):  Gittan-haiku-x86_64.hpkg and .tar.gz (qt6, built in a
+#                      QEMU VM)
 #
 # As in Trndi, a push to main publishes a release: the version job takes the
 # next build number from the "build-<n>" tags (100 when there is none), and
@@ -767,11 +768,72 @@ jobs:
           tar -C dist -czf Gittan-${{ matrix.name }}.tar.gz Gittan
           ls -l Gittan-${{ matrix.name }}.tar.gz
 
+      # The same folder as a Haiku package, so pkgman brings Qt 6, libiconv
+      # and git with it and Deskbar lists Gittan. A package is mounted read
+      # only, which suits Gittan: it only reads beside its executable
+      # (lexlib/, the libraries). The step may fail without losing the
+      # tarball. The package is installed in the VM afterwards, which checks
+      # that its requirements resolve against HaikuPorts.
+      - name: Make the Haiku package
+        continue-on-error: true
+        shell: cpa.sh {0}
+        run: |
+          set -euo pipefail
+          VERSION='${{ needs.version.outputs.version }}'
+          [ -n "$VERSION" ] || VERSION="$(make -s version)"
+          HPKG="Gittan-${{ matrix.name }}.hpkg"
+          ROOT=dist/hpkg
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/apps" "$ROOT/data/deskbar/menu/Applications"
+          cp -r dist/Gittan "$ROOT/apps/Gittan"
+          # Relative, so it holds whether the package is installed for the
+          # system (/boot/system) or the user (~/config).
+          ln -s ../../../../apps/Gittan/Gittan "$ROOT/data/deskbar/menu/Applications/Gittan"
+          echo "Libraries Gittan links against:"
+          objdump -p "$ROOT/apps/Gittan/Gittan" | grep NEEDED || true
+          cat > "$ROOT/.PackageInfo" <<INFO
+          name gittan
+          version $VERSION-1
+          architecture x86_64
+          summary "Git Tree Analyzer & Navigator"
+          description "A free, native git client built around the diff. See what you changed as you change it, who wrote each line and the history behind it, then commit, sync and merge without leaving it. The AI features are off until you turn them on."
+          packager "Björn Lindh <https://github.com/slicke/gittan>"
+          vendor "Gittan"
+          copyrights { "Björn Lindh" }
+          licenses { "GNU GPL v3" }
+          urls { "https://gittan.app" }
+          provides {
+            gittan = $VERSION-1
+            app:Gittan = $VERSION
+          }
+          requires {
+            haiku
+            libqt6pas
+            lib:libiconv
+            cmd:git
+          }
+          INFO
+          # Made in dist/ and moved beside the tarball only once it installs
+          # and starts, so a broken package is not uploaded.
+          package create -C "$ROOT" "dist/$HPKG"
+          package list "dist/$HPKG"
+          pkgman install -y "$PWD/dist/$HPKG"
+          test -x /boot/system/apps/Gittan/Gittan || { echo "::error::The package installed no Gittan"; exit 1; }
+          (cd / && timeout 10 /boot/system/apps/Gittan/Gittan > /tmp/gittan-hpkg.log 2>&1) || true
+          cat /tmp/gittan-hpkg.log
+          if grep -qi "runtime_loader\|cannot open file\|could not load" /tmp/gittan-hpkg.log; then
+            echo "::error::Gittan from the package cannot load its libraries"; exit 1
+          fi
+          mv "dist/$HPKG" "$HPKG"
+          ls -l "$HPKG"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: Gittan-extra-${{ matrix.name }}
-          path: Gittan-${{ matrix.name }}.tar.gz
+          path: |
+            Gittan-${{ matrix.name }}.tar.gz
+            Gittan-${{ matrix.name }}.hpkg
           if-no-files-found: error
           retention-days: 14
 
@@ -1075,6 +1137,8 @@ jobs:
               continue
             fi
             case "$(basename "$F")" in
+              Gittan-haiku-x86_64.hpkg)
+                ADDED="$ADDED- **Gittan-haiku-x86_64.hpkg** — Haiku (64-bit) package. Install it with \`pkgman install Gittan-haiku-x86_64.hpkg\`, which also brings Qt 6 and git; Gittan is then in the Deskbar menu under Applications."$'\n' ;;
               Gittan-haiku-x86_64.tar.gz)
                 ADDED="$ADDED- **Gittan-haiku-x86_64.tar.gz** — Haiku (64-bit) without installing, needs Qt 6 from HaikuPorts (\`pkgman install libqt6pas\`). Unpack anywhere and run Gittan."$'\n' ;;
               Gittan-windows-arm64.zip)

@@ -33,7 +33,7 @@ Packaged builds for every platform are on the [Releases page](https://github.com
 | macOS (Intel) | `Gittan-macos-intel.dmg` |
 | Windows (x64; Windows 11 on Arm runs it emulated) | `Gittan-windows-x64-setup.exe`, or `Gittan-windows-x64.zip` without installing |
 | Windows on Arm (arm64) | `Gittan-windows-arm64.zip`, without installing; added to a release when its build makes it |
-| Haiku (x86_64) | `Gittan-haiku-x86_64.tar.gz`, without installing; needs Qt 6 (`pkgman install libqt6pas`); added to a release when its build makes it |
+| Haiku (x86_64) | `Gittan-haiku-x86_64.hpkg` (`pkgman install Gittan-haiku-x86_64.hpkg`, which brings Qt 6 and git), or `Gittan-haiku-x86_64.tar.gz` without installing, which needs Qt 6 (`pkgman install libqt6pas`); both added to a release when its build makes it |
 | Linux (amd64, GTK 3) | `Gittan-linux-amd64.deb`, `Gittan-linux-x86_64.rpm`, or `Gittan-linux-amd64.tar.gz` without installing |
 | Linux (arm64, GTK 3; Raspberry Pi OS 64-bit) | `Gittan-linux-arm64.deb`, `Gittan-linux-aarch64.rpm`, or `Gittan-linux-arm64.tar.gz` without installing |
 
