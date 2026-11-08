@@ -734,8 +734,23 @@ jobs:
           test -x Gittan || { echo "::error::Gittan was not built"; exit 1; }
           # The tests stop the leg, as on the others. (They used to end at
           # once with exit code 3: the Makefile's rpath lost $ORIGIN in
-          # FPC's link through a shell, so libqjs was not found.)
-          make test
+          # FPC's link through a shell, so libqjs was not found.) Git on
+          # Haiku now and then fails a run when several go at once (a push
+          # with "pthread_join failed", one of TestAsyncReads' six reads
+          # coming back empty), a different test each time, so a failed
+          # round is run again: a failure in both stops the leg, one in the
+          # first alone is a warning.
+          if ! make test > /tmp/gittan-tests.log 2>&1; then
+            cat /tmp/gittan-tests.log
+            # The failed and erred tests' messages, not the ignored ones'.
+            FIRST=$(awk '/^List of (failures|errors):/ {on=1} /^List of ignored tests:/ {on=0}
+              on && /Message:/ {sub(/^ *Message: */, ""); print}' /tmp/gittan-tests.log | head -3 | tr '\n' ' ')
+            echo "The tests failed once; running them again"
+            make test
+            echo "::warning::A test failed on Haiku in the first round only: $FIRST"
+          else
+            cat /tmp/gittan-tests.log
+          fi
           mkdir -p dist/Gittan
           cp Gittan dist/Gittan/
           cp -r lexlib dist/Gittan/
