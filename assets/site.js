@@ -83,6 +83,7 @@
       b.appendChild(d);
     });
     function select(b, focus) {
+      if (b.hasAttribute('data-more')) fold(true);
       tabs.forEach(function (o) {
         var on = o === b;
         o.setAttribute('aria-selected', on);
@@ -91,6 +92,10 @@
       });
       if (focus) { b.focus(); b.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
     }
+    // The ten views behind Ten more views show when asked for, or when one of them is chosen.
+    var tour = list.closest('.tour'), more = tour && tour.querySelector('.tabs-more');
+    var fold = function (open) { if (!more) return; tour.classList.toggle('folded', !open); more.setAttribute('aria-expanded', String(open)); };
+    if (more) { fold(false); more.addEventListener('click', function () { fold(tour.classList.contains('folded')); }); }
     tabs.forEach(function (b, i) {
       b.addEventListener('click', function () { select(b); });
       b.addEventListener('keydown', function (e) {

@@ -212,7 +212,13 @@ section { padding: calc(var(--section-gap) / 2) 0; }
 .hero .eyebrow { margin-bottom: 28px; }
 .hero h1 { font-size: var(--step-display); line-height: .98; }
 .hero h1 span { display: block; white-space: nowrap; }
-.hero h1 span:last-child { color: var(--accent); }
+/* the headline as a diff: the line that was, struck through on red, and the line that is, on green */
+.diffhead { display: grid; gap: 8px; }
+.diffhead .del, .diffhead .add { position: relative; margin: 0; border-left: 4px solid; border-radius: 0 10px 10px 0; }
+.diffhead .del { font: 400 var(--step-sub)/1.2 var(--display); letter-spacing: -.02em; color: var(--muted); padding: .22em .6em .22em 1.5em; background: var(--red-tint); border-left-color: var(--red-bright); text-decoration: line-through; text-decoration-color: var(--red); text-decoration-thickness: 2px; justify-self: start; }
+.diffhead .del::before { content: "\2212"; position: absolute; left: .55em; top: .22em; color: var(--red); font-weight: 600; text-decoration: none; }
+.diffhead .add { padding: .14em .3em .16em .62em; background: var(--add-bg); border-left-color: var(--accent-bright); }
+.diffhead .add::before { content: "+"; position: absolute; left: .16em; top: .12em; font-size: .46em; line-height: 1; color: var(--accent); font-weight: 600; }
 .hero .tag-line { font-size: var(--step-lead); line-height: 1.45; max-width: 38ch; margin: 28px 0 36px; color: var(--muted); }
 .hero .sub { margin-top: 14px; font-size: var(--step-small); color: var(--muted); }
 .hero .sub a { color: var(--ink); }
@@ -275,32 +281,54 @@ section { padding: calc(var(--section-gap) / 2) 0; }
 
 /* ---------- tour: the list of views beside the screenshot ---------- */
 .tour { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--gutter); align-items: start; }
-.tour .tabs { display: none; flex-direction: column; gap: 2px; position: sticky; top: calc(var(--bar) + 24px); margin: 0; }
-.tour .tabs button { font: inherit; text-align: left; padding: 8px 14px; cursor: pointer; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); width: 100%; transition: color .18s, background-color .18s; }
-.tour .tabs button:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 5%, transparent); }
-.tour .tabs button b { display: block; font-weight: 600; font-size: 1.0625rem; color: inherit; }
-.tour .tabs button .desc { display: none; margin-top: 8px; color: var(--muted); line-height: 1.5; text-wrap: pretty; }
-.tour .tabs button .desc b { display: inline; font-size: inherit; color: var(--ink); }
-.tour .tabs button[aria-selected="true"] { color: var(--ink); background: var(--surface); padding: 16px; box-shadow: inset 3px 0 0 var(--accent-bright), inset 0 0 0 1px var(--line); }
-.tour .tabs button[aria-selected="true"] .desc { display: block; }
+.tour .tabs { display: none; position: sticky; top: calc(var(--bar) + 24px); margin: 0; }
+.tour .tabs [role="tablist"] { display: flex; flex-direction: column; gap: 2px; }
+.tour .tabs [role="tab"] { font: inherit; text-align: left; padding: 8px 14px; cursor: pointer; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted); width: 100%; transition: color .18s, background-color .18s; }
+.tour .tabs [role="tab"]:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.tour .tabs [role="tab"] b { display: block; font-weight: 600; font-size: 1.0625rem; color: inherit; }
+.tour .tabs [role="tab"] .desc { display: none; margin-top: 8px; color: var(--muted); line-height: 1.5; text-wrap: pretty; }
+.tour .tabs [role="tab"] .desc b { display: inline; font-size: inherit; color: var(--ink); }
+.tour .tabs [role="tab"][aria-selected="true"] { color: var(--ink); background: var(--surface); padding: 16px; box-shadow: inset 3px 0 0 var(--accent-bright), inset 0 0 0 1px var(--line); }
+.tour .tabs [role="tab"][aria-selected="true"] .desc { display: block; }
 .tour .stage { min-width: 0; }
 .tour figure { margin: 0 0 56px; }
 .tour figcaption { margin: 0 0 18px; max-width: 70ch; color: var(--muted); }
 .tour figcaption b { color: var(--ink); }
 .tour .frame { filter: drop-shadow(0 26px 40px color-mix(in srgb, #000 22%, transparent)); }
 .tour .frame img { display: block; width: 100%; height: auto; }
-.js .tour .tabs { display: flex; }
+.js .tour .tabs { display: block; }
+.js .tour.folded [role="tab"][data-more] { display: none; }
+.tabs-more { display: none; align-items: center; gap: 8px; margin-top: 10px; padding: 10px 14px; border: 0; border-radius: var(--radius); background: transparent; font: 600 .9375rem/1 var(--text); color: var(--accent); cursor: pointer; transition: background-color .18s; }
+.js .tabs-more { display: inline-flex; }
+.tabs-more:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.tabs-more svg { width: 14px; height: 14px; transition: transform .25s var(--ease-out); }
+.tabs-more[aria-expanded="true"] svg { transform: rotate(180deg); }
+.tour.folded .when-open, .tour:not(.folded) .when-folded { display: none; }
 .js .tour figure { display: none; margin-bottom: 0; }
 .js .tour figure.on { display: block; animation: fade .35s ease both; }
 @keyframes fade { from { opacity: 0; } }
 @media (min-width: 901px) { .js .tour figcaption { display: none; } }
 @media (max-width: 900px) {
   .tour { grid-template-columns: 1fr; gap: 20px; }
-  .tour .tabs { position: static; flex-direction: row; flex-wrap: wrap; gap: 6px; }
-  .tour .tabs button, .tour .tabs button[aria-selected="true"] { width: auto; padding: 7px 14px; border-radius: var(--pill); box-shadow: inset 0 0 0 1px var(--line); }
-  .tour .tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); box-shadow: none; }
-  .tour .tabs button .desc { display: none !important; }
+  .tour .tabs { position: static; }
+  .tour .tabs [role="tablist"] { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+  .tour .tabs [role="tab"], .tour .tabs [role="tab"][aria-selected="true"] { width: auto; padding: 7px 14px; border-radius: var(--pill); box-shadow: inset 0 0 0 1px var(--line); }
+  .tour .tabs [role="tab"][aria-selected="true"] { background: var(--ink); color: var(--bg); box-shadow: none; }
+  .tour .tabs [role="tab"] .desc { display: none !important; }
 }
+
+/* ---------- then commit it: three steps in a row, each with its window ---------- */
+.flow { list-style: none; margin: 0; padding: 0; counter-reset: step; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gutter); }
+.flow li { counter-increment: step; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.flow .shot { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: var(--surface); border-radius: 16px; box-shadow: inset 0 0 0 1px var(--line); margin-bottom: 8px; }
+.flow .shot img { display: block; width: calc(100% * var(--zoom, 1)); max-width: none; height: auto; transform: translate(var(--x, 0), var(--y, 0)); transform-origin: 0 0; clip-path: none; }
+.flow .shot::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px var(--line); pointer-events: none; }
+.flow h3 { display: flex; align-items: center; gap: 12px; font: 400 var(--step-sub)/1.15 var(--display); letter-spacing: -.02em; }
+.flow h3::before { content: counter(step); flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: var(--accent-tint); color: var(--accent); font: 400 1rem/1 var(--display); }
+.flow p { color: var(--muted); max-width: 46ch; }
+.flow a { font-weight: 600; text-decoration: none; color: var(--ink); }
+.flow a:hover { color: var(--accent); }
+@media (max-width: 900px) { .flow { grid-template-columns: 1fr; gap: 40px; } }
 
 /* ---------- download: three platforms on the ground ---------- */
 .dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: var(--gutter); row-gap: 48px; }

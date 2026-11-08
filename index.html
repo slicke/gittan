@@ -57,6 +57,7 @@
     <nav class="sections" aria-label="Sections">
       <a href="#unique">Only here</a>
       <a href="#tour">Tour</a>
+      <a href="#workflow">Workflow</a>
       <a href="features.html#new">What&#39;s new</a>
       <div class="has-sub">
         <a href="features.html">All features</a>
@@ -87,7 +88,8 @@
       <a href="#tour">Tour</a>
       <a href="#download">Download</a>
       <a href="features.html#new">What's new</a>
-      <a href="features.html#workflow">Workflow</a>
+      <a href="#workflow">Workflow</a>
+      <a href="features.html">All features</a>
       <a href="features.html#features">The diff</a>
       <a href="features.html#history">History</a>
       <a href="features.html#build">Build from source</a>
@@ -101,7 +103,10 @@
   <div class="wrap grid">
     <div class="hero-words">
       <p class="eyebrow"><i></i><i></i>Free, native git client</p>
-      <h1 data-e="headline"><span>Understand</span><span>every change.</span></h1>
+      <div class="diffhead" data-e="headline">
+        <p class="del" aria-hidden="true">Wonder what changed.</p>
+        <h1 class="add"><span>Understand</span><span>every change.</span></h1>
+      </div>
       <p class="tag-line" data-e="lead">Then commit it. Gittan, the Git Tree Analyzer &amp; Navigator, is a free, native git client built around the diff.</p>
       <div data-e="action">
         <a class="tag" id="get" href="#download" data-twin><span>Download</span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></a>
@@ -178,18 +183,7 @@
 </picture></div>
       </article>
     </div>
-    <ul class="flist">
-      <li><h3>Time-lapse</h3><p>A file played through every version it has had, the lines each commit brought in lit up.</p></li>
-      <li><h3>Code History under the lines</h3><p>The earlier versions of the selected lines, or of the function the caret is in, laid under them.</p></li>
-      <li><h3>Reviewed, and gone</h3><p>A change you have read turns into plain code, so the diff shrinks to what you have not looked at.</p></li>
-      <li><h3>Undo for what git did</h3><p>Takes back a commit, an amend, a merge, a reset, a rebase or a switch, named after what it was.</p></li>
-      <li><h3>No index to think about</h3><p>A commit takes the files you ticked, whole, as the diff shows them. Gittan never says “staged”.</p></li>
-      <li><h3>Search for the commit that changed a text</h3><p><code>change:</code> in the graph's search is <code>git log -S</code> and <code>-G</code> with a text field.</p></li>
-      <li><h3>Symbols in a diff</h3><p>The functions a diff touched, who calls them, and <kbd>F12</kbd> to a definition, with no language server.</p></li>
-      <li><h3>AI with the agent you already have</h3><p>Off until you turn it on. Then it runs Claude Code or GitHub Copilot as you are signed in.</p></li>
-      <li><h3>Markdown, HTML and SVG drawn</h3><p>The file drawn beside its diff, the changed parts marked, with no browser engine inside.</p></li>
-    </ul>
-    <p class="all-link"><a class="tag quiet" href="features.html"><span>Every feature, and what's new</span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></a></p>
+    <p class="all-link"><a class="tag quiet" href="features.html#only"><span>Nine more, only in Gittan</span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></a></p>
   </div>
 </section>
 
@@ -203,23 +197,26 @@
   </div>
   <div class="wrap wide">
     <div class="tour">
-      <div class="tabs" role="tablist" aria-label="Screenshots" aria-orientation="vertical">
-        <button role="tab" id="b-history" aria-selected="true" aria-controls="t-history"><b>Code History</b></button>
-        <button role="tab" id="b-timelapse" aria-selected="false" aria-controls="t-timelapse" tabindex="-1"><b>Time-lapse</b></button>
-        <button role="tab" id="b-blame" aria-selected="false" aria-controls="t-blame" tabindex="-1"><b>Blame</b></button>
-        <button role="tab" id="b-side" aria-selected="false" aria-controls="t-side" tabindex="-1"><b>Side by side</b></button>
-        <button role="tab" id="b-preview" aria-selected="false" aria-controls="t-preview" tabindex="-1"><b>Preview</b></button>
-        <button role="tab" id="b-summary" aria-selected="false" aria-controls="t-summary" tabindex="-1"><b>Summary</b></button>
-        <button role="tab" id="b-repo" aria-selected="false" aria-controls="t-repo" tabindex="-1"><b>Repository</b></button>
-        <button role="tab" id="b-project" aria-selected="false" aria-controls="t-project" tabindex="-1"><b>Project</b></button>
-        <button role="tab" id="b-graph" aria-selected="false" aria-controls="t-graph" tabindex="-1"><b>Commit graph</b></button>
-        <button role="tab" id="b-stats" aria-selected="false" aria-controls="t-stats" tabindex="-1"><b>Statistics</b></button>
-        <button role="tab" id="b-files" aria-selected="false" aria-controls="t-files" tabindex="-1"><b>Files</b></button>
-        <button role="tab" id="b-commands" aria-selected="false" aria-controls="t-commands" tabindex="-1"><b>Commands</b></button>
-        <button role="tab" id="b-palette" aria-selected="false" aria-controls="t-palette" tabindex="-1"><b>Command palette</b></button>
-        <button role="tab" id="b-submodule" aria-selected="false" aria-controls="t-submodule" tabindex="-1"><b>Submodules</b></button>
-        <button role="tab" id="b-clean" aria-selected="false" aria-controls="t-clean" tabindex="-1"><b>Clean tree</b></button>
-        <button role="tab" id="b-ai" aria-selected="false" aria-controls="t-ai" tabindex="-1"><b>AI review</b></button>
+      <div class="tabs">
+        <div role="tablist" aria-label="Screenshots" aria-orientation="vertical">
+          <button role="tab" id="b-history" aria-selected="true" aria-controls="t-history"><b>Code History</b></button>
+          <button role="tab" id="b-timelapse" aria-selected="false" aria-controls="t-timelapse" tabindex="-1"><b>Time-lapse</b></button>
+          <button role="tab" id="b-side" aria-selected="false" aria-controls="t-side" tabindex="-1"><b>Side by side</b></button>
+          <button role="tab" id="b-preview" aria-selected="false" aria-controls="t-preview" tabindex="-1"><b>Preview</b></button>
+          <button role="tab" id="b-graph" aria-selected="false" aria-controls="t-graph" tabindex="-1"><b>Commit graph</b></button>
+          <button role="tab" id="b-ai" aria-selected="false" aria-controls="t-ai" tabindex="-1"><b>AI review</b></button>
+          <button role="tab" data-more id="b-blame" aria-selected="false" aria-controls="t-blame" tabindex="-1"><b>Blame</b></button>
+          <button role="tab" data-more id="b-summary" aria-selected="false" aria-controls="t-summary" tabindex="-1"><b>Summary</b></button>
+          <button role="tab" data-more id="b-repo" aria-selected="false" aria-controls="t-repo" tabindex="-1"><b>Repository</b></button>
+          <button role="tab" data-more id="b-project" aria-selected="false" aria-controls="t-project" tabindex="-1"><b>Project</b></button>
+          <button role="tab" data-more id="b-stats" aria-selected="false" aria-controls="t-stats" tabindex="-1"><b>Statistics</b></button>
+          <button role="tab" data-more id="b-files" aria-selected="false" aria-controls="t-files" tabindex="-1"><b>Files</b></button>
+          <button role="tab" data-more id="b-commands" aria-selected="false" aria-controls="t-commands" tabindex="-1"><b>Commands</b></button>
+          <button role="tab" data-more id="b-palette" aria-selected="false" aria-controls="t-palette" tabindex="-1"><b>Command palette</b></button>
+          <button role="tab" data-more id="b-submodule" aria-selected="false" aria-controls="t-submodule" tabindex="-1"><b>Submodules</b></button>
+          <button role="tab" data-more id="b-clean" aria-selected="false" aria-controls="t-clean" tabindex="-1"><b>Clean tree</b></button>
+        </div>
+        <button class="tabs-more" type="button" aria-expanded="false"><span class="when-folded">Ten more views</span><span class="when-open">Fewer views</span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
       </div>
       <div class="stage">
         <figure id="t-history" class="on" role="tabpanel" aria-labelledby="b-history">
@@ -371,6 +368,51 @@
   </div>
 </section>
 
+<section id="workflow" data-name="Then commit it">
+  <div class="wrap">
+    <div class="sechead">
+      <p class="eyebrow"><i></i><i></i>Then commit it</p>
+      <h2>Commit, sync and merge, from the diff</h2>
+      <p class="lead">The work that follows a change happens where you read it. Anything that would throw work away asks first, and nothing is merged or rebased unless you ask for it. <a href="features.html#workflow">The whole workflow</a> has eighteen views.</p>
+    </div>
+    <ol class="flow">
+      <li>
+        <div class="shot" data-ui style="--zoom:2;--x:0%;--y:-40%"><picture>
+            <source srcset="assets/shots/commit-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/commit-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/commit-light.avif" type="image/avif">
+            <img src="assets/shots/commit-light.png" width="1280" height="800" loading="lazy" alt="TrailCard.vue changed in the diff view with the button block left out of the commit in a muted tint and Reviewed, Include in Commit, Put into Its Commit and Discard pills over it, the file's box in the tree half ticked, README.md unticked, Include All in the file header, and the Commit section with a message and the Commit button">
+          </picture></div>
+        <h3>Commit what you ticked</h3>
+        <p>Tick the files that belong together, write the message under them, and commit with <kbd>⌘↩</kbd>. A block, or only the lines you select, can wait for the next commit. There is no index to think about.</p>
+        <a href="features.html?tab=b-commit#workflow">Committing, in the workflow</a>
+      </li>
+      <li>
+        <div class="shot" data-ui style="--zoom:2;--x:-20%;--y:-40%"><picture>
+            <source srcset="assets/shots/sync-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/sync-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/sync-light.avif" type="image/avif">
+            <img src="assets/shots/sync-light.png" width="1280" height="800" loading="lazy" alt="The list over the status bar with Pull (one behind), Push (two ahead), Force Push replacing one, Fetch and Commit Graph">
+          </picture></div>
+        <h3>Pull and push from the status bar</h3>
+        <p>Its middle button is always the next step: Pull here, with one commit behind and two ahead. Force Push takes a lease and says how many of the remote's commits it replaces, and a push shows its hooks as they run.</p>
+        <a href="features.html?tab=b-sync#workflow">Pull and push, in the workflow</a>
+      </li>
+      <li>
+        <div class="shot" data-ui style="--zoom:1.8;--x:-44%;--y:-10%"><picture>
+            <source srcset="assets/shots/merge-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/merge-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/merge-light.avif" type="image/avif">
+            <img src="assets/shots/merge-light.png" width="1280" height="800" loading="lazy" alt="The merge editor on TrailCard.vue with the base shown: Mine at HEAD, Base at 241f7b2 and Theirs on offline-maps side by side, each conflict headed by a fork, Conflict 2 of 3 and the side's name as a pill, the second conflict with no lines in the base and the third with the stats line both sides started from, check boxes on each side's lines, Hide Base in the header, and the Result pane under them, 1 of 3 conflicts resolved, with the third conflict's markers holding the base's line">
+          </picture></div>
+        <h3>Resolve what conflicts</h3>
+        <p>A merge that stops names its conflicts. Use Mine, Use Theirs, or the merge editor: yours and theirs side by side, the result under them, conflict by conflict, and Branch &gt; Undo if it was a mistake.</p>
+        <a href="features.html?tab=b-merge#workflow">The merge editor, in the workflow</a>
+      </li>
+    </ol>
+  </div>
+</section>
+
 <section id="download" data-name="Download">
   <div class="wrap">
     <div class="sechead">
@@ -440,6 +482,7 @@
         <ul>
           <li><a href="#unique">Only in Gittan</a></li>
           <li><a href="#tour">Tour</a></li>
+          <li><a href="#workflow">Then commit it</a></li>
           <li><a href="features.html">All features</a></li>
           <li><a href="features.html#new">What's new</a></li>
           <li><a href="features.html#build">Build from source</a></li>
