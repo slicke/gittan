@@ -70,11 +70,13 @@ type
     neither (gmNotMerged, deleting it may lose work). }
   TGittanGoneMerge = (gmMerged, gmSquashed, gmNotMerged);
 
-  {** A local branch whose upstream is gone, and what a deletion did:
-    Deleted with the commit it was at in Was, or Error with git's
-    reason. }
+  {** A local branch whose upstream is gone, with the commit the scan
+    found it at (Tip, the full id, which Merge was worked out for), and
+    what a deletion did: Deleted with the commit it was at in Was, or
+    Error with git's reason. }
   TGittanGoneBranch = record
     Name: string;
+    Tip: string;
     Merge: TGittanGoneMerge;
     Deleted: boolean;
     Was: string;
@@ -195,10 +197,12 @@ type
   end;
   TGittanMaintRefs = array of TGittanMaintRef;
 
-  {** A branch to delete: the repository's root and the branch. }
+  {** A branch to delete: the repository's root, the branch and the
+    commit the scan found it at, '' to delete it wherever it is. }
   TGittanBranchRef = record
     Path: string;
     Branch: string;
+    Tip: string;
   end;
   TGittanBranchRefs = array of TGittanBranchRef;
 
@@ -402,8 +406,11 @@ function ScanGoneRepo(const APath, ACaption: string; AFetch: boolean;
   ACancel: TGittanCancelEvent = nil): TGittanGoneRepo;
 
 {** Deletes the local branch ABranch of the repository at APath (`git
-  branch -D`): Deleted, with the commit it was at, or Error. }
-function DeleteGoneBranch(const APath, ABranch: string): TGittanGoneBranch;
+  branch -D`): Deleted, with the commit it was at, or Error. With an
+  ATip the branch goes only while it is still at that commit, so one
+  that got commits since the scan, which looked at ATip, is kept. }
+function DeleteGoneBranch(const APath, ABranch: string;
+  const ATip: string = ''): TGittanGoneBranch;
 
 implementation
 
@@ -655,6 +662,8 @@ begin
         Continue;
       Result.Branches[n] := Default(TGittanGoneBranch);
       Result.Branches[n].Name := Names[i];
+      GitOut(Repo.Root, ['rev-parse', '--verify', '-q', 'refs/heads/' + Names[i] +
+        '^{commit}'], Result.Branches[n].Tip);
       Result.Branches[n].Merge := GoneMergeState(Repo, Names[i], DefaultRef);
       Inc(n);
     end;
@@ -1151,13 +1160,22 @@ begin
     AItem.Error := 'git failed.';
 end;
 
-function DeleteGoneBranch(const APath, ABranch: string): TGittanGoneBranch;
+function DeleteGoneBranch(const APath, ABranch: string;
+  const ATip: string): TGittanGoneBranch;
 var
-  Output, Err: string;
+  Output, Err, Cur: string;
   p: integer;
 begin
   Result := Default(TGittanGoneBranch);
   Result.Name := ABranch;
+  { What was asked about was the branch at ATip: one that moved since
+    may hold work nobody was asked about. }
+  if (ATip <> '') and GitOut(APath, ['rev-parse', '--verify', '-q',
+    'refs/heads/' + ABranch + '^{commit}'], Cur) and (Cur <> ATip) then
+  begin
+    Result.Error := 'The branch has new commits since the scan.';
+    Exit;
+  end;
   GitOut(APath, ['rev-parse', '--short', 'refs/heads/' + ABranch], Result.Was);
   Result.Deleted := RunGitIn(APath, ['branch', '-D', '--', ABranch], Output, Err);
   if Result.Deleted then
@@ -1380,7 +1398,7 @@ var
 begin
   for i := 0 to High(FRefs) do
   begin
-    FResults[i] := DeleteGoneBranch(FRefs[i].Path, FRefs[i].Branch);
+    FResults[i] := DeleteGoneBranch(FRefs[i].Path, FRefs[i].Branch, FRefs[i].Tip);
     ItemDone;
   end;
   Done;

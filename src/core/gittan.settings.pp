@@ -37,6 +37,9 @@ const
   SettingsFileName = 'settings.json';
   StateFileName = 'state.json';
   OldIniFileName = 'gittan.ini';
+  {** After the name of a settings file: the copy of one that did not
+    parse (settings.json.damaged). }
+  DamagedSuffix = '.damaged';
   {** The version of the files' layout, written as "version" in both. }
   SettingsVersion = 1;
   {** The editor font when none was picked: the platform's own monospaced
@@ -76,6 +79,7 @@ type
     FSettingsDoc, FStateDoc: TJSONObject;
     FDir: string;
     FOldIniFound: boolean;
+    FDamagedFiles: string;
     function ForgeObj(const AForge: string; ACreate: boolean): TJSONObject;
     function ExtObj(const AId: string; ACreate: boolean): TJSONObject;
     function GrantObj(const AId: string; ACreate: boolean): TJSONObject;
@@ -327,6 +331,10 @@ type
       and neither settings.json nor state.json: the settings started
       over, and the window says so once. }
     property OldIniFound: boolean read FOldIniFound;
+    {** The files Load could not read as JSON, by name with ", " between
+      ('' for none): their settings are at the defaults, and each one's
+      text is kept beside it with DamagedSuffix after its name. }
+    property DamagedFiles: string read FDamagedFiles;
   end;
 
 {** Whether AKey can be an extension's id or the key of one of its
@@ -532,26 +540,37 @@ begin
 end;
 
 { The file AFileName as a JSON object; an empty one when it is missing,
-  cannot be read or is not an object. }
-function ReadDoc(const AFileName: string): TJSONObject;
+  cannot be read or is not an object. One with text that does not parse
+  or is no object (ADamaged; an edit by hand that left a comma too
+  many) is copied to AFileName + DamagedSuffix first, since the next
+  save writes the defaults over it. }
+function ReadDoc(const AFileName: string; out ADamaged: boolean): TJSONObject;
 var
   Data: TJSONData;
   Text: RawByteString;
 begin
   Result := nil;
+  ADamaged := False;
+  Text := '';
   if FileExists(AFileName) then
     try
       { The bytes are UTF-8 whatever the system's code page is. }
       Text := ReadFileBytes(AFileName);
       SetCodePage(Text, CP_UTF8, False);
+      ADamaged := Trim(Text) <> '';
       Data := GetJSON(UTF8String(Text));
       if Data is TJSONObject then
-        Result := TJSONObject(Data)
+      begin
+        Result := TJSONObject(Data);
+        ADamaged := False;
+      end
       else
         Data.Free;
     except
       { A damaged file is treated as none. }
     end;
+  if ADamaged then
+    WriteFileReplacing(AFileName + DamagedSuffix, Text, &600);
   if Result = nil then
     Result := TJSONObject.Create;
 end;
@@ -664,13 +683,21 @@ end;
 procedure TGittanSettings.Load;
 var
   O, Sub: TJSONObject;
+  Damaged: boolean;
 begin
   FreeAndNil(FSettingsDoc);
   FreeAndNil(FStateDoc);
   FOldIniFound := not FileExists(SettingsFile) and not FileExists(StateFile) and
     FileExists(IncludeTrailingPathDelimiter(FDir) + OldIniFileName);
-  FSettingsDoc := ReadDoc(SettingsFile);
-  FStateDoc := ReadDoc(StateFile);
+  FSettingsDoc := ReadDoc(SettingsFile, Damaged);
+  FDamagedFiles := '';
+  if Damaged then
+    FDamagedFiles := SettingsFileName;
+  FStateDoc := ReadDoc(StateFile, Damaged);
+  if Damaged and (FDamagedFiles <> '') then
+    FDamagedFiles := FDamagedFiles + ', ' + StateFileName
+  else if Damaged then
+    FDamagedFiles := StateFileName;
 
   O := ObjOf(FSettingsDoc, 'editor');
   FontName := StrOf(O, 'fontName');
@@ -886,11 +913,12 @@ end;
 procedure TGittanSettings.SaveRecent;
 var
   Doc: TJSONObject;
+  Damaged: boolean;
 begin
   { The file as it is now, which another instance may have written since
     Load, with the recent lists put in, and nothing else. }
   try
-    Doc := ReadDoc(StateFile);
+    Doc := ReadDoc(StateFile, Damaged);
     try
       Doc.Integers['version'] := SettingsVersion;
       Doc.Arrays['recent'] := ListJson(FRecent);

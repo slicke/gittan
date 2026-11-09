@@ -109,6 +109,12 @@ begin
   AssertFalse('the editor', Allows(['pr', 'comment', '1', '-e']));
   AssertFalse('the token', Allows(['status', '--show-token']));
   { The subcommand behind --repo, and no other flag before it. }
+  AssertFalse('a checkout by its other name', Allows(['pr', 'co', '12']));
+  AssertFalse('a pull request by create''s other name', Allows(['pr', 'new', '--fill']));
+  AssertFalse('a release by create''s other name', Allows(['release', 'new', 'v1', 'file']));
+  AssertFalse('a repository by create''s other name', Allows(['repo', 'new', 'o/r']));
+  AssertTrue('a list by its other name', Allows(['pr', 'ls']));
+  AssertTrue('run ls has -w as run list has', Allows(['run', 'ls', '-w', 'build.yml']));
   AssertFalse('a checkout behind --repo', Allows(['pr', '--repo', 'o/r', 'checkout', '12']));
   AssertFalse('a checkout behind -R', Allows(['pr', '-R', 'o/r', 'checkout', '12']));
   AssertFalse('a checkout behind --repo=', Allows(['pr', '--repo=o/r', 'checkout', '12']));

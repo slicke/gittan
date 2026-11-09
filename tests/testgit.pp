@@ -3644,6 +3644,17 @@ begin
   AssertEquals('', FRepo.MergeMessage);
   AssertTrue(FRepo.Reset(First, rmHard));
 
+  { Its changes discarded one by one leave git's file and no squash;
+    giving it up takes the changes back. }
+  AssertTrue(FRepo.Error, FRepo.MergeRef('side', Conflicts, mwSquash));
+  Git(['rm', '-q', '-f', 'b.txt', 'c.txt']);
+  AssertFalse('nothing staged', FRepo.SquashPending);
+  AssertFalse(FRepo.AbortOperation);
+  AssertTrue(FRepo.Error, FRepo.MergeRef('side', Conflicts, mwSquash));
+  AssertTrue(FRepo.Error, FRepo.AbortOperation);
+  AssertFalse(FRepo.SquashPending);
+  AssertEquals('', Git(['status', '--porcelain', '-z']));
+
   WriteFile('b.txt', 'main'#10);
   Commit('main b');
   AssertTrue(FRepo.Error, FRepo.CommitsToMerge('side', Count, Forward));
@@ -3655,7 +3666,10 @@ begin
   AssertFalse(FRepo.MergeRef('side', Conflicts, mwSquash));
   AssertTrue('a squash stops on conflicts too', Conflicts);
   AssertEquals('', FRepo.Operation);
-  Git(['reset', '-q', '--hard']);
+  AssertTrue('pending with its conflicts', FRepo.SquashPending);
+  AssertTrue(FRepo.Error, FRepo.AbortOperation);
+  AssertEquals('given up', '', Git(['status', '--porcelain', '-z']));
+  AssertEquals('main'#10, Git(['show', 'HEAD:b.txt']));
 end;
 
 { Co-authored-by trailers go in a paragraph of their own, or join a
@@ -3674,6 +3688,10 @@ begin
   AssertEquals('Subject'#10#10'Body here.'#10#10'Co-authored-by: Ada <ada@example.invalid>'#10 +
     'Co-authored-by: Bo <bo@example.invalid>',
     WithCoAuthors('Subject'#10#10'Body here.', ['Ada <ada@example.invalid>', ' Bo <bo@example.invalid>']));
+  AssertEquals('a CRLF message, its trailer found',
+    'Subject'#10#10'Co-authored-by: Ada <ada@example.invalid>',
+    WithCoAuthors('Subject'#13#10#13#10'Co-authored-by: Ada <ada@example.invalid>'#13#10,
+    ['Ada <ada@example.invalid>']));
   AssertEquals('joins the trailers',
     'Subject'#10#10'Body.'#10#10'Fixes: #1'#10'Co-authored-by: Ada <ada@example.invalid>',
     WithCoAuthors('Subject'#10#10'Body.'#10#10'Fixes: #1', ['Ada <ada@example.invalid>']));

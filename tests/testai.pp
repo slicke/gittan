@@ -1274,6 +1274,20 @@ begin
     AssertEquals(0, Pos('The commits', Text));
     AssertTrue(Pos('+untracked', Text) > 0);
 
+    { A base with commits HEAD lacks: the diff undoes them, which the
+      agent is told. }
+    AssertEquals('none behind', 0, Pos('Note:', Text));
+    Git(['branch', 'ahead']);
+    Git(['reset', '-q', '--hard', 'start']);
+    Paths.Clear;
+    Paths.Add('a.pas');
+    AssertTrue(Error, SummaryInput(FDir, 'ahead', False, Paths, Text, Error));
+    AssertTrue('the note', Pos('Note: ahead has 2 commit(s) that HEAD does not have', Text) > 0);
+    AssertTrue(Error, SummaryInput(FDir, 'ahead..start', True, Paths, Text, Error));
+    AssertTrue('a range', Pos('Note: ahead has 2 commit(s) that start does not have', Text) > 0);
+    AssertTrue(Error, SummaryInput(FDir, 'ahead...start', True, Paths, Text, Error));
+    AssertEquals('three dots', 0, Pos('Note:', Text));
+
     AssertFalse('a base git does not have', SummaryInput(FDir, 'nowhere', False, Paths,
       Text, Error));
   finally

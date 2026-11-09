@@ -10,6 +10,17 @@
 - On Windows and Linux (GTK 3), Alt or F10 shows a menu bar at the top of the window, as in Firefox: the menus' names in a row, Left and Right moving between them, also while one is open, and Alt with a letter opens that menu at once. It goes again once a command is chosen, on Escape, or when you click elsewhere. The menu button in the title bar still drops the whole menu. View > Menu Bar keeps the menu bar shown for good, with the minimize, maximize and close buttons at its right end and the menu button gone; its empty part moves the window like the title bar.
 - A FreeBSD build (amd64, GTK 3), Gittan-freebsd-amd64.tar.gz, for FreeBSD 15.1 or later with GTK 3 and git (`pkg install gtk3 git`). Like the Haiku and Windows on Arm builds, a release does not wait for it.
 
+### Fixed
+- A settings.json or state.json that cannot be read as JSON, after an edit by hand that left a comma too many, is no longer overwritten with the defaults without a trace: its text is kept beside it as settings.json.damaged or state.json.damaged, and a banner says so at start.
+- A settings file or repository list that is a symbolic link, into a folder of dotfiles, stays a link when Gittan saves: the file it leads to is written.
+- The Batch tab deletes a gone branch only while it is still at the commit the scan found it at, so a branch that got commits while the tab stood open is kept, with the reason beside it.
+- Trusting a forge's signing keys refuses an e-mail the allowed signers file would read as a pattern or as more than one name, such as one with a `*` or a comma in it, rather than writing it there.
+- An extension with the forge permission alone can no longer reach `gh pr create`, `gh pr checkout`, `gh repo create` and `gh release create` through gh's other names for them (new, co).
+- A squash merge can be given up: Abort is in the Commit section while its changes are staged, also when it stopped on conflicts, where there was no way back in Gittan.
+- The message of a squash merge whose changes were discarded no longer comes back in the commit field for later, unrelated work.
+- Putting a change into a commit that is itself a fixup of a commit not on the branch folds it into that fixup, rather than leaving a "fixup! fixup!" commit behind and saying it went in.
+- On Windows a co-author already in the message's trailers is no longer added a second time.
+
 ## 0.17 (build-142, 2026-11-08)
 
 ### Added

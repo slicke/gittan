@@ -37,13 +37,20 @@ function UnescapeC(const S: string): string;
   temporary file beside it first (AFileName, the process id, a count of
   the writes and .tmp, so two writers never share one), then renamed over
   it in one step, so a failed or cut write leaves the old file as it
-  was. AMode is the new file's permissions on Unix (&600 for one with a
+  was. A symbolic link at AFileName stays: the file it leads to is the
+  one replaced (a settings file linked into a folder of dotfiles).
+  AMode is the new file's permissions on Unix (&600 for one with a
   secret in it), less the umask; Windows has none. False when it could
   not be written. }
 function WriteFileReplacing(const AFileName: RawByteString; const AText: RawByteString;
   AMode: integer = &644): boolean;
 
 implementation
+
+{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
+uses
+  BaseUnix;
+{$ENDIF}
 
 function ReadFileBytes(const AFileName: string): RawByteString;
 var
@@ -148,16 +155,53 @@ var
   { The writes so far, which name each one's temporary file. }
   WriteCount: longint = 0;
 
+{ AFileName, or the file the symbolic link there leads to, through a
+  few links at most (a loop of them ends there); a relative target
+  counts from the link's folder. }
+function ThroughLinks(const AFileName: RawByteString): RawByteString;
+var
+  Target: RawByteString;
+  n: integer;
+begin
+  Result := AFileName;
+  for n := 1 to 8 do
+  begin
+    {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
+    { readlink itself: FileGetSymLinkTarget reads no link whose file is
+      not there yet. '' for what is no link. }
+    Target := fpReadLink(Result);
+    if Target = '' then
+      Exit;
+    {$ELSE}
+    Target := '';
+    { It raises for a name that is not there, a file not yet written. }
+    try
+      if not FileGetSymLinkTarget(Result, Target) or (Target = '') then
+        Exit;
+    except
+      Exit;
+    end;
+    {$ENDIF}
+    if (Target[1] in AllowDirectorySeparators) or
+      ((Length(Target) > 1) and (Target[2] = ':')) then
+      Result := Target
+    else
+      Result := ExpandFileName(ExtractFilePath(ExpandFileName(Result)) + Target);
+  end;
+end;
+
 function WriteFileReplacing(const AFileName: RawByteString; const AText: RawByteString;
   AMode: integer): boolean;
 var
-  Temp: RawByteString;
+  Name, Temp: RawByteString;
   F: THandle;
 begin
   Result := False;
-  Temp := AFileName + '.' + IntToStr(GetProcessID) + '-' +
+  { The rename would put the new file in the link's place. }
+  Name := ThroughLinks(AFileName);
+  Temp := Name + '.' + IntToStr(GetProcessID) + '-' +
     IntToStr(InterLockedIncrement(WriteCount)) + '.tmp';
-  ForceDirectories(ExtractFileDir(AFileName));
+  ForceDirectories(ExtractFileDir(Name));
   { One left by an earlier run with the same process id would keep its
     own mode. }
   DeleteFile(Temp);
@@ -174,10 +218,10 @@ begin
   {$IFDEF WINDOWS}
   { RenameFile does not replace a file on Windows; MoveFileEx does, in
     one step, so the file on disk stays the old one when it fails. }
-  Result := MoveFileExW(PWideChar(UTF8Decode(Temp)), PWideChar(UTF8Decode(AFileName)),
+  Result := MoveFileExW(PWideChar(UTF8Decode(Temp)), PWideChar(UTF8Decode(Name)),
     MOVEFILE_REPLACE_EXISTING or MOVEFILE_WRITE_THROUGH);
   {$ELSE}
-  Result := RenameFile(Temp, AFileName);
+  Result := RenameFile(Temp, Name);
   {$ENDIF}
   if not Result then
     DeleteFile(Temp);

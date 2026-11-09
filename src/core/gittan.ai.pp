@@ -1285,6 +1285,36 @@ begin
     Result := ABase + '..HEAD';
 end;
 
+{ What to tell the agent when the old side of the comparison has commits
+  the new side lacks (a base that moved on, origin/main past the
+  branch): the diff is between the two ends, so it shows those commits
+  undone, and the log lists none of them. '' when there are none, or
+  for three dots, which compare with the merge base. }
+function SummaryBehindNote(const ARoot, ABase: string; ARange: boolean): string;
+var
+  Old, New, Count, Err: string;
+  p: integer;
+begin
+  Result := '';
+  Old := ABase;
+  New := 'HEAD';
+  if ARange then
+  begin
+    p := Pos('..', ABase);
+    if (p = 0) or (Pos('...', ABase) > 0) then
+      Exit;
+    Old := Copy(ABase, 1, p - 1);
+    New := Copy(ABase, p + 2, MaxInt);
+  end;
+  if (Old = '') or (New = '') then
+    Exit;
+  if RunGitIn(ARoot, ['rev-list', '--count', New + '..' + Old], Count, Err) and
+    (StrToIntDef(Trim(Count), 0) > 0) then
+    Result := Format('Note: %s has %s commit(s) that %s does not have. The diff shows ' +
+      'their changes undone; those are not changes made here, so leave them out.',
+      [Old, Trim(Count), New]) + LineEnding;
+end;
+
 function SummaryInput(const ARoot, ABase: string; ARange: boolean; APaths: TStrings;
   out AText, AError: string): boolean;
 var
@@ -1305,7 +1335,8 @@ begin
       KeepText(Log, '[The commits are cut here: %d of their %d bytes are left out.]',
       MessageDiffKeep div 2) + LineEnding;
   if Trim(Diff) <> '' then
-    AText := AText + 'The changes (git diff --stat):' + LineEnding + Stat + LineEnding +
+    AText := AText + SummaryBehindNote(ARoot, ABase, ARange) +
+      'The changes (git diff --stat):' + LineEnding + Stat + LineEnding +
       'The diff:' + LineEnding + KeepText(Diff,
       '[The diff is cut here: %d of its %d bytes are left out. ' +
       'The summary above lists every file.]', Max(MessageDiffKeep div 4,

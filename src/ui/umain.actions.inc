@@ -419,6 +419,14 @@ end;
   or names no version, is left to the errors of the git calls. }
 procedure TRepoFrame.CheckSettingsReset;
 begin
+  { A file that did not parse: its text is kept, and said where. }
+  if App.Settings.DamagedFiles <> '' then
+  begin
+    MarkNews;
+    FBanner.DetailFont.Assign(Edit.Font);
+    FBanner.Add(rsSettingsDamaged, Format(rsSettingsDamagedDetail,
+      [App.Settings.DamagedFiles, DamagedSuffix, App.Settings.Dir]), bkInfo);
+  end;
   if not App.Settings.OldIniFound then
     Exit;
   MarkNews;

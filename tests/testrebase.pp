@@ -242,16 +242,19 @@ begin
   Add('ccccccc3', 'fixup! fir', '', raPick);
   Add('ddddddd4', 'fixup! elsewhere', '', raDrop);
   Add('eeeeeee5', 'fixup!  ', '', raPick);
+  Add('fffffff6', 'fixup! aaaaaaa1', '', raPick);
   AutosquashSteps(FSteps);
   AssertEquals('aaaaaaa1', FSteps[0].Hash);
   AssertTrue(FSteps[0].Action = raPick);
-  AssertEquals('bbbbbbb2', FSteps[1].Hash);
-  AssertEquals('ccccccc3', FSteps[2].Hash);
-  AssertTrue(FSteps[2].Action = raFixup);
-  AssertEquals('ddddddd4', FSteps[3].Hash);
-  AssertTrue('an action set stays', FSteps[3].Action = raDrop);
-  AssertEquals('one that names nothing stays', 'eeeeeee5', FSteps[4].Hash);
-  AssertTrue(FSteps[4].Action = raPick);
+  AssertEquals('by its id a fixup that stayed a step is fixed up', 'fffffff6', FSteps[1].Hash);
+  AssertTrue(FSteps[1].Action = raFixup);
+  AssertEquals('bbbbbbb2', FSteps[2].Hash);
+  AssertEquals('ccccccc3', FSteps[3].Hash);
+  AssertTrue(FSteps[3].Action = raFixup);
+  AssertEquals('ddddddd4', FSteps[4].Hash);
+  AssertTrue('an action set stays', FSteps[4].Action = raDrop);
+  AssertEquals('one that names nothing stays', 'eeeeeee5', FSteps[5].Hash);
+  AssertTrue(FSteps[5].Action = raPick);
 end;
 
 initialization

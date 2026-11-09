@@ -725,9 +725,12 @@ procedure TRepoFrame.AbortOperationClick(Sender: TObject);
 var
   Noun: string;
 begin
-  if (FRepo.Root = '') or (FOperation = '') then
+  if (FRepo.Root = '') or ((FOperation = '') and not FSquashPending) then
     Exit;
-  Noun := OperationNoun(FOperation);
+  if FOperation = '' then
+    Noun := rsNounSquash
+  else
+    Noun := OperationNoun(FOperation);
   if StrayRebase then
   begin
     { HEAD is on another branch: offer to forget the rebase too, which

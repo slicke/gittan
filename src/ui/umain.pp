@@ -638,6 +638,9 @@ type
     FMarkHash, FMarkName: string;
     FMarkDate: TDateTime;
     FMergeMessage: string;
+    { A squash merge is staged and not yet committed, as of the last
+      refresh (TGittanRepo.SquashPending). }
+    FSquashPending: boolean;
     { Fetch, pull and push (umain.remote.inc): the job while it runs,
       the commits ahead and HEAD when it started, the menu items, and
       the list the status bar's counts drop up. }
@@ -3150,6 +3153,8 @@ resourcestring
     'someone else''s work maybe, which the forced push would lose. Pull them in first?';
   rsGitTooOld = 'git %s is older than %d.%d';
   rsSettingsReset = 'Your settings were reset';
+  rsSettingsDamaged = 'A settings file could not be read';
+  rsSettingsDamagedDetail = '%0:s is not valid JSON, so what it holds starts from the defaults. Its text is kept as a copy named with %1:s at the end, in %2:s.';
   rsSettingsResetDetail = 'Gittan now keeps its settings in settings.json and state.json, and does not read the gittan.ini of earlier builds. Pick your options again in Settings; the old file is still in %s.';
   rsGitTooOldDetail = 'Gittan needs git %d.%d or later, and some of what it does fails with ' +
     'this one (%s). Update git, or set a newer one in Settings > Tools.';
@@ -3614,6 +3619,7 @@ resourcestring
   rsAllResolvedCommit = 'All conflicts resolved: commit the merge';
   rsAllResolvedContinue = 'All conflicts resolved: continue %s';
   rsNounMerge = 'the merge';
+  rsNounSquash = 'the squash merge';
   rsNounRebase = 'the rebase';
   rsNounCherryPick = 'the cherry-pick';
   rsNounRevert = 'the revert';
@@ -7786,6 +7792,7 @@ begin
   FBehind := ASnap.Behind;
   FRewritten := ASnap.Rewritten;
   FOperation := ASnap.Operation;
+  FSquashPending := ASnap.SquashPending;
   FBisect := ASnap.Bisect;
   FRebaseBranch := ASnap.RebaseBranch;
   if (FOperation = 'rebasing') and (FRebaseBranch <> '') and ASnap.Detached then

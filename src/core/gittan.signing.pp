@@ -912,6 +912,22 @@ var
     same file and each write it back without the other's line. }
   AllowedSignersLock: TRTLCriticalSection;
 
+{ Whether AEmail can stand as the principal of an allowed signers line
+  and name that e-mail alone: ssh reads * and ? there as wildcards, ! as
+  a negation and a comma as the next principal, and a space, a quote or
+  a line end would start another field or line. The e-mail comes from a
+  commit or a forge's answer, so none of this is taken on trust. }
+function PlainPrincipal(const AEmail: string): boolean;
+var
+  c: char;
+begin
+  Result := (AEmail <> '') and (AEmail[1] <> '#');
+  if Result then
+    for c in AEmail do
+      if (c <= ' ') or (c = #127) or (c in ['*', '?', '!', ',', '"']) then
+        Exit(False);
+end;
+
 function AddAllowedSigner(const AFile, AEmail, AKey: string; out AError: string): boolean;
 var
   Lines: TStringList;
@@ -919,6 +935,11 @@ var
   i: integer;
 begin
   AError := '';
+  if not PlainPrincipal(AEmail) then
+  begin
+    AError := 'The e-mail cannot be a signer''s name: ' + AEmail;
+    Exit(False);
+  end;
   Key := PublicKeyOf(AKey);
   if Key = '' then
   begin
