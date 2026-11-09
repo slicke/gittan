@@ -5039,5 +5039,9 @@ end;
 
 initialization
   Randomize;
-  RegisterTest(TGitRepoTest);
+  { CI's Intel macOS leg leaves this suite out (GITTAN_SKIP_GIT_REPO_TESTS
+    set): under Rosetta its hundreds of git processes take ten minutes
+    where the arm64 leg, which runs it, takes one. }
+  if GetEnvironmentVariable('GITTAN_SKIP_GIT_REPO_TESTS') = '' then
+    RegisterTest(TGitRepoTest);
 end.

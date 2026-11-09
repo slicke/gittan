@@ -212,6 +212,7 @@ jobs:
 
       - name: Install Lazarus/FPC (macOS)
         if: matrix.os_target == 'macos'
+        id: mac-toolchain
         # A stalled mirror must not burn the whole 90-minute job budget, but
         # the two files are 620 MB, which takes half an hour when only a
         # slow SourceForge (300 KB/s) answers and the cache is empty.
@@ -249,6 +250,9 @@ jobs:
           }
           fetch fpc.dmg fpc-3.2.4rc2.intelarm64-macosx.dmg
           fetch lazarus.zip lazarus-darwin-aarch64-5.0RC1.zip
+          # What the x86_64 units' cache below is keyed on, so another FPC
+          # or Lazarus never meets units the old ones compiled.
+          echo "files=$(cat "$DL/fpc.dmg" "$DL/lazarus.zip" | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
           MNT="$(mktemp -d)"
           hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DL/fpc.dmg"
@@ -403,6 +407,25 @@ jobs:
           cp pkg/gittan_*.deb Gittan-linux-"$DEB_ARCH".deb
           cp pkg/gittan-*.rpm Gittan-linux-"$RPM_ARCH".rpm
 
+      # The Lazarus zip has its packages (FCL, LazUtils, FreeTypeLaz, LCLBase,
+      # LCL) compiled for arm64 only, so the Intel leg compiled them for
+      # x86_64 on every run, under Rosetta as ppcx64 is an Intel binary.
+      # Their unit folders are kept instead, under a key made of the two
+      # installers' checksum: units of another Lazarus or FPC could look
+      # newer than the new sources and be linked as they are. After the
+      # install, which replaces /Applications/lazarus.
+      - name: Restore the x86_64 Lazarus units (macOS)
+        if: matrix.os_target == 'macos' && matrix.cpu == 'x86_64'
+        id: lazarus-units-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            /Applications/lazarus/packager/units/x86_64-darwin
+            /Applications/lazarus/components/lazutils/lib/x86_64-darwin
+            /Applications/lazarus/components/freetype/lib/x86_64-darwin
+            /Applications/lazarus/lcl/units/x86_64-darwin
+          key: lazarus-units-macos-x86_64-cocoa-${{ steps.mac-toolchain.outputs.files }}
+
       - name: Build and package (macOS)
         if: matrix.os_target == 'macos'
         env:
@@ -416,6 +439,10 @@ jobs:
           # The x86_64 tests run under Rosetta. /usr/bin/git, Apple's shim,
           # cannot start there (its libxcrun has no x86_64), so the tests
           # get the git it stands for, an arm64 binary that runs as it is.
+          # TGitRepoTest is left out there: it took ten minutes of the
+          # leg's twenty under Rosetta, one on the arm64 leg, which runs
+          # it as Linux and Windows do.
+          if [ "$CPU" = x86_64 ]; then export GITTAN_SKIP_GIT_REPO_TESTS=1; fi
           PATH="$(dirname "$(xcrun --find git)"):$PATH" gmake test CPU="$CPU"
           # Lazarus's bundle links Contents/MacOS/Gittan to ../../../Gittan;
           # replace the link with the binary and carry lexlib in Resources,
@@ -456,6 +483,17 @@ jobs:
             fi
             sleep $((try * 5))
           done
+
+      - name: Save the x86_64 Lazarus units (macOS)
+        if: matrix.os_target == 'macos' && matrix.cpu == 'x86_64' && steps.lazarus-units-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            /Applications/lazarus/packager/units/x86_64-darwin
+            /Applications/lazarus/components/lazutils/lib/x86_64-darwin
+            /Applications/lazarus/components/freetype/lib/x86_64-darwin
+            /Applications/lazarus/lcl/units/x86_64-darwin
+          key: ${{ steps.lazarus-units-cache.outputs.cache-primary-key }}
 
       - name: Build and test (Windows)
         if: matrix.os_target == 'windows'
