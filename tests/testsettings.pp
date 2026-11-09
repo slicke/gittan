@@ -148,6 +148,7 @@ begin
     S.Width := 800;
     S.Height := 600;
     S.Maximized := True;
+    S.MenuBar := True;
     S.TreeWidth := 240;
     S.RepoFilesOpen := True;
     S.SubmodulesOpen := False;
@@ -209,6 +210,7 @@ begin
     AssertEquals(800, S.Width);
     AssertEquals(600, S.Height);
     AssertTrue(S.Maximized);
+    AssertTrue(S.MenuBar);
     AssertEquals(240, S.TreeWidth);
     AssertTrue(S.RepoFilesOpen);
     AssertFalse(S.SubmodulesOpen);

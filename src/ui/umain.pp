@@ -387,6 +387,9 @@ type
     FRecentMenu, FCompareMenu, FTerminalItem, FUninstallCliItem: TMenuItem;
     FSnapshots: TGittanSnapshots;
     FWrapItem, FOnlyChangesItem, FSideItem, FIgnoreSpaceItem, FMdPreviewItem: TMenuItem;
+    { View > Menu Bar: the menu bar over the title bar kept (Windows and
+      GTK 3, where the title bar is the window's own). }
+    FMenuBarItem: TMenuItem;
     { View > Image: how a changed image is shown, one item per mode. }
     FImageMenu: TMenuItem;
     FImageModeItems: array[TGittanImageMode] of TMenuItem;
@@ -1752,6 +1755,7 @@ type
     procedure MenuZoomOutClick(Sender: TObject);
     procedure MenuZoomResetClick(Sender: TObject);
     procedure MenuFontClick(Sender: TObject);
+    procedure MenuMenuBarClick(Sender: TObject);
     procedure OpenSettings(APage: TSettingsPage);
     procedure PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);
     procedure ApplyEditorFont(AFont: TFont);
@@ -2813,6 +2817,7 @@ resourcestring
   rsZoomOut = 'Zoom &Out';
   rsZoomReset = 'Actual Si&ze';
   rsFont = 'Fo&nt...';
+  rsMenuBar = '&Menu Bar';
   rsSyntaxTheme = 'Syntax T&heme';
   rsTagline = 'See what changed in a git repository';
   rsGo = '&Go';
@@ -6153,6 +6158,11 @@ begin
     Item.Checked := i = FSyntaxTheme;
     FThemeItems[i] := Item;
   end;
+  {$IF DEFINED(LCLWin32) OR DEFINED(LCLGtk3)}
+  ViewMenu.Add(NewLine);
+  FMenuBarItem := AddItem(ViewMenu, rsMenuBar, 0, @MenuMenuBarClick);
+  FMenuBarItem.Checked := App.Settings.MenuBar;
+  {$ENDIF}
 
   GoMenu := TMenuItem.Create(Main);
   GoMenu.Caption := rsGo;

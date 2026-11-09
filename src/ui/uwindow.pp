@@ -375,6 +375,9 @@ begin
   {$IFDEF LCLGtk3}
   InstallTitleBar(Self, TGittanGtkTitleBar(FOwnBar));
   {$ENDIF}
+  {$IF DEFINED(LCLWin32) OR DEFINED(LCLGtk3)}
+  FOwnBar.PinnedMenu := App.Settings.MenuBar;
+  {$ENDIF}
 end;
 
 function TGittanWindow.GetFrame(AIndex: integer): TRepoFrame;

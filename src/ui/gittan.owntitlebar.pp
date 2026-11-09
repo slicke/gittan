@@ -96,6 +96,9 @@ type
     FHot, FOpen, FStepTo: integer;
     { The menu to open next is on its way (OpenAsync): the strip stays. }
     FPending: boolean;
+    { Kept shown (View > Menu Bar): it then gives the focus back rather
+      than going. }
+    FPinned: boolean;
     { Shown from the keyboard: the names underline their accelerators. }
     FKeys: boolean;
     FPopup: TPopupMenu;
@@ -106,14 +109,19 @@ type
     function IndexOfKey(AKey: char): integer;
     procedure SetHot(AIndex: integer);
     procedure SetPrevFocus(AControl: TWinControl);
+    procedure SetPinned(AValue: boolean);
+    procedure ShowStrip;
     procedure PopupItemClick(Sender: TObject);
     procedure PopupClose(Sender: TObject);
     procedure OpenAsync(Data: PtrInt);
   protected
     procedure Notification(AComponent: TComponent; Operation: TOperation); override;
+    procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+      const AXProportion, AYProportion: double); override;
     procedure Paint; override;
     procedure KeyDown(var Key: word; Shift: TShiftState); override;
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
+    procedure MouseLeave; override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
       override;
     procedure DoExit; override;
@@ -144,6 +152,9 @@ type
     procedure MenuClosed;
     {** Whether a menu of the strip is open, or the next on its way. }
     function MenuOpen: boolean;
+    {** Kept shown over the title bar (View > Menu Bar), rather than
+      shown by Alt and gone once done with. }
+    property Pinned: boolean read FPinned write SetPinned;
   end;
 
   { TGittanOwnTitleBar }
@@ -196,6 +207,8 @@ type
     function TabRect(AIndex: integer): TRect;
     function CrossRect(const ATab: TRect): TRect;
     function Strip: TGittanMenuStrip;
+    function GetPinnedMenu: boolean;
+    procedure SetPinnedMenu(AValue: boolean);
     procedure PopupItemClick(Sender: TObject);
     procedure PopupClose(Sender: TObject);
     procedure DropMenu(AOnly: TMenuItem);
@@ -248,8 +261,12 @@ type
     {** Shows the menu bar and drops the menu whose name has the
       accelerator AKey; False when none has it. }
     function OpenMenuByKey(AKey: char): boolean;
-    {** Whether the menu bar is shown: the window leaves the keys to it. }
+    {** Whether the menu bar has the keys (Alt showed it or gave it the
+      focus, or a menu of it is open): the window leaves them to it. }
     function MenuActive: boolean;
+    {** The menu bar kept shown over the bar (View > Menu Bar); Alt then
+      gives it the focus. }
+    property PinnedMenu: boolean read GetPinnedMenu write SetPinnedMenu;
     {** The tabs, left to right: ACaptions are their names, AHints their
       tooltips (the paths), AMarks those with news (a dot before the
       name), AActive the one shown; AFixed when they are a view's own,
@@ -922,7 +939,19 @@ end;
 
 function TGittanOwnTitleBar.MenuActive: boolean;
 begin
-  Result := (FStrip <> nil) and FStrip.Visible;
+  Result := (FStrip <> nil) and FStrip.Visible and (FStrip.Focused or FStrip.MenuOpen);
+end;
+
+function TGittanOwnTitleBar.GetPinnedMenu: boolean;
+begin
+  Result := (FStrip <> nil) and FStrip.Pinned;
+end;
+
+procedure TGittanOwnTitleBar.SetPinnedMenu(AValue: boolean);
+begin
+  if FTabsOnly or (Parent = nil) or (not AValue and (FStrip = nil)) then
+    Exit;
+  Strip.Pinned := AValue;
 end;
 
 procedure TGittanOwnTitleBar.OpenMenu;
@@ -1328,6 +1357,16 @@ begin
     FPrevFocus := nil;
 end;
 
+{ Kept from the start, the strip is made in FormCreate, which scales its
+  height once more afterwards; the height is set again, as the bar's. }
+procedure TGittanMenuStrip.DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+  const AXProportion, AYProportion: double);
+begin
+  inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
+  if AMode = lapAutoAdjustForDPI then
+    Height := Scale96ToScreen(StripHeight);
+end;
+
 procedure TGittanMenuStrip.SetPrevFocus(AControl: TWinControl);
 begin
   if FPrevFocus <> nil then
@@ -1405,23 +1444,39 @@ end;
 
 { Over the title bar, which moves down by the strip's height while it is
   shown; the focus is the strip's, the control that had it noted. }
+procedure TGittanMenuStrip.ShowStrip;
+begin
+  if Visible or (Parent = nil) then
+    Exit;
+  Height := Scale96ToForm(StripHeight);
+  Parent.DisableAlign;
+  try
+    Visible := True;
+    Top := 0;
+    FBar.Top := Height;
+  finally
+    Parent.EnableAlign;
+  end;
+end;
+
+procedure TGittanMenuStrip.SetPinned(AValue: boolean);
+begin
+  if FPinned = AValue then
+    Exit;
+  FPinned := AValue;
+  if FPinned then
+    ShowStrip
+  else if Visible and not Focused and not MenuOpen then
+    Visible := False;
+end;
+
 procedure TGittanMenuStrip.Activate(AIndex: integer; AKeys: boolean);
 begin
   if Parent = nil then
     Exit;
-  if not Visible then
-  begin
+  if not Focused then
     SetPrevFocus(Screen.ActiveControl);
-    Height := Scale96ToForm(StripHeight);
-    Parent.DisableAlign;
-    try
-      Visible := True;
-      Top := 0;
-      FBar.Top := Height;
-    finally
-      Parent.EnableAlign;
-    end;
-  end;
+  ShowStrip;
   Collect;
   if Length(FItems) = 0 then
   begin
@@ -1450,7 +1505,13 @@ begin
   if ARestore and (FPrevFocus <> nil) and FPrevFocus.CanFocus then
     FPrevFocus.SetFocus;
   SetPrevFocus(nil);
-  Visible := False;
+  if FPinned then
+  begin
+    FKeys := False;
+    Invalidate;
+  end
+  else
+    Visible := False;
 end;
 
 { The menu under its name, its top item's OnClick run first, as a menu
@@ -1596,6 +1657,17 @@ begin
   Index := IndexAt(X, Y);
   if (FOpen < 0) and (Index >= 0) then
     SetHot(Index);
+  { A click on a name of the kept strip may take the focus; the control
+    that has it now gets it back once the menu is done with. }
+  if not Focused and (FOpen < 0) then
+    SetPrevFocus(Screen.ActiveControl);
+end;
+
+procedure TGittanMenuStrip.MouseLeave;
+begin
+  inherited MouseLeave;
+  if not Focused and (FOpen < 0) then
+    SetHot(-1);
 end;
 
 procedure TGittanMenuStrip.MouseDown(Button: TMouseButton; Shift: TShiftState;

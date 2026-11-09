@@ -907,6 +907,21 @@ procedure TRepoFrame.ViewMenuClick(Sender: TObject);
 begin
   FFoldMenu.Enabled := FoldingShown and Edit.Visible;
   FImageMenu.Enabled := FImageDiff.Visible and FImageDiff.Overlays;
+  if FMenuBarItem <> nil then
+    FMenuBarItem.Checked := App.Settings.MenuBar;
+end;
+
+{ The menu bar over the title bar kept, or back to coming with Alt; one
+  setting for the window, kept at once. }
+procedure TRepoFrame.MenuMenuBarClick(Sender: TObject);
+begin
+  App.Settings.MenuBar := not App.Settings.MenuBar;
+  FMenuBarItem.Checked := App.Settings.MenuBar;
+  App.Settings.Save;
+  {$IFDEF OWNBAR}
+  if OwnBar <> nil then
+    OwnBar.PinnedMenu := App.Settings.MenuBar;
+  {$ENDIF}
 end;
 
 procedure TRepoFrame.MenuOnlyChangesClick(Sender: TObject);

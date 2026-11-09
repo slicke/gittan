@@ -88,6 +88,9 @@ type
     {** The window bounds, or a zero Width when none were saved. }
     Left, Top, Width, Height: integer;
     Maximized: boolean;
+    {** Whether the menu bar stays over the title bar (View > Menu Bar,
+      Windows and GTK 3), rather than coming with Alt alone. }
+    MenuBar: boolean;
     {** The width of the file tree, 0 for the default. }
     TreeWidth: integer;
     {** Whether the sidebar's rows over the file tree, which open the
@@ -722,6 +725,7 @@ begin
   Width := Max(0, IntOf(O, 'width'));
   Height := Max(0, IntOf(O, 'height'));
   Maximized := BoolOf(O, 'maximized', False);
+  MenuBar := BoolOf(O, 'menuBar', False);
   TreeWidth := Max(0, IntOf(O, 'treeWidth'));
   NavOpen := BoolOf(O, 'nav', True);
   RepoFilesOpen := BoolOf(O, 'repoFiles', False);
@@ -819,6 +823,7 @@ begin
   O.Integers['width'] := Width;
   O.Integers['height'] := Height;
   O.Booleans['maximized'] := Maximized;
+  O.Booleans['menuBar'] := MenuBar;
   O.Integers['treeWidth'] := TreeWidth;
   O.Booleans['nav'] := NavOpen;
   O.Booleans['repoFiles'] := RepoFilesOpen;
