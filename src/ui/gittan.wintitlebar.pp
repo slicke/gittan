@@ -492,10 +492,15 @@ begin
   end;
 end;
 
+{ Outside the class: inside a control's method WNDPROC is its WndProc. }
+procedure InstallStripProc(AWnd: HWND);
+begin
+  OldStripProc := WNDPROC(SetWindowLongPtrW(AWnd, GWLP_WNDPROC, LONG_PTR(@StripProc)));
+end;
+
 procedure TGittanWinTitleBar.StripMade(AStrip: TGittanMenuStrip);
 begin
-  OldStripProc := WNDPROC(SetWindowLongPtrW(AStrip.Handle, GWLP_WNDPROC,
-    LONG_PTR(@StripProc)));
+  InstallStripProc(AStrip.Handle);
 end;
 
 procedure TGittanWinTitleBar.CreateWnd;
