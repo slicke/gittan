@@ -595,7 +595,8 @@ begin
   else
     FForgeRect := Types.Rect(0, 0, 0, 0);
   S := Scale96ToForm(PlusSize);
-  if FTabsOnly then
+  { No menu button beside a menu bar: Qt's, or the strip kept shown. }
+  if FTabsOnly or PinnedMenu then
     FMenuRect := Types.Rect(Scale96ToForm(Pad - Gap), (H - S) div 2,
       Scale96ToForm(Pad - Gap), (H + S) div 2)
   else
@@ -952,6 +953,13 @@ begin
   if FTabsOnly or (Parent = nil) or (not AValue and (FStrip = nil)) then
     Exit;
   Strip.Pinned := AValue;
+  { The menu button goes while the strip is kept, the tabs moving left
+    into its room. }
+  if FMenuOpen then
+    FPopup.Close;
+  SetHot(tpNone, -1);
+  Layout;
+  Invalidate;
 end;
 
 procedure TGittanOwnTitleBar.OpenMenu;
@@ -1070,7 +1078,7 @@ begin
   TextY := (Height - Canvas.TextHeight('Xg')) div 2 + 1;
 
   { The menu button: three lines. }
-  if not FTabsOnly then
+  if not FTabsOnly and not PinnedMenu then
   begin
     if FMenuOpen or (FHotPart = tpMenu) then
       HotBox(FMenuRect, FButtonHot);
