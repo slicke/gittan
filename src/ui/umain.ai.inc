@@ -6,31 +6,31 @@
   OpenAI-compatible API. Nothing of it shows until the settings turn
   the features on (AI page, off by default, since the changes go to the
   agent's provider) and the agent they pick can be asked (its command
-  found; for the API a model named). The first feature is AI at the
-  right end of the Commit
-  header, and Commit > Write Commit Message (Shift+Cmd+K): the agent
+  found; for the API a model named). The menu items are in the AI menu.
+  The first feature is AI at the right end of the Commit header, and
+  Write Commit Message (Shift+Cmd+K): the agent
   writes the message for the ticked files, which goes into the field
   when the field is as it was when it was asked. Either again while it
   writes stops it.
 
-  The second is View > Review Changes with AI (Alt+Cmd+R): the agent
+  The second is Review Changes (Alt+Cmd+R): the agent
   reviews what the change view compares, and its findings are cards in
   the change view among a pull request's threads (see umain.reviews.inc),
-  kept for that comparison until the next review or Clear AI Review.
+  kept for that comparison until the next review or Clear Review.
 
   The third is the sparkle in the filter field (where something is), the
   fourth Resolve with the agent in a conflict's list (umain.conflicts.inc):
   the agent writes the lines that take the conflict's place, which are
   written as a pick of the list is, so Undo Discard puts it back. The
-  fifth is Commit > Split Changes into Commits: the agent groups the
+  fifth is Split into Commits: the agent groups the
   changed files into commits with their messages, and a pick from the
   plan ticks one commit's files and fills in its message. The sixth is
   Fix on a finding's card: the agent changes the file as the finding
   asks, written as a discard is, so Undo Discard takes it back. The
-  seventh is Go > Explain Line History with AI (and the editor menu's):
+  seventh is Explain Line History (and the editor menu's):
   the agent reads the history of the lines (git log -L) and explains
   how they came to be, a card under them among the review's. The
-  eighth is View > Summarize Changes with AI: the agent says what the
+  eighth is Summarize Changes: the agent says what the
   commits and the diff the change view compares changed, shown in the
   AI notice (ShowAIAnswer), which any answer in Markdown can use. }
 
