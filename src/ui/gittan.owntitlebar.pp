@@ -97,8 +97,14 @@ type
     { The menu to open next is on its way (OpenAsync): the strip stays. }
     FPending: boolean;
     { Kept shown (View > Menu Bar): it then gives the focus back rather
-      than going. }
+      than going, and has the caption buttons. }
     FPinned: boolean;
+    { The caption buttons under the mouse and pressed, where the strip
+      sees the mouse on them itself (GTK); a press on the empty part
+      that a drag past a few pixels turns into a move of the window. }
+    FButtonHot, FButtonPressed: TGittanTitlePart;
+    FDragArmed: boolean;
+    FPressPoint: TPoint;
     { Shown from the keyboard: the names underline their accelerators. }
     FKeys: boolean;
     FPopup: TPopupMenu;
@@ -123,6 +129,8 @@ type
     procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
     procedure MouseLeave; override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+      override;
+    procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
       override;
     procedure DoExit; override;
     procedure ExitAsync(Data: PtrInt);
@@ -152,6 +160,14 @@ type
     procedure MenuClosed;
     {** Whether a menu of the strip is open, or the next on its way. }
     function MenuOpen: boolean;
+    {** The index of the name at X, Y of the strip, -1 for none. }
+    function NameAt(X, Y: integer): integer;
+    {** The caption button at X, Y of the strip, which has them while it
+      is kept (Pinned); tpNone for none. }
+    function CaptionPart(X, Y: integer): TGittanTitlePart;
+    {** Where the caption button APart is, empty while the strip has
+      none. }
+    function ButtonRect(APart: TGittanTitlePart): TRect;
     {** Kept shown over the title bar (View > Menu Bar), rather than
       shown by Alt and gone once done with. }
     property Pinned: boolean read FPinned write SetPinned;
@@ -232,9 +248,9 @@ type
     {** Whether the window is maximized: the maximize button then shows
       the restore glyph. }
     function Maximized: boolean; virtual; abstract;
-    {** Draws AGlyph centered in AR in AColor, and leaves the canvas's
-      font as it found it. }
-    procedure DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+    {** Draws AGlyph centered in AR on ACanvas (the bar's, or the menu
+      strip's) in AColor, and leaves the canvas's font as the bar's. }
+    procedure DrawGlyph(ACanvas: TCanvas; AGlyph: TGittanTitleGlyph; const AR: TRect;
       AColor: TColor); virtual; abstract;
     {** A click released on a caption button the bar itself saw the mouse
       on (on Windows the form sees it instead, and this is not called). }
@@ -246,6 +262,16 @@ type
       (Windows). }
     procedure TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
       const AName: TRect); virtual;
+    {** What a press on the menu strip's empty part does where the strip
+      sees it itself (GTK): moves the window (a drag), maximizes or
+      restores it (a double click), drops the window menu (a right
+      click). Nothing here: on Windows the form answers it as caption. }
+    procedure WindowMove; virtual;
+    procedure WindowZoom; virtual;
+    procedure WindowMenu; virtual;
+    {** The menu strip has just been made, with its handle (Windows lets
+      the form answer the mouse on its empty part and its buttons). }
+    procedure StripMade(AStrip: TGittanMenuStrip); virtual;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -267,6 +293,11 @@ type
     {** The menu bar kept shown over the bar (View > Menu Bar); Alt then
       gives it the focus. }
     property PinnedMenu: boolean read GetPinnedMenu write SetPinnedMenu;
+    {** The menu bar Alt shows, nil before it was first needed. }
+    property MenuStrip: TGittanMenuStrip read FStrip;
+    {** Repaints the menu strip too, which draws the caption buttons while
+      it is kept, with the bar's state. }
+    procedure Invalidate; override;
     {** The tabs, left to right: ACaptions are their names, AHints their
       tooltips (the paths), AMarks those with news (a dot before the
       name), AActive the one shown; AFixed when they are a view's own,
@@ -323,7 +354,7 @@ type
   TGittanTabBar = class(TGittanOwnTitleBar)
   protected
     function Maximized: boolean; override;
-    procedure DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+    procedure DrawGlyph(ACanvas: TCanvas; AGlyph: TGittanTitleGlyph; const AR: TRect;
       AColor: TColor); override;
   public
     constructor Create(AOwner: TComponent); override;
@@ -370,6 +401,9 @@ const
   { The menu bar: its height and the room either side of a name. }
   StripHeight = 28;
   StripItemPad = 9;
+  { How far a press on the strip's empty part moves before the window
+    follows it (GTK), as GTK's drag threshold. }
+  StripDragThreshold = 8;
 
 { TGittanOwnTitleBar }
 
@@ -582,8 +616,9 @@ begin
   H := Height;
   W := Scale96ToForm(ButtonWidth);
   { A row of tabs only: the caption buttons and the menu button take no
-    room, their rects empty at the edges. }
-  if FTabsOnly then
+    room, their rects empty at the edges; the same for the caption
+    buttons while the menu strip is kept, which has them. }
+  if FTabsOnly or PinnedMenu then
     W := 0;
   FCloseRect := Types.Rect(Width - W, 0, Width, H);
   FMaxRect := Types.Rect(FCloseRect.Left - W, 0, FCloseRect.Left, H);
@@ -925,6 +960,7 @@ begin
     FStrip.Visible := False;
     FStrip.Align := alTop;
     FStrip.Parent := Parent;
+    StripMade(FStrip);
   end;
   Result := FStrip;
 end;
@@ -941,6 +977,29 @@ end;
 function TGittanOwnTitleBar.MenuActive: boolean;
 begin
   Result := (FStrip <> nil) and FStrip.Visible and (FStrip.Focused or FStrip.MenuOpen);
+end;
+
+procedure TGittanOwnTitleBar.Invalidate;
+begin
+  inherited Invalidate;
+  if (FStrip <> nil) and FStrip.Visible then
+    FStrip.Invalidate;
+end;
+
+procedure TGittanOwnTitleBar.WindowMove;
+begin
+end;
+
+procedure TGittanOwnTitleBar.StripMade(AStrip: TGittanMenuStrip);
+begin
+end;
+
+procedure TGittanOwnTitleBar.WindowZoom;
+begin
+end;
+
+procedure TGittanOwnTitleBar.WindowMenu;
+begin
 end;
 
 function TGittanOwnTitleBar.GetPinnedMenu: boolean;
@@ -1016,7 +1075,7 @@ var
       Canvas.Brush.Color := Back;
       Canvas.FillRect(AR);
     end;
-    DrawGlyph(AGlyph, AR, Fore);
+    DrawGlyph(Canvas, AGlyph, AR, Fore);
   end;
 
   procedure Line(X1, Y1, X2, Y2: integer; AColor: TColor);
@@ -1280,7 +1339,7 @@ begin
     end;
   end;
 
-  if not FTabsOnly then
+  if not FTabsOnly and not PinnedMenu then
   begin
     DrawButton(tpMinimize, FMinRect, tgMinimize);
     if Maximized then
@@ -1347,6 +1406,8 @@ begin
   FHot := -1;
   FOpen := -1;
   FStepTo := -1;
+  FButtonHot := tpNone;
+  FButtonPressed := tpNone;
   FPopup := TPopupMenu.Create(Self);
   FPopup.OnClose := @PopupClose;
 end;
@@ -1426,6 +1487,42 @@ begin
   for i := 0 to High(FRects) do
     if (X >= FRects[i].Left) and (X < FRects[i].Right) then
       Exit(i);
+end;
+
+function TGittanMenuStrip.NameAt(X, Y: integer): integer;
+begin
+  if CaptionPart(X, Y) <> tpNone then
+    Result := -1
+  else
+    Result := IndexAt(X, Y);
+end;
+
+function TGittanMenuStrip.ButtonRect(APart: TGittanTitlePart): TRect;
+var
+  W, i: integer;
+begin
+  Result := Types.Rect(0, 0, 0, 0);
+  if not FPinned then
+    Exit;
+  W := Scale96ToForm(ButtonWidth);
+  case APart of
+    tpClose: i := 1;
+    tpMaximize: i := 2;
+    tpMinimize: i := 3;
+  else
+    Exit;
+  end;
+  Result := Types.Rect(Width - i * W, 0, Width - (i - 1) * W, Height);
+end;
+
+function TGittanMenuStrip.CaptionPart(X, Y: integer): TGittanTitlePart;
+var
+  Part: TGittanTitlePart;
+begin
+  for Part in [tpMinimize, tpMaximize, tpClose] do
+    if ButtonRect(Part).Contains(Types.Point(X, Y)) then
+      Exit(Part);
+  Result := tpNone;
 end;
 
 function TGittanMenuStrip.IndexOfKey(AKey: char): integer;
@@ -1662,18 +1759,39 @@ var
   Index: integer;
 begin
   inherited MouseMove(Shift, X, Y);
-  Index := IndexAt(X, Y);
+  Index := NameAt(X, Y);
   if (FOpen < 0) and (Index >= 0) then
     SetHot(Index);
+  if CaptionPart(X, Y) <> FButtonHot then
+  begin
+    FButtonHot := CaptionPart(X, Y);
+    Invalidate;
+  end;
+  if FDragArmed and (ssLeft in Shift) and
+    ((Abs(X - FPressPoint.X) >= Scale96ToForm(StripDragThreshold)) or
+    (Abs(Y - FPressPoint.Y) >= Scale96ToForm(StripDragThreshold))) then
+  begin
+    FDragArmed := False;
+    FBar.WindowMove;
+  end;
   { A click on a name of the kept strip may take the focus; the control
     that has it now gets it back once the menu is done with. }
   if not Focused and (FOpen < 0) then
     SetPrevFocus(Screen.ActiveControl);
 end;
 
+{ A press is forgotten with the mouse gone: without capture (GTK) the
+  release outside is never seen. }
 procedure TGittanMenuStrip.MouseLeave;
 begin
   inherited MouseLeave;
+  FDragArmed := False;
+  if (FButtonHot <> tpNone) or (FButtonPressed <> tpNone) then
+  begin
+    FButtonHot := tpNone;
+    FButtonPressed := tpNone;
+    Invalidate;
+  end;
   if not Focused and (FOpen < 0) then
     SetHot(-1);
 end;
@@ -1684,12 +1802,57 @@ var
   Index: integer;
 begin
   inherited MouseDown(Button, Shift, X, Y);
-  Index := IndexAt(X, Y);
-  if (Button = mbLeft) and (Index >= 0) then
+  Index := NameAt(X, Y);
+  if Index >= 0 then
   begin
-    SetHot(Index);
-    OpenItem(Index);
+    if Button = mbLeft then
+    begin
+      SetHot(Index);
+      OpenItem(Index);
+    end;
+    Exit;
   end;
+  { The caption buttons act on release; the empty part is the caption
+    (on Windows the form answers it, and this is not called). }
+  if CaptionPart(X, Y) <> tpNone then
+  begin
+    if Button = mbLeft then
+    begin
+      FButtonPressed := CaptionPart(X, Y);
+      Invalidate;
+    end;
+    Exit;
+  end;
+  case Button of
+    mbLeft:
+      if ssDouble in Shift then
+      begin
+        FDragArmed := False;
+        FBar.WindowZoom;
+      end
+      else
+      begin
+        FDragArmed := True;
+        FPressPoint := Types.Point(X, Y);
+      end;
+    mbRight: FBar.WindowMenu;
+  end;
+end;
+
+procedure TGittanMenuStrip.MouseUp(Button: TMouseButton; Shift: TShiftState;
+  X, Y: integer);
+var
+  Pressed: TGittanTitlePart;
+begin
+  inherited MouseUp(Button, Shift, X, Y);
+  FDragArmed := False;
+  Pressed := FButtonPressed;
+  if Pressed = tpNone then
+    Exit;
+  FButtonPressed := tpNone;
+  Invalidate;
+  if (Button = mbLeft) and (CaptionPart(X, Y) = Pressed) then
+    FBar.CaptionButtonClick(Pressed);
 end;
 
 { The focus went elsewhere: the strip goes, once the focus has moved, but
@@ -1713,6 +1876,32 @@ var
   R: TRect;
   S: string;
   Ink: TColor;
+
+  procedure PaintButton(APart: TGittanTitlePart; AGlyph: TGittanTitleGlyph;
+    AInk: TColor);
+  var
+    BR: TRect;
+    Fore: TColor;
+  begin
+    BR := ButtonRect(APart);
+    Fore := AInk;
+    if (FBar.FHotButton = APart) or (FBar.FPressedButton = APart) or
+      (FButtonHot = APart) or (FButtonPressed = APart) then
+    begin
+      Canvas.Brush.Style := bsSolid;
+      if APart = tpClose then
+      begin
+        Canvas.Brush.Color := CloseHot;
+        Fore := clWhite;
+      end
+      else
+        Canvas.Brush.Color := FBar.FButtonHot;
+      Canvas.FillRect(BR);
+    end;
+    FBar.DrawGlyph(Canvas, AGlyph, BR, Fore);
+    Canvas.Font := FBar.Font;
+  end;
+
 begin
   Collect;
   if (FBar.FSplitControl <> nil) and (FBar.FSplitControl.Parent <> nil) then
@@ -1758,6 +1947,21 @@ begin
       Canvas.Pen.Width := 1;
     end;
   end;
+  { The caption buttons while the strip is kept, in the bar's state (the
+    form sees the mouse on them on Windows) or the strip's own. }
+  if FPinned then
+  begin
+    if FBar.FActive then
+      Ink := FBar.FText
+    else
+      Ink := FBar.FDim;
+    PaintButton(tpMinimize, tgMinimize, Ink);
+    if FBar.Maximized then
+      PaintButton(tpMaximize, tgRestore, Ink)
+    else
+      PaintButton(tpMaximize, tgMaximize, Ink);
+    PaintButton(tpClose, tgClose, Ink);
+  end;
 end;
 
 { TGittanTabBar }
@@ -1773,7 +1977,7 @@ begin
   Result := False;
 end;
 
-procedure TGittanTabBar.DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+procedure TGittanTabBar.DrawGlyph(ACanvas: TCanvas; AGlyph: TGittanTitleGlyph; const AR: TRect;
   AColor: TColor);
 begin
 end;

@@ -52,11 +52,12 @@ type
     FGlyphFont: string;
   protected
     function Maximized: boolean; override;
-    procedure DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+    procedure DrawGlyph(ACanvas: TCanvas; AGlyph: TGittanTitleGlyph; const AR: TRect;
       AColor: TColor); override;
     procedure CreateWnd; override;
     procedure TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
       const AName: TRect); override;
+    procedure StripMade(AStrip: TGittanMenuStrip); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -88,7 +89,7 @@ const
 var
   Bar: TGittanWinTitleBar;
   FormWnd: HWND;
-  OldFormProc, OldBarProc: WNDPROC;
+  OldFormProc, OldBarProc, OldStripProc: WNDPROC;
   { Where the client area would start under the menu bar, from the
     window's top, as WM_NCCALCSIZE found it. }
   MenuBottom: integer;
@@ -276,6 +277,24 @@ begin
   Result := CallWindowProcW(OldBarProc, Wnd, Msg, WParam, LParam);
 end;
 
+{ The menu strip's window: its names are its own, the rest (the empty
+  part, the caption buttons while it is kept, the resize edge at the
+  top) goes to the form, which answers them as the bar's. }
+function StripProc(Wnd: HWND; Msg: UINT; WParam: WPARAM; LParam: LPARAM): LRESULT; stdcall;
+var
+  P: TPoint;
+begin
+  if (Msg = WM_NCHITTEST) and (Bar <> nil) and (Bar.MenuStrip <> nil) then
+  begin
+    P := Types.Point(GET_X_LPARAM(LParam), GET_Y_LPARAM(LParam));
+    Windows.ScreenToClient(Wnd, P);
+    if (Bar.MenuStrip.NameAt(P.X, P.Y) < 0) or
+      (not IsZoomed(FormWnd) and (P.Y < FrameThickness(FormWnd, True))) then
+      Exit(HTTRANSPARENT);
+  end;
+  Result := CallWindowProcW(OldStripProc, Wnd, Msg, WParam, LParam);
+end;
+
 function FormProc(Wnd: HWND; Msg: UINT; WParam: WPARAM; LParam: LPARAM): LRESULT; stdcall;
 var
   Params: PNCCalcSizeParams;
@@ -284,6 +303,7 @@ var
   R: TRect;
   Track: TTrackMouseEvent;
   Part: TGittanTitlePart;
+  Strip: TGittanMenuStrip;
 begin
   case Msg of
     WM_NCCALCSIZE:
@@ -321,6 +341,22 @@ begin
               Exit(HTTOPRIGHT)
             else
               Exit(HTTOP);
+          end;
+        end;
+        { The menu strip over the bar: its names are its own, its caption
+          buttons (while it is kept) the buttons, the rest the caption. }
+        Strip := Bar.MenuStrip;
+        if (Strip <> nil) and Strip.Visible then
+        begin
+          P := Strip.ScreenToClient(Types.Point(GET_X_LPARAM(LParam), GET_Y_LPARAM(LParam)));
+          if (P.Y >= 0) and (P.Y < Strip.Height) and (P.X >= 0) and (P.X < Strip.Width) then
+          begin
+            Part := Strip.CaptionPart(P.X, P.Y);
+            if Part <> tpNone then
+              Exit(PartCode(Part));
+            if Strip.NameAt(P.X, P.Y) >= 0 then
+              Exit(HTCLIENT);
+            Exit(HTCAPTION);
           end;
         end;
         P := Bar.ScreenToClient(Types.Point(GET_X_LPARAM(LParam), GET_Y_LPARAM(LParam)));
@@ -456,6 +492,12 @@ begin
   end;
 end;
 
+procedure TGittanWinTitleBar.StripMade(AStrip: TGittanMenuStrip);
+begin
+  OldStripProc := WNDPROC(SetWindowLongPtrW(AStrip.Handle, GWLP_WNDPROC,
+    LONG_PTR(@StripProc)));
+end;
+
 procedure TGittanWinTitleBar.CreateWnd;
 begin
   inherited CreateWnd;
@@ -484,7 +526,7 @@ begin
   end;
 end;
 
-procedure TGittanWinTitleBar.DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+procedure TGittanWinTitleBar.DrawGlyph(ACanvas: TCanvas; AGlyph: TGittanTitleGlyph; const AR: TRect;
   AColor: TColor);
 var
   S: string;
@@ -496,13 +538,13 @@ begin
   else
     S := GlyphClose;
   end;
-  Canvas.Font.Name := FGlyphFont;
-  Canvas.Font.Height := -Scale96ToForm(10);
-  Canvas.Font.Color := AColor;
-  Canvas.Brush.Style := bsClear;
-  Canvas.TextOut(AR.Left + (AR.Width - Canvas.TextWidth(S)) div 2,
-    AR.Top + (AR.Height - Canvas.TextHeight(S)) div 2, S);
-  Canvas.Font := Font;
+  ACanvas.Font.Name := FGlyphFont;
+  ACanvas.Font.Height := -Scale96ToForm(10);
+  ACanvas.Font.Color := AColor;
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.TextOut(AR.Left + (AR.Width - ACanvas.TextWidth(S)) div 2,
+    AR.Top + (AR.Height - ACanvas.TextHeight(S)) div 2, S);
+  ACanvas.Font := Font;
 end;
 
 end.

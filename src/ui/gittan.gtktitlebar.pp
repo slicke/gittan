@@ -60,7 +60,7 @@ type
     procedure ShowWindowMenu;
   protected
     function Maximized: boolean; override;
-    procedure DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+    procedure DrawGlyph(ACanvas: TCanvas; AGlyph: TGittanTitleGlyph; const AR: TRect;
       AColor: TColor); override;
     procedure CaptionButtonClick(APart: TGittanTitlePart); override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
@@ -71,6 +71,9 @@ type
     procedure MouseLeave; override;
     procedure TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
       const AName: TRect); override;
+    procedure WindowMove; override;
+    procedure WindowZoom; override;
+    procedure WindowMenu; override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -388,6 +391,21 @@ begin
   gtk_window_begin_move_drag(Win, 1, P.X, P.Y, gtk_get_current_event_time);
 end;
 
+procedure TGittanGtkTitleBar.WindowMove;
+begin
+  BeginMove;
+end;
+
+procedure TGittanGtkTitleBar.WindowZoom;
+begin
+  ToggleMaximized;
+end;
+
+procedure TGittanGtkTitleBar.WindowMenu;
+begin
+  ShowWindowMenu;
+end;
+
 procedure TGittanGtkTitleBar.ShowWindowMenu;
 var
   Win: PGtkWindow;
@@ -454,7 +472,7 @@ end;
 
 { Lines a pixel wide, as the caption buttons of GNOME and Windows 11
   draw them: a dash, a square, two squares, a cross. }
-procedure TGittanGtkTitleBar.DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+procedure TGittanGtkTitleBar.DrawGlyph(ACanvas: TCanvas; AGlyph: TGittanTitleGlyph; const AR: TRect;
   AColor: TColor);
 var
   CX, CY, H, D: integer;
@@ -462,29 +480,29 @@ begin
   CX := (AR.Left + AR.Right) div 2;
   CY := (AR.Top + AR.Bottom) div 2;
   H := Scale96ToForm(5);
-  Canvas.Pen.Color := AColor;
-  Canvas.Pen.Width := 1;
-  Canvas.Pen.Style := psSolid;
-  Canvas.Brush.Style := bsClear;
+  ACanvas.Pen.Color := AColor;
+  ACanvas.Pen.Width := 1;
+  ACanvas.Pen.Style := psSolid;
+  ACanvas.Brush.Style := bsClear;
   case AGlyph of
     tgMinimize:
-      Canvas.Line(CX - H, CY, CX + H + 1, CY);
+      ACanvas.Line(CX - H, CY, CX + H + 1, CY);
     tgMaximize:
-      Canvas.Rectangle(CX - H, CY - H, CX + H + 1, CY + H + 1);
+      ACanvas.Rectangle(CX - H, CY - H, CX + H + 1, CY + H + 1);
     tgRestore:
       begin
         { The front square, and the back one's top and right edges
           behind it. }
         D := Scale96ToForm(2);
-        Canvas.Rectangle(CX - H, CY - H + D, CX + H - D + 1, CY + H + 1);
-        Canvas.Polyline([Types.Point(CX - H + D, CY - H + D - 1),
+        ACanvas.Rectangle(CX - H, CY - H + D, CX + H - D + 1, CY + H + 1);
+        ACanvas.Polyline([Types.Point(CX - H + D, CY - H + D - 1),
           Types.Point(CX - H + D, CY - H), Types.Point(CX + H, CY - H),
           Types.Point(CX + H, CY + H - D), Types.Point(CX + H - D + 1, CY + H - D)]);
       end;
     tgClose:
       begin
-        Canvas.Line(CX - H, CY - H, CX + H + 1, CY + H + 1);
-        Canvas.Line(CX - H, CY + H, CX + H + 1, CY - H - 1);
+        ACanvas.Line(CX - H, CY - H, CX + H + 1, CY + H + 1);
+        ACanvas.Line(CX - H, CY + H, CX + H + 1, CY - H - 1);
       end;
   end;
 end;
