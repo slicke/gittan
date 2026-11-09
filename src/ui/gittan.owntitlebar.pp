@@ -137,6 +137,11 @@ type
       that one once the open one has closed. True when the caller is to
       close the open one. }
     function HoverAt(const AScreen: TPoint): boolean;
+    {** The open menu has closed: the next opens when one was asked for
+      (StepMenu, HoverAt), else the strip goes. The popup's OnClose calls
+      it; a descendant that pops the menu up itself calls it from the
+      menu's own signal. Once per menu: a second call does nothing. }
+    procedure MenuClosed;
     {** Whether a menu of the strip is open, or the next on its way. }
     function MenuOpen: boolean;
   end;
@@ -1493,9 +1498,16 @@ end;
   one opens; else (Escape, a click elsewhere, a command chosen) the
   strip goes. }
 procedure TGittanMenuStrip.PopupClose(Sender: TObject);
+begin
+  MenuClosed;
+end;
+
+procedure TGittanMenuStrip.MenuClosed;
 var
   Index: integer;
 begin
+  if FOpen < 0 then
+    Exit;
   FOpen := -1;
   if FStepTo >= 0 then
   begin

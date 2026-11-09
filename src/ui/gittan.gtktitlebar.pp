@@ -106,6 +106,49 @@ var
     trigger of that one's popup, which opens from the message loop with
     no event of its own; GTK shows no popup without one on Wayland. }
   StepEvent: PGdkEvent;
+  { A menu closed for the one beside it: that one pops up a moment later
+    (StepDelay), from a timeout, with what it needs kept here. Popped up
+    at once, inside the closing menu's event, it came up as a child of
+    the closing one on Wayland and went with it. }
+  Stepping: boolean;
+  PendingSource: guint;
+  PendingMenu, PendingWidget: PGtkWidget;
+  PendingDx: integer;
+  PendingEvent: PGdkEvent;
+
+const
+  StepDelay = 30;
+
+procedure DropPending;
+begin
+  if PendingSource <> 0 then
+    g_source_remove(PendingSource);
+  PendingSource := 0;
+  if PendingEvent <> nil then
+    gdk_event_free(PendingEvent);
+  PendingEvent := nil;
+end;
+
+{ AMenu under the name, anchored at AWidget's bottom left corner and
+  shifted right by ADx, with AEvent as its trigger. }
+procedure PopupMenuAt(AMenu, AWidget: PGtkWidget; ADx: integer; AEvent: PGdkEvent);
+begin
+  g_object_set(PGObject(AMenu), 'rect-anchor-dx', [ADx, nil]);
+  gtk_menu_popup_at_widget(PGtkMenu(AMenu), AWidget, GDK_GRAVITY_SOUTH_WEST,
+    GDK_GRAVITY_NORTH_WEST, AEvent);
+end;
+
+function PopupPending(AData: gpointer): gboolean; cdecl;
+begin
+  Result := False;
+  PendingSource := 0;
+  if (TrackStrip <> nil) and TrackStrip.Visible and TrackStrip.MenuOpen and
+    (PGtkWidget(TrackTop) = PendingMenu) then
+    PopupMenuAt(PendingMenu, PendingWidget, PendingDx, PendingEvent);
+  if PendingEvent <> nil then
+    gdk_event_free(PendingEvent);
+  PendingEvent := nil;
+end;
 
 { The event being handled, kept as StepEvent, and the open menu closed. }
 procedure EndForStep;
@@ -113,6 +156,7 @@ begin
   if StepEvent <> nil then
     gdk_event_free(StepEvent);
   StepEvent := gtk_get_current_event;
+  Stepping := True;
   gtk_menu_shell_deactivate(TrackTop);
 end;
 
@@ -143,6 +187,13 @@ begin
     g_signal_stop_emission_by_name(PGObject(AShell), 'move-current');
     EndForStep;
   end;
+end;
+
+{ The LCL's own deactivate handler closes only a menu its popup showed. }
+procedure MenuDeactivate(AShell: PGtkMenuShell; AData: gpointer); cdecl;
+begin
+  if (TrackStrip <> nil) and (AShell = TrackTop) then
+    TrackStrip.MenuClosed;
 end;
 
 function MenuMotion(AWidget: PGtkWidget; AEvent: PGdkEventMotion;
@@ -260,6 +311,7 @@ begin
   if StepEvent <> nil then
     gdk_event_free(StepEvent);
   StepEvent := nil;
+  DropPending;
   inherited Destroy;
 end;
 
@@ -445,15 +497,28 @@ begin
   TrackStrip := AStrip;
   TrackTop := PGtkMenuShell(Menu);
   WatchMenu(Menu);
+  g_signal_handlers_disconnect_matched(PGObject(Menu),
+    [G_SIGNAL_MATCH_FUNC], 0, 0, nil, @MenuDeactivate, nil);
+  g_signal_connect_data(PGObject(Menu), 'deactivate',
+    TGCallback(@MenuDeactivate), nil, nil, G_CONNECT_DEFAULT);
   Event := gtk_get_current_event;
   if Event = nil then
     Event := StepEvent
   else if StepEvent <> nil then
     gdk_event_free(StepEvent);
   StepEvent := nil;
-  g_object_set(PGObject(Menu), 'rect-anchor-dx', [AName.Left, nil]);
-  gtk_menu_popup_at_widget(PGtkMenu(Menu), TGtk3Widget(AStrip.Handle).Widget,
-    GDK_GRAVITY_SOUTH_WEST, GDK_GRAVITY_NORTH_WEST, Event);
+  DropPending;
+  if Stepping then
+  begin
+    Stepping := False;
+    PendingMenu := Menu;
+    PendingWidget := TGtk3Widget(AStrip.Handle).Widget;
+    PendingDx := AName.Left;
+    PendingEvent := Event;
+    PendingSource := g_timeout_add(StepDelay, @PopupPending, nil);
+    Exit;
+  end;
+  PopupMenuAt(Menu, TGtk3Widget(AStrip.Handle).Widget, AName.Left, Event);
   if Event <> nil then
     gdk_event_free(Event);
 end;
