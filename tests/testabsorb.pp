@@ -38,6 +38,7 @@ type
     procedure TestBaseNoMergeBase;
     procedure TestBuild;
     procedure TestRunAll;
+    procedure TestRunIntoFixup;
     procedure TestRunSome;
     procedure TestRunNothing;
     procedure TestRunStale;
@@ -362,6 +363,32 @@ begin
     AssertEquals('one|two!!|three|four|five!|five-b|six!|seven|eight|nine|ten!',
       ReadLines('a.txt'));
     AssertEquals('', GitOut(['stash', 'list']));
+  finally
+    Plan.Free;
+  end;
+end;
+
+{ A change of a commit that is a fixup of one not on the branch goes
+  into that fixup, which stays a commit. }
+procedure TAbsorbTest.TestRunIntoFixup;
+var
+  Plan: TGittanAbsorbPlan;
+  Commits: integer;
+  Conflicts, Stopped: boolean;
+  Err: string;
+begin
+  WriteLines('b.txt', ['alpha', 'beta!', 'gamma']);
+  Commit('fixup! Elsewhere');
+  WriteLines('b.txt', ['alpha', 'beta!!', 'gamma']);
+  Plan := TGittanAbsorbPlan.Create;
+  try
+    AssertEquals('', Build(Plan, ['b.txt']));
+    AssertTrue('run: ' + Err, AbsorbRun(FRepo, Plan, [True], [], Commits, Conflicts,
+      Stopped, Err));
+    AssertEquals('fixup! Elsewhere|Base', Subjects);
+    AssertEquals('alpha|beta!!|gamma',
+      StringReplace(GitOut(['show', 'HEAD:b.txt']), #10, '|', [rfReplaceAll]));
+    AssertEquals('', GitOut(['status', '--porcelain']));
   finally
     Plan.Free;
   end;

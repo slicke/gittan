@@ -50,9 +50,10 @@ type
     find for a model that cannot read files, the lines in the files it
     named; atResolve resolves one conflict; atSplit groups the changed
     files into commits; atFix fixes what a review's finding points out;
-    atWhy explains how lines came to be as they are. }
+    atWhy explains how lines came to be as they are; atSummary says
+    what the commits and the diff it is given changed. }
   TGittanAITask = (atMessage, atReview, atFind, atLocate, atResolve, atSplit, atFix,
-    atWhy);
+    atWhy, atSummary);
 
   {** How many lines of each file a model was given (FindLinesInput). }
   TGittanLineCounts = array of integer;
@@ -71,6 +72,9 @@ const
   {** How many of the recent subjects show the agent the repository's
     style. }
   MessageSubjects = 10;
+  {** The most commits of a summary's range listed for the agent, the
+    newest. }
+  SummaryCommits = 200;
   {** The most findings of a review kept; the prompt asks for fewer. }
   ReviewMaxFindings = 10;
   {** The most files of an answer to where something is kept. }
@@ -357,6 +361,31 @@ function FixBlock(const AFileName: string; const ABefore, AAfter: TStringArray):
 function WhyInput(const ARoot, APath, ARef: string; AFrom, ATo: integer;
   out AText, AError: string): boolean;
 
+{** What the agent gets to summarize what the change view compares in
+  the repository at ARoot, ABase as ReviewChanges takes it: the commits
+  between (ABase..HEAD, a range's own two ends, none against HEAD; the
+  newest SummaryCommits, each with its short hash, author, date and
+  whole message), cut at half of MessageDiffKeep, then the summary and
+  the diff as ReviewChanges makes them, unnumbered, cut at what is left
+  of it. False, with git's reason in AError, when git failed; an empty
+  AText when there is neither a commit nor a difference. }
+function SummaryInput(const ARoot, ABase: string; ARange: boolean; APaths: TStrings;
+  out AText, AError: string): boolean;
+
+const
+  {** The scheme of the links LinkCommits makes, the full hash after it. }
+  CommitLinkScheme = 'gittan-commit:';
+  {** The most hashes LinkCommits asks git about in one text. }
+  LinkCommitsMax = 64;
+
+{** AMarkdown with each commit hash it names (7 to 40 lowercase hex
+  digits, a word by itself or the whole of an inline code span) made a
+  link to CommitLinkScheme and the full hash, when git in the repository
+  at ARoot finds that commit. Fenced code, links, autolinks and HTML tags
+  are left as they are, as is a hash in a path or a URL (after a slash,
+  a dot, a colon and the like). }
+function LinkCommits(const ARoot, AMarkdown: string): string;
+
 {** The commits git's conflict in the repository at ARoot comes from, for
   APath: the commit being applied (the first of MERGE_HEAD,
   CHERRY_PICK_HEAD, REVERT_HEAD and REBASE_HEAD there is) with its
@@ -569,7 +598,33 @@ type
     property Error: string read FError;
   end;
 
+  {** Has the agent summarize what the change view compares (see
+    SummaryInput); the answer is Markdown. }
+  TGittanSummaryJob = class(TGittanAgentJob)
+  private
+    FBase: string;
+    FRange: boolean;
+    FPaths: TStringList;
+    FOk: boolean;
+    FText, FMarkdown, FError: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const ARoot: string; AAI: TGittanAI; const ABase: string;
+      ARange: boolean; APaths: TStrings);
+    destructor Destroy; override;
+    property Base: string read FBase;
+    property Ok: boolean read FOk;
+    {** The summary, when Ok, as the agent wrote it. }
+    property Text: string read FText;
+    {** Text with the commits it names made links (LinkCommits), to show. }
+    property Markdown: string read FMarkdown;
+    {** Why there is none, when not Ok. }
+    property Error: string read FError;
+  end;
+
 resourcestring
+  rsNothingToSummarize = 'There are no changes to summarize.';
   rsNothingToReview = 'There are no changes to review.';
   rsReviewNotRead = 'The answer was no list of findings: %s';
   rsFoundNotRead = 'The answer was no list of files: %s';
@@ -713,6 +768,17 @@ const
   WhyReadNote = 'You may read the repository''s files to see how the lines are used. ';
   WhyPromptEnd = 'Answer with at most three short paragraphs of Markdown alone, the ' +
     'history first, no headings, no preamble.';
+  SummaryPromptStart = 'Summarize the changes given below for someone who has not ' +
+    'followed them: the commits (newest first, each with its message), when there ' +
+    'are any, then the summary and the diff of everything that changed. Say what ' +
+    'changed and why, grouped by what it is about (a feature, a fix, a refactoring, ' +
+    'a dependency) rather than commit by commit or file by file, the most ' +
+    'important first, and name a commit by its short hash where it helps to find ' +
+    'the change. Say only what the commits and the diff show; where they are cut, ' +
+    'say that the summary covers a part. ';
+  SummaryReadNote = 'You may read the repository''s files to understand a change. ';
+  SummaryPromptEnd = 'Answer with Markdown alone: a sentence or two on the whole, ' +
+    'then a short list or a few short sections, no preamble, no closing remarks.';
 
 var
   AIClasses: array[TGittanAgent] of TGittanAIClass;
@@ -775,6 +841,11 @@ begin
         Result := WhyPromptStart + WhyReadNote + WhyPromptEnd
       else
         Result := WhyPromptStart + WhyPromptEnd;
+    atSummary:
+      if AReadsFiles then
+        Result := SummaryPromptStart + SummaryReadNote + SummaryPromptEnd
+      else
+        Result := SummaryPromptStart + SummaryPromptEnd;
     else { atLocate }
       Result := LocatePromptStart + LocatePromptEnd;
   end;
@@ -1165,32 +1236,302 @@ begin
     'The diff:' + LineEnding + KeepDiff(Diff);
 end;
 
+{ The summary and the diff of what the change view compares: a range
+  ABase diffed as it is, else the work tree's APaths against ABase (HEAD
+  when empty) through IndexDiff. }
+function ComparedDiff(const ARoot, ABase: string; ARange: boolean; APaths: TStrings;
+  out AStat, ADiff, AError: string): boolean;
+var
+  Base: string;
+  HasHead, HasParent: boolean;
+begin
+  if ARange then
+    Exit(RunGitIn(ARoot, ['diff', '--stat=100', ABase], AStat, AError) and
+      RunGitIn(ARoot, ['diff', '--no-ext-diff', '-M', ABase], ADiff, AError));
+  HeadState(ARoot, HasHead, HasParent);
+  Base := ABase;
+  if Base = '' then
+    if HasHead then
+      Base := 'HEAD'
+    else
+      Base := EmptyTreeId;
+  Result := IndexDiff(ARoot, Base, HasHead, APaths, AStat, ADiff, AError);
+end;
+
 function ReviewChanges(const ARoot, ABase: string; ARange: boolean; APaths: TStrings;
   out AText, AError: string): boolean;
 var
-  Base, Stat, Diff: string;
-  HasHead, HasParent: boolean;
+  Stat, Diff: string;
 begin
   AText := '';
-  if ARange then
-    Result := RunGitIn(ARoot, ['diff', '--stat=100', ABase], Stat, AError) and
-      RunGitIn(ARoot, ['diff', '--no-ext-diff', '-M', ABase], Diff, AError)
-  else
-  begin
-    HeadState(ARoot, HasHead, HasParent);
-    Base := ABase;
-    if Base = '' then
-      if HasHead then
-        Base := 'HEAD'
-      else
-        Base := EmptyTreeId;
-    Result := IndexDiff(ARoot, Base, HasHead, APaths, Stat, Diff, AError);
-  end;
+  Result := ComparedDiff(ARoot, ABase, ARange, APaths, Stat, Diff, AError);
   if not Result or (Trim(Diff) = '') then
     Exit;
   AText := 'The changes (git diff --stat):' + LineEnding + Stat + LineEnding +
     'The diff, each line numbered (N for the new side, O for the old):' + LineEnding +
     KeepDiff(NumberDiff(Diff));
+end;
+
+{ The commits a comparison with ABase spans, as git log takes them:
+  ABase..HEAD, a range's own ends with two dots (A...B compares B with
+  its merge base with A, whose commits are A..B's), none against HEAD. }
+function SummaryLogRange(const ABase: string; ARange: boolean): string;
+begin
+  if ABase = '' then
+    Result := ''
+  else if ARange then
+    Result := StringReplace(ABase, '...', '..', [])
+  else
+    Result := ABase + '..HEAD';
+end;
+
+{ What to tell the agent when the old side of the comparison has commits
+  the new side lacks (a base that moved on, origin/main past the
+  branch): the diff is between the two ends, so it shows those commits
+  undone, and the log lists none of them. '' when there are none, or
+  for three dots, which compare with the merge base. }
+function SummaryBehindNote(const ARoot, ABase: string; ARange: boolean): string;
+var
+  Old, New, Count, Err: string;
+  p: integer;
+begin
+  Result := '';
+  Old := ABase;
+  New := 'HEAD';
+  if ARange then
+  begin
+    p := Pos('..', ABase);
+    if (p = 0) or (Pos('...', ABase) > 0) then
+      Exit;
+    Old := Copy(ABase, 1, p - 1);
+    New := Copy(ABase, p + 2, MaxInt);
+  end;
+  if (Old = '') or (New = '') then
+    Exit;
+  if RunGitIn(ARoot, ['rev-list', '--count', New + '..' + Old], Count, Err) and
+    (StrToIntDef(Trim(Count), 0) > 0) then
+    Result := Format('Note: %s has %s commit(s) that %s does not have. The diff shows ' +
+      'their changes undone; those are not changes made here, so leave them out.',
+      [Old, Trim(Count), New]) + LineEnding;
+end;
+
+function SummaryInput(const ARoot, ABase: string; ARange: boolean; APaths: TStrings;
+  out AText, AError: string): boolean;
+var
+  Range, Log, Stat, Diff: string;
+begin
+  AText := '';
+  Log := '';
+  Range := SummaryLogRange(ABase, ARange);
+  if (Range <> '') and not RunGitIn(ARoot, ['log', '--no-color', '-n',
+    IntToStr(SummaryCommits), '--format=commit %h%nAuthor: %an%nDate: %as%n%n%B', Range],
+    Log, AError) then
+    Exit(False);
+  Result := ComparedDiff(ARoot, ABase, ARange, APaths, Stat, Diff, AError);
+  if not Result then
+    Exit;
+  if Trim(Log) <> '' then
+    AText := 'The commits (git log ' + Range + ', newest first):' + LineEnding +
+      KeepText(Log, '[The commits are cut here: %d of their %d bytes are left out.]',
+      MessageDiffKeep div 2) + LineEnding;
+  if Trim(Diff) <> '' then
+    AText := AText + SummaryBehindNote(ARoot, ABase, ARange) +
+      'The changes (git diff --stat):' + LineEnding + Stat + LineEnding +
+      'The diff:' + LineEnding + KeepText(Diff,
+      '[The diff is cut here: %d of its %d bytes are left out. ' +
+      'The summary above lists every file.]', Max(MessageDiffKeep div 4,
+      MessageDiffKeep - Length(AText)));
+end;
+
+function IsHashText(const S: string): boolean;
+var
+  i: integer;
+begin
+  Result := (Length(S) >= 7) and (Length(S) <= 40);
+  if Result then
+    for i := 1 to Length(S) do
+      if not (S[i] in ['0'..'9', 'a'..'f']) then
+        Exit(False);
+end;
+
+function LinkCommits(const ARoot, AMarkdown: string): string;
+const
+  WordChars = ['0'..'9', 'a'..'z', 'A'..'Z'];
+  { Before or after these a hash is part of a path, a URL or a name. }
+  NotBefore = ['/', '\', '-', '_', ':', '#', '@', '=', '.', '&', '?', '%', '+', '~'];
+  NotAfter = ['/', '\', '-', '_', '@'];
+var
+  Found: TStringList;
+  Looked: integer;
+  Lines: TStringArray;
+  Text: TStringBuilder;
+  Fence: string;
+  n: integer;
+
+  { The full hash of the commit AHash names, '' when there is none. }
+  function Resolve(const AHash: string): string;
+  var
+    k: integer;
+    Output, Error: string;
+  begin
+    k := Found.IndexOfName(AHash);
+    if k >= 0 then
+      Exit(Found.ValueFromIndex[k]);
+    Result := '';
+    if Looked >= LinkCommitsMax then
+      Exit;
+    Inc(Looked);
+    if RunGitIn(ARoot, ['rev-parse', '--verify', '--quiet', AHash + '^{commit}'],
+      Output, Error) then
+      Result := Trim(Output);
+    if not IsHashText(Result) then
+      Result := '';
+    Found.Add(AHash + '=' + Result);
+  end;
+
+  function FenceOf(const ALine: string): string;
+  var
+    S: string;
+    k: integer;
+  begin
+    Result := '';
+    S := TrimLeft(ALine);
+    if (Length(ALine) - Length(S) > 3) or (Length(S) < 3) or not (S[1] in ['`', '~']) then
+      Exit;
+    k := 1;
+    while (k < Length(S)) and (S[k + 1] = S[1]) do
+      Inc(k);
+    if k >= 3 then
+      Result := Copy(S, 1, k);
+  end;
+
+  procedure LinkLine(const S: string);
+  var
+    i, j, k, Run: integer;
+    Word, Full: string;
+  begin
+    i := 1;
+    while i <= Length(S) do
+    begin
+      case S[i] of
+        '`':
+          begin
+            Run := 1;
+            while (i + Run <= Length(S)) and (S[i + Run] = '`') do
+              Inc(Run);
+            j := Pos(StringOfChar('`', Run), S, i + Run);
+            while (j > 0) and (j + Run <= Length(S)) and (S[j + Run] = '`') do
+            begin
+              k := j + Run;
+              while (k <= Length(S)) and (S[k] = '`') do
+                Inc(k);
+              j := Pos(StringOfChar('`', Run), S, k);
+            end;
+            if j = 0 then
+            begin
+              Text.Append(Copy(S, i, Run));
+              Inc(i, Run);
+              Continue;
+            end;
+            Word := Trim(Copy(S, i + Run, j - i - Run));
+            Full := '';
+            if IsHashText(Word) then
+              Full := Resolve(Word);
+            if Full <> '' then
+              Text.Append('[').Append(Copy(S, i, j + Run - i)).Append('](')
+                .Append(CommitLinkScheme).Append(Full).Append(')')
+            else
+              Text.Append(Copy(S, i, j + Run - i));
+            i := j + Run;
+          end;
+        '[':
+          begin
+            { A link as it is, its text and its target. }
+            j := Pos('](', S, i + 1);
+            k := 0;
+            if (j > 0) and (Pos(']', Copy(S, i + 1, j - i - 1)) = 0) then
+              k := Pos(')', S, j + 2);
+            if k = 0 then
+            begin
+              Text.Append('[');
+              Inc(i);
+              Continue;
+            end;
+            Text.Append(Copy(S, i, k - i + 1));
+            i := k + 1;
+          end;
+        '<':
+          begin
+            { An autolink or an HTML tag. }
+            j := 0;
+            if (i < Length(S)) and (S[i + 1] in ['a'..'z', 'A'..'Z', '/', '!']) then
+              j := Pos('>', S, i + 1);
+            if j = 0 then
+            begin
+              Text.Append('<');
+              Inc(i);
+              Continue;
+            end;
+            Text.Append(Copy(S, i, j - i + 1));
+            i := j + 1;
+          end;
+        '0'..'9', 'a'..'z', 'A'..'Z':
+          begin
+            j := i;
+            while (j <= Length(S)) and (S[j] in WordChars) do
+              Inc(j);
+            Word := Copy(S, i, j - i);
+            Full := '';
+            if IsHashText(Word) and ((i = 1) or not (S[i - 1] in NotBefore)) and
+              ((j > Length(S)) or not (S[j] in NotAfter)) then
+              Full := Resolve(Word);
+            if Full <> '' then
+              Text.Append('[').Append(Word).Append('](').Append(CommitLinkScheme)
+                .Append(Full).Append(')')
+            else
+              Text.Append(Word);
+            i := j;
+          end;
+      else
+        Text.Append(S[i]);
+        Inc(i);
+      end;
+    end;
+  end;
+
+begin
+  Found := TStringList.Create;
+  Text := TStringBuilder.Create;
+  try
+    Looked := 0;
+    Fence := '';
+    Lines := AMarkdown.Split([#10]);
+    for n := 0 to High(Lines) do
+    begin
+      if n > 0 then
+        Text.Append(#10);
+      if Fence <> '' then
+      begin
+        { A fence ends with at least as many of its marks. }
+        if (FenceOf(Lines[n]) <> '') and (FenceOf(Lines[n])[1] = Fence[1]) and
+          (Length(FenceOf(Lines[n])) >= Length(Fence)) and
+          (Trim(Lines[n]) = FenceOf(Lines[n])) then
+          Fence := '';
+        Text.Append(Lines[n]);
+      end
+      else if FenceOf(Lines[n]) <> '' then
+      begin
+        Fence := FenceOf(Lines[n]);
+        Text.Append(Lines[n]);
+      end
+      else
+        LinkLine(Lines[n]);
+    end;
+    Result := Text.ToString;
+  finally
+    Text.Free;
+    Found.Free;
+  end;
 end;
 
 { The number after AMark ('-' or '+') in the hunk header AHeader. }
@@ -2308,6 +2649,56 @@ begin
     FOk := FText <> '';
     if not FOk then
       FError := Format(rsAgentNoAnswer, [AgentName]);
+  end;
+  Done;
+end;
+
+{ TGittanSummaryJob }
+
+constructor TGittanSummaryJob.Create(const ARoot: string; AAI: TGittanAI;
+  const ABase: string; ARange: boolean; APaths: TStrings);
+begin
+  inherited Create(ARoot, AAI);
+  FBase := ABase;
+  FRange := ARange;
+  FPaths := TStringList.Create;
+  FPaths.AddStrings(APaths);
+end;
+
+destructor TGittanSummaryJob.Destroy;
+begin
+  inherited Destroy;
+  FPaths.Free;
+end;
+
+procedure TGittanSummaryJob.Execute;
+var
+  Input, Answer: string;
+begin
+  if not SummaryInput(FRoot, FBase, FRange, FPaths, Input, FError) then
+  begin
+    Done;
+    Exit;
+  end;
+  if Input = '' then
+  begin
+    FError := rsNothingToSummarize;
+    Done;
+    Exit;
+  end;
+  if Terminated then
+    Exit;
+  FOk := Ask(atSummary, Input, Answer, FError);
+  if Terminated then
+    Exit;
+  if FOk then
+  begin
+    FText := Trim(StringReplace(Answer, #13#10, #10, [rfReplaceAll]));
+    FOk := FText <> '';
+    if not FOk then
+      FError := Format(rsAgentNoAnswer, [AgentName])
+    else
+      FMarkdown := LinkCommits(FRoot, FText);
   end;
   Done;
 end;

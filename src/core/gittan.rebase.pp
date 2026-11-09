@@ -98,9 +98,10 @@ function FixupTarget(const ASubject: string; out AAction: TGittanRebaseAction): 
   ones moved there before it, with raFixup or raSquash as its action
   and, for a squash, the prefix taken off its message. The commit
   named is an earlier step (in replay order) that is no fixup itself,
-  with that subject, else whose subject starts with the text, else
-  whose id starts with it (four hex digits or more); a fixup of a
-  fixup follows it to its commit. One that names no step stays where
+  with that subject, else whose subject starts with the text, else the
+  step whose id starts with it (four hex digits or more), a fixup with
+  no commit among the steps included; a fixup of a fixup follows it to
+  its commit. One that names no step stays where
   it is, a pick. The actions of the steps not moved stay. }
 procedure AutosquashSteps(var ASteps: TGittanRebaseSteps);
 
@@ -260,11 +261,17 @@ var
       if (Target[n] < 0) and (Action[n] = raPick) and
         (Copy(ASteps[n].Subject, 1, Length(AText)) = AText) then
         Exit(n);
+    { An id names its step whatever that one's subject is: a fixup that
+      found its commit leads there, one that found none (its commit is
+      not among the steps) stays a step, which this one follows. }
     if LooksLikeId(AText) then
       for n := 0 to ABefore - 1 do
-        if (Target[n] < 0) and (Action[n] = raPick) and
-          SameText(Copy(ASteps[n].Hash, 1, Length(AText)), AText) then
+        if SameText(Copy(ASteps[n].Hash, 1, Length(AText)), AText) then
+        begin
+          if Target[n] >= 0 then
+            Exit(Target[n]);
           Exit(n);
+        end;
     Result := -1;
   end;
 

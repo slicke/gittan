@@ -334,8 +334,23 @@ end;
 procedure TBatchTest.TestDeleteRefused;
 var
   Branch: TGittanGoneBranch;
+  Repo: TGittanGoneRepo;
+  i: integer;
 begin
   MakeRepos;
+  { A branch that got a commit since the scan stays, and goes at the
+    commit it is at. }
+  Repo := ScanGoneRepo(FWork, '', True);
+  i := FindBranch(Repo, 'wip');
+  AssertTrue(i >= 0);
+  AssertEquals(GitOut(FWork, ['rev-parse', 'wip']), Repo.Branches[i].Tip);
+  Git(FWork, ['branch', '-f', 'wip', 'wip~1']);
+  Branch := DeleteGoneBranch(FWork, 'wip', Repo.Branches[i].Tip);
+  AssertFalse(Branch.Deleted);
+  AssertTrue(Branch.Error <> '');
+  AssertTrue(GitOut(FWork, ['branch', '--list', 'wip']) <> '');
+  Branch := DeleteGoneBranch(FWork, 'wip', GitOut(FWork, ['rev-parse', 'wip']));
+  AssertTrue(Branch.Error, Branch.Deleted);
   { The branch checked out cannot go. }
   Branch := DeleteGoneBranch(FWork, 'current');
   AssertFalse(Branch.Deleted);

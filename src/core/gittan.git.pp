@@ -142,6 +142,8 @@ type
     Error: string;
     Stats: TGittanFileStats;
     Branch, DefaultBranch, MergeBase, Operation, RebaseBranch: string;
+    {** A squash merge is staged and not yet committed (SquashPending). }
+    SquashPending: boolean;
     {** HEAD is on no branch: Branch is then the short commit id. }
     Detached: boolean;
     {** The id of the commit HEAD is on; empty before the first commit. }
@@ -284,6 +286,7 @@ type
     FIndexPass: integer;
     FIndexAdded: boolean;
     FIgnoreWhitespace: boolean;
+    FNoVerify: boolean;
     FOnOutput: TGittanOutputEvent;
     { The last MergeConflicts of Snapshot: the two commits merged (HEAD's
       and the default branch's, '' for none), the count and the paths.
@@ -538,6 +541,9 @@ type
       of that name in its hooks folder, `core.hooksPath` (husky's
       .husky/_) or .git/hooks. }
     function HasHook(const AName: string): boolean;
+    {** Where the hook AName would be: its hooks folder (`git rev-parse
+      --git-path hooks`) and the name; empty without a repository. }
+    function HookPath(const AName: string): string;
     {** The variables a fetch, pull or push runs with besides Gittan's
       own: ssh in batch mode (`ssh -o BatchMode=yes`), so a key that
       needs its passphrase, or a host not yet known, fails at once with
@@ -761,7 +767,9 @@ type
       stopped at (`--skip`) and goes on with the rest. }
     function SkipOperation: boolean;
     {** Gives up what git is in the middle of (`--abort`): the branch and
-      the work tree go back to how they were before it started. }
+      the work tree go back to how they were before it started. A
+      squash merge not yet committed (SquashPending), stopped on
+      conflicts or not, is given up too (`reset --merge`). }
     function AbortOperation: boolean;
     {** Forgets what git is in the middle of (`--quit`): HEAD, the index
       and the work tree stay as they are, git just stops rebasing (or
@@ -776,7 +784,10 @@ type
     function MergeMessage: string;
     {** Whether a squash merge is staged and not yet committed: git
       left SQUASH_MSG in the git directory, which the next commit
-      takes away. }
+      takes away, git is in the middle of nothing else, and the index
+      holds something to commit. The file alone does not say so: it
+      stays when the staged changes are discarded one by one. Runs git
+      when the file is there. }
     function SquashPending: boolean;
     {** The e-mail the repository commits under (`git config
       user.email`), empty when none is set. }
@@ -1129,6 +1140,9 @@ type
       and the output of the hooks it runs. Called in the caller's
       thread. }
     property OnOutput: TGittanOutputEvent read FOnOutput write FOnOutput;
+    {** Pushes, the deletions on a remote among them, without the
+      pre-push hook (`git push --no-verify`). }
+    property NoVerify: boolean read FNoVerify write FNoVerify;
   end;
 
 {** The PATH Gittan looks for its tools on and runs git and gh with,
@@ -4392,11 +4406,20 @@ begin
     (Pos('/', Copy(S, 1, Colon)) = 0);
 end;
 
+{ With NoVerify a push gets --no-verify right after the command. }
 function TGittanRepo.RunRemote(const AArgs: array of string): boolean;
 var
   Output, Err: string;
+  Args: TStringArray;
+  i: integer;
 begin
-  Result := (FRoot <> '') and RunGitEnv(FRoot, AArgs, RemoteEnvironment, Output, Err, '',
+  Args := nil;
+  SetLength(Args, Length(AArgs));
+  for i := 0 to High(AArgs) do
+    Args[i] := AArgs[i];
+  if FNoVerify and (Length(Args) > 0) and (Args[0] = 'push') then
+    Insert('--no-verify', Args, 1);
+  Result := (FRoot <> '') and RunGitEnv(FRoot, Args, RemoteEnvironment, Output, Err, '',
     FOnOutput);
   if not Result then
     FError := Err;
@@ -4763,11 +4786,11 @@ end;
 
 { rev-parse --git-path gives the hooks folder with core.hooksPath
   honoured, relative to the root when it is inside the work tree. }
-function TGittanRepo.HasHook(const AName: string): boolean;
+function TGittanRepo.HookPath(const AName: string): string;
 var
   Dir: string;
 begin
-  Result := False;
+  Result := '';
   if (FRoot = '') or (AName = '') or not RunGit(FRoot, ['rev-parse', '--git-path', 'hooks'], Dir) then
     Exit;
   Dir := Trim(Dir);
@@ -4775,7 +4798,15 @@ begin
     Exit;
   if not ((Dir[1] in ['/', '\']) or ((Length(Dir) > 1) and (Dir[2] = ':'))) then
     Dir := IncludeTrailingPathDelimiter(FRoot) + Dir;
-  Result := FileExists(IncludeTrailingPathDelimiter(SetDirSeparators(Dir)) + AName);
+  Result := IncludeTrailingPathDelimiter(SetDirSeparators(Dir)) + AName;
+end;
+
+function TGittanRepo.HasHook(const AName: string): boolean;
+var
+  Path: string;
+begin
+  Path := HookPath(AName);
+  Result := (Path <> '') and FileExists(Path);
 end;
 
 { ---------------------------------------------------------------------------
@@ -5267,6 +5298,10 @@ begin
   Result := TrimRight(AMessage);
   if Length(ACoAuthors) = 0 then
     Exit;
+  { A memo on Windows gives CRLF, and with a LineBreak of its own a
+    list splits at that alone: the CRs would stay on the lines, and a
+    trailer already there would not be found. }
+  Result := StringReplace(Result, #13#10, #10, [rfReplaceAll]);
   Lines := TStringList.Create;
   try
     { LF on Windows too, as git writes a message. }
@@ -6281,6 +6316,11 @@ var
   Command, Output: string;
 begin
   Command := OperationCommand(Operation);
+  { A squash merge has no MERGE_HEAD, so merge --abort refuses it;
+    reset --merge takes back what it staged, its conflicts too, keeps
+    the changes that were there before it and removes git's message. }
+  if (FRoot <> '') and (Command = '') and SquashPending then
+    Exit(RunGit(FRoot, ['reset', '--merge'], Output));
   if (FRoot = '') or (Command = '') then
   begin
     FError := 'Git is not in the middle of anything to abort.';
@@ -6344,10 +6384,12 @@ end;
 
 function TGittanRepo.SquashPending: boolean;
 var
-  Dir: string;
+  Dir, Output, Err: string;
 begin
   Dir := GitDir;
-  Result := (Dir <> '') and FileExists(IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG');
+  { diff --quiet fails with a staged change, an unmerged file too. }
+  Result := (Dir <> '') and FileExists(IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG') and
+    (Operation = '') and not RunGitIn(FRoot, ['diff', '--cached', '--quiet'], Output, Err);
 end;
 
 function TGittanRepo.HeadMessage(out AMessage: string): boolean;
@@ -6764,6 +6806,7 @@ begin
   ASnap.Rewritten := ASnap.HasUpstream and not ASnap.Detached and (ASnap.Ahead > 0) and
     (ASnap.Behind > 0) and UpstreamInReflog(ASnap.Branch);
   ASnap.Operation := Operation;
+  ASnap.SquashPending := SquashPending;
   if ASnap.Operation = 'rebasing' then
     ASnap.RebaseBranch := RebaseBranch;
   if ASnap.Operation = 'bisecting' then

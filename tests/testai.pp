@@ -84,6 +84,9 @@ type
     procedure TestFixJob;
     procedure TestWhyInput;
     procedure TestWhyJob;
+    procedure TestSummaryInput;
+    procedure TestSummaryJob;
+    procedure TestLinkCommits;
   end;
 
 implementation
@@ -1223,6 +1226,162 @@ begin
   finally
     Job.Free;
   end;
+end;
+
+procedure TAiTest.TestSummaryInput;
+var
+  Text, Error: string;
+  Paths: TStringList;
+begin
+  WriteFile('a.pas', 'one');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add a']);
+  Git(['tag', 'start']);
+  WriteFile('a.pas', 'two');
+  Git(['commit', '-q', '-am', 'Change a'#10#10'One was wrong.']);
+  WriteFile('b.pas', 'new');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add b']);
+  Paths := TStringList.Create;
+  try
+    AssertTrue(Error, SummaryInput(FDir, '', False, Paths, Text, Error));
+    AssertEquals('nothing against HEAD', '', Text);
+
+    { The work tree against a commit: the commits since, and the diff
+      with what is not committed. }
+    WriteFile('c.pas', 'untracked');
+    Paths.Add('a.pas');
+    Paths.Add('b.pas');
+    Paths.Add('c.pas');
+    AssertTrue(Error, SummaryInput(FDir, 'start', False, Paths, Text, Error));
+    AssertTrue('the range', Pos('git log start..HEAD', Text) > 0);
+    AssertTrue('a commit, its body too', Pos('One was wrong.', Text) > 0);
+    AssertTrue('the newest', Pos('Add b', Text) > 0);
+    AssertEquals('the base itself', 0, Pos('Add a' + LineEnding, Text));
+    AssertTrue('the diff', Pos('+two', Text) > 0);
+    AssertTrue('an untracked file', Pos('+untracked', Text) > 0);
+    AssertEquals('no line numbers', 0, Pos('N1 +two', Text));
+
+    { A range is diffed as it is; three dots list the commits of two. }
+    AssertTrue(Error, SummaryInput(FDir, 'start...HEAD~1', True, Paths, Text, Error));
+    AssertTrue('the range', Pos('git log start..HEAD~1', Text) > 0);
+    AssertTrue(Pos('Change a', Text) > 0);
+    AssertEquals('past the range', 0, Pos('Add b', Text));
+    AssertEquals('the work tree', 0, Pos('untracked', Text));
+
+    { Against HEAD there are no commits, only what is not committed. }
+    AssertTrue(Error, SummaryInput(FDir, '', False, Paths, Text, Error));
+    AssertEquals(0, Pos('The commits', Text));
+    AssertTrue(Pos('+untracked', Text) > 0);
+
+    { A base with commits HEAD lacks: the diff undoes them, which the
+      agent is told. }
+    AssertEquals('none behind', 0, Pos('Note:', Text));
+    Git(['branch', 'ahead']);
+    Git(['reset', '-q', '--hard', 'start']);
+    Paths.Clear;
+    Paths.Add('a.pas');
+    AssertTrue(Error, SummaryInput(FDir, 'ahead', False, Paths, Text, Error));
+    AssertTrue('the note', Pos('Note: ahead has 2 commit(s) that HEAD does not have', Text) > 0);
+    AssertTrue(Error, SummaryInput(FDir, 'ahead..start', True, Paths, Text, Error));
+    AssertTrue('a range', Pos('Note: ahead has 2 commit(s) that start does not have', Text) > 0);
+    AssertTrue(Error, SummaryInput(FDir, 'ahead...start', True, Paths, Text, Error));
+    AssertEquals('three dots', 0, Pos('Note:', Text));
+
+    AssertFalse('a base git does not have', SummaryInput(FDir, 'nowhere', False, Paths,
+      Text, Error));
+  finally
+    Paths.Free;
+  end;
+end;
+
+procedure TAiTest.TestSummaryJob;
+var
+  AI: TGittanAI;
+  Job: TGittanSummaryJob;
+  Paths: TStringList;
+begin
+  WriteFile('a.pas', 'one');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add a']);
+  WriteFile('a.pas', 'two');
+  Git(['commit', '-q', '-am', 'Change a']);
+  TFakeAI.Reset;
+  TFakeAI.Answers := [#10'One **fix**.'#13#10#13#10'- `a.pas` says two'#10];
+  AI := TFakeAI.Create('', '', 'fake');
+  Paths := TStringList.Create;
+  try
+    Job := TGittanSummaryJob.Create(FDir, AI, 'HEAD~1', False, Paths);
+  finally
+    Paths.Free;
+    AI.Free;
+  end;
+  try
+    Job.OnDone := @JobDone;
+    FDone := 0;
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertEquals(1, FDone);
+    AssertTrue(Job.Error, Job.Ok);
+    AssertTrue(TFakeAI.Tasks[0] = atSummary);
+    AssertTrue(Pos('Change a', TFakeAI.Inputs[0]) > 0);
+    AssertEquals('One **fix**.'#10#10'- `a.pas` says two', Job.Text);
+  finally
+    Job.Free;
+  end;
+
+  { Nothing compared is said without asking the agent. }
+  TFakeAI.Reset;
+  AI := TFakeAI.Create('', '', 'fake');
+  Paths := TStringList.Create;
+  try
+    Job := TGittanSummaryJob.Create(FDir, AI, '', False, Paths);
+  finally
+    Paths.Free;
+    AI.Free;
+  end;
+  try
+    Job.OnDone := @JobDone;
+    FDone := 0;
+    Job.Start;
+    Job.WaitFor;
+    CheckSynchronize(0);
+    AssertFalse(Job.Ok);
+    AssertEquals(rsNothingToSummarize, Job.Error);
+    AssertEquals(0, Length(TFakeAI.Tasks));
+  finally
+    Job.Free;
+  end;
+end;
+
+procedure TAiTest.TestLinkCommits;
+var
+  Full, Short, Url, Text, Error: string;
+begin
+  WriteFile('a.pas', 'one');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add a']);
+  AssertTrue(RunGitIn(FDir, ['rev-parse', 'HEAD'], Full, Error));
+  Full := Trim(Full);
+  Short := Copy(Full, 1, 7);
+  Url := CommitLinkScheme + Full;
+  AssertEquals('a word', 'Fixed in [' + Short + '](' + Url + ').',
+    LinkCommits(FDir, 'Fixed in ' + Short + '.'));
+  AssertEquals('a code span', '- [`' + Short + '`](' + Url + ') adds a',
+    LinkCommits(FDir, '- `' + Short + '` adds a'));
+  AssertEquals('the full hash', '(**[' + Full + '](' + Url + ')**)',
+    LinkCommits(FDir, '(**' + Full + '**)'));
+  Text := 'see 1234567 and deadbee and `' + Short + ' more` and x' + Short + ' and ' +
+    Short + 'x and src/' + Short + ' and ' + Short + '/a and v1.' + Short;
+  AssertEquals('no commit, or not by itself', Text, LinkCommits(FDir, Text));
+  Text := '[' + Short + '](https://example.com/' + Short + ') <https://x/' + Short +
+    '> <a href="' + Short + '">';
+  AssertEquals('links and tags', Text, LinkCommits(FDir, Text));
+  Text := 'a'#10'```'#10 + Short + #10'```'#10 + Short;
+  AssertEquals('fenced code', 'a'#10'```'#10 + Short + #10'```'#10'[' + Short + '](' +
+    Url + ')', LinkCommits(FDir, Text));
+  AssertEquals('ABCDEF1 is not lowercase', 'ABCDEF1', LinkCommits(FDir, 'ABCDEF1'));
 end;
 
 initialization

@@ -3,6 +3,27 @@
 ## Unreleased
 
 ### Added
+- An AI menu, shown while the AI features are on, holds all of them in one place: Write Commit Message and Split into Commits from Commit, Review Changes and Clear Review from View, Explain Line History from Go, and Summarize Changes. The shortcuts are the same.
+- AI > Summarize Changes, or ✦ Summarize at the top right of the summary (with the AI features on): the agent says what the changes shown amount to, the commits since what you compare with and the diff, or what is not yet committed when you compare with HEAD. The answer comes in a panel over the window, drawn as Markdown, with Copy to take it along as text and each commit it names a link that shows that commit; the panel stays until you close it, and Stop there or in the menu ends the agent while it works.
+- Pushing without the pre-push hook: Repository > Push Without Hooks, and Push Without Hooks in the notice when the hook refused a push, push with --no-verify for that push alone. When the hook is Git LFS's, Gittan warns first that the LFS files would not be uploaded.
+- A Haiku package, Gittan-haiku-x86_64.hpkg: `pkgman install Gittan-haiku-x86_64.hpkg` brings Qt 6 and git with it, and Gittan is then in the Deskbar menu under Applications. The tarball is still there. Like the tarball, a release does not wait for it.
+- On Windows and Linux (GTK 3), Alt or F10 shows a menu bar at the top of the window, as in Firefox: the menus' names in a row, Left and Right moving between them, also while one is open, and Alt with a letter opens that menu at once. It goes again once a command is chosen, on Escape, or when you click elsewhere. The menu button in the title bar still drops the whole menu. View > Menu Bar keeps the menu bar shown for good, with the minimize, maximize and close buttons at its right end and the menu button gone; its empty part moves the window like the title bar.
+- A FreeBSD build (amd64, GTK 3), Gittan-freebsd-amd64.tar.gz, for FreeBSD 15.1 or later with GTK 3 and git (`pkg install gtk3 git`). Like the Haiku and Windows on Arm builds, a release does not wait for it.
+
+### Fixed
+- A settings.json or state.json that cannot be read as JSON, after an edit by hand that left a comma too many, is no longer overwritten with the defaults without a trace: its text is kept beside it as settings.json.damaged or state.json.damaged, and a banner says so at start.
+- A settings file or repository list that is a symbolic link, into a folder of dotfiles, stays a link when Gittan saves: the file it leads to is written.
+- The Batch tab deletes a gone branch only while it is still at the commit the scan found it at, so a branch that got commits while the tab stood open is kept, with the reason beside it.
+- Trusting a forge's signing keys refuses an e-mail the allowed signers file would read as a pattern or as more than one name, such as one with a `*` or a comma in it, rather than writing it there.
+- An extension with the forge permission alone can no longer reach `gh pr create`, `gh pr checkout`, `gh repo create` and `gh release create` through gh's other names for them (new, co).
+- A squash merge can be given up: Abort is in the Commit section while its changes are staged, also when it stopped on conflicts, where there was no way back in Gittan.
+- The message of a squash merge whose changes were discarded no longer comes back in the commit field for later, unrelated work.
+- Putting a change into a commit that is itself a fixup of a commit not on the branch folds it into that fixup, rather than leaving a "fixup! fixup!" commit behind and saying it went in.
+- On Windows a co-author already in the message's trailers is no longer added a second time.
+
+## 0.17 (build-142, 2026-11-08)
+
+### Added
 - Signed commits show a shield in the commit graph and a line on the commit's card: filled with a check when git vouches for the signature, red for a bad or revoked one, outlined for a key not known here or a signature git could not check, which the card explains (an SSH signature wants an allowed signers file, an OpenPGP one gpg), rather than passing such a commit off as unsigned, as git's own letter does.
 - Signing your own commits is set up in the Name and Email dialog: sign with an SSH key (ssh-keygen comes with macOS, Linux and Windows, and GitHub, GitLab and the others verify it) or a GPG key, pick the key from those found in ~/.ssh, the ssh agent or gpg, and Test signs a throwaway commit to show the chain works before anything is saved. Saving writes commit.gpgsign, tag.gpgSign, gpg.format and user.signingkey at the identity's scope, and for an SSH key sets up the allowed signers file, so your commits show as verified in Gittan too. When gpg is missing the dialog says where to get it.
 - A commit signed with a key not known here can be trusted on GitHub's word: "Trust github.com's keys" on the commit's card, or Trust Signing Keys from github.com in its menu, asks GitHub who made the commit, fetches their GPG and SSH signing keys (a merge made on the web is GitHub's own key), puts the GPG keys into your gpg and the SSH keys into the allowed signers file, and shows those commits as verified, marked trusted through github.com. gpg's own trust settings are left alone; the fingerprints you trusted are kept in settings.json.

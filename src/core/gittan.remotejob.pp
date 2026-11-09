@@ -46,7 +46,7 @@ type
     FRoot, FArg, FRemote, FPath, FBranch, FPullRef: string;
     FKind: TGittanRemoteKind;
     FMode: TGittanPullMode;
-    FOk, FDiverged, FRejected, FStale, FUnseen, FSubmodules: boolean;
+    FOk, FDiverged, FRejected, FStale, FUnseen, FSubmodules, FNoVerify: boolean;
     FError, FHeadRef: string;
     FRefs: TStringArray;
     FOnOutput: TNotifyEvent;
@@ -69,6 +69,9 @@ type
     property Mode: TGittanPullMode read FMode;
     property Arg: string read FArg;
     property Remote: string read FRemote;
+    {** Whether a push, or a deletion on a remote, skips the pre-push
+      hook (`--no-verify`); set before Start. }
+    property NoVerify: boolean read FNoVerify write FNoVerify;
     {** Whether a clone brings the submodules too; set before Start. }
     property Submodules: boolean read FSubmodules write FSubmodules;
     {** Where a submodule add puts the submodule, relative to the root;
@@ -254,6 +257,7 @@ begin
   Repo := TGittanRepo.Create;
   try
     Repo.OnOutput := @Output;
+    Repo.NoVerify := FNoVerify;
     if Repo.Open(FRoot) then
       case FKind of
         rkFetch: FOk := Repo.Fetch;

@@ -30,7 +30,12 @@
   it shows the form, and lets the bar be a pixel high: the LCL subtracts
   the bar's height from the form's, and takes a height of 0 as the menu
   height of its own) and the bar's menu button drops a copy of the menu
-  as a popup. The caption glyphs are drawn with lines.
+  as a popup; Alt shows the bar's own menu bar over it. While a menu of
+  that one is open, its GtkMenu and the submenus' tell the strip of
+  Left and Right past their ends (move-current) and of the mouse on
+  another name (motion-notify-event, in root coordinates, which are the
+  screen's on X11), so the next menu opens as in a menu bar. The caption
+  glyphs are drawn with lines.
 
   The unit uses GTK; umain keeps it behind LCLGtk3. }
 unit gittan.gtktitlebar;
@@ -55,7 +60,7 @@ type
     procedure ShowWindowMenu;
   protected
     function Maximized: boolean; override;
-    procedure DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+    procedure DrawGlyph(ACanvas: TCanvas; AGlyph: TGittanTitleGlyph; const AR: TRect;
       AColor: TColor); override;
     procedure CaptionButtonClick(APart: TGittanTitlePart); override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
@@ -64,6 +69,11 @@ type
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
       override;
     procedure MouseLeave; override;
+    procedure TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
+      const AName: TRect); override;
+    procedure WindowMove; override;
+    procedure WindowZoom; override;
+    procedure WindowMenu; override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -92,6 +102,161 @@ var
   { The bar the window's signals are connected to; nil once it is gone,
     so a late signal finds nothing. }
   LiveBar: TGittanGtkTitleBar;
+  { The strip whose menu is open, and its top GtkMenu. }
+  TrackStrip: TGittanMenuStrip;
+  TrackTop: PGtkMenuShell;
+  { The key or the motion that closed a menu for the one beside it, the
+    trigger of that one's popup, which opens from the message loop with
+    no event of its own; GTK shows no popup without one on Wayland. }
+  StepEvent: PGdkEvent;
+  { A menu closed for the one beside it: that one pops up a moment later
+    (StepDelay), from a timeout, with what it needs kept here. Popped up
+    at once, inside the closing menu's event, it came up as a child of
+    the closing one on Wayland and went with it. }
+  Stepping: boolean;
+  PendingSource: guint;
+  PendingMenu, PendingWidget: PGtkWidget;
+  PendingDx: integer;
+  PendingEvent: PGdkEvent;
+  { Where the pointer was at the last motion in the strip's menu, and
+    whether that is known: a motion with the pointer standing still (as
+    when a menu opens under it) does not take a menu reached with Left or
+    Right back to the name under the pointer. }
+  LastMotion: TPoint;
+  MotionKnown: boolean;
+
+const
+  StepDelay = 30;
+
+procedure DropPending;
+begin
+  if PendingSource <> 0 then
+    g_source_remove(PendingSource);
+  PendingSource := 0;
+  if PendingEvent <> nil then
+    gdk_event_free(PendingEvent);
+  PendingEvent := nil;
+end;
+
+{ AMenu under the name, anchored at AWidget's bottom left corner and
+  shifted right by ADx, with AEvent as its trigger. }
+procedure PopupMenuAt(AMenu, AWidget: PGtkWidget; ADx: integer; AEvent: PGdkEvent);
+begin
+  g_object_set(PGObject(AMenu), 'rect-anchor-dx', [ADx, nil]);
+  gtk_menu_popup_at_widget(PGtkMenu(AMenu), AWidget, GDK_GRAVITY_SOUTH_WEST,
+    GDK_GRAVITY_NORTH_WEST, AEvent);
+end;
+
+function PopupPending(AData: gpointer): gboolean; cdecl;
+begin
+  Result := False;
+  PendingSource := 0;
+  if (TrackStrip <> nil) and TrackStrip.Visible and TrackStrip.MenuOpen and
+    (PGtkWidget(TrackTop) = PendingMenu) then
+    PopupMenuAt(PendingMenu, PendingWidget, PendingDx, PendingEvent);
+  if PendingEvent <> nil then
+    gdk_event_free(PendingEvent);
+  PendingEvent := nil;
+end;
+
+{ The event being handled, kept as StepEvent, and the open menu closed. }
+procedure EndForStep;
+begin
+  if StepEvent <> nil then
+    gdk_event_free(StepEvent);
+  StepEvent := gtk_get_current_event;
+  Stepping := True;
+  gtk_menu_shell_deactivate(TrackTop);
+end;
+
+{ Left in the strip's menu itself, or Right on an item without a
+  submenu: the menu beside it opens once this one has closed. }
+procedure MenuMoveCurrent(AShell: PGtkMenuShell; ADir: TGtkMenuDirectionType;
+  AData: gpointer); cdecl;
+var
+  Item: PGtkWidget;
+  Step: boolean;
+begin
+  if (TrackStrip = nil) or (TrackTop = nil) then
+    Exit;
+  Step := False;
+  case ADir of
+    GTK_MENU_DIR_PARENT:
+      if AShell = TrackTop then
+        Step := TrackStrip.StepMenu(-1);
+    GTK_MENU_DIR_CHILD:
+      begin
+        Item := gtk_menu_shell_get_selected_item(AShell);
+        if (Item = nil) or (gtk_menu_item_get_submenu(PGtkMenuItem(Item)) = nil) then
+          Step := TrackStrip.StepMenu(1);
+      end;
+  end;
+  if Step then
+  begin
+    g_signal_stop_emission_by_name(PGObject(AShell), 'move-current');
+    EndForStep;
+  end;
+end;
+
+{ The LCL's own deactivate handler closes only a menu its popup showed. }
+procedure MenuDeactivate(AShell: PGtkMenuShell; AData: gpointer); cdecl;
+begin
+  if (TrackStrip <> nil) and (AShell = TrackTop) then
+    TrackStrip.MenuClosed;
+end;
+
+function MenuMotion(AWidget: PGtkWidget; AEvent: PGdkEventMotion;
+  AData: gpointer): gboolean; cdecl;
+var
+  P: TPoint;
+begin
+  Result := False;
+  if (TrackStrip = nil) or (TrackTop = nil) or (AEvent = nil) then
+    Exit;
+  P := Types.Point(Round(AEvent^.x_root), Round(AEvent^.y_root));
+  { The first motion after a menu opens only says where the pointer is. }
+  if not MotionKnown or ((P.X = LastMotion.X) and (P.Y = LastMotion.Y)) then
+  begin
+    LastMotion := P;
+    MotionKnown := True;
+    Exit;
+  end;
+  LastMotion := P;
+  if TrackStrip.HoverAt(P) then
+  begin
+    EndForStep;
+    Result := True;
+  end;
+end;
+
+{ AMenu and every submenu under it tell the strip of the keys and the
+  mouse; connected once each. }
+procedure WatchMenu(AMenu: PGtkWidget);
+var
+  Children, L: PGList;
+  Sub: PGtkWidget;
+begin
+  if AMenu = nil then
+    Exit;
+  g_signal_handlers_disconnect_matched(PGObject(AMenu),
+    [G_SIGNAL_MATCH_FUNC], 0, 0, nil, @MenuMoveCurrent, nil);
+  g_signal_handlers_disconnect_matched(PGObject(AMenu),
+    [G_SIGNAL_MATCH_FUNC], 0, 0, nil, @MenuMotion, nil);
+  g_signal_connect_data(PGObject(AMenu), 'move-current',
+    TGCallback(@MenuMoveCurrent), nil, nil, G_CONNECT_DEFAULT);
+  g_signal_connect_data(PGObject(AMenu), 'motion-notify-event',
+    TGCallback(@MenuMotion), nil, nil, G_CONNECT_DEFAULT);
+  Children := gtk_container_get_children(PGtkContainer(AMenu));
+  L := Children;
+  while L <> nil do
+  begin
+    Sub := gtk_menu_item_get_submenu(PGtkMenuItem(L^.data));
+    if Sub <> nil then
+      WatchMenu(Sub);
+    L := L^.next;
+  end;
+  g_list_free(Children);
+end;
 
 { The GTK window of the form the bar is on; nil before it has one,
   unless AForce makes the form create it. }
@@ -161,6 +326,12 @@ destructor TGittanGtkTitleBar.Destroy;
 begin
   if LiveBar = Self then
     LiveBar := nil;
+  TrackStrip := nil;
+  TrackTop := nil;
+  if StepEvent <> nil then
+    gdk_event_free(StepEvent);
+  StepEvent := nil;
+  DropPending;
   inherited Destroy;
 end;
 
@@ -218,6 +389,21 @@ begin
   P := Mouse.CursorPos;
   SetHot(tpNone, -1);
   gtk_window_begin_move_drag(Win, 1, P.X, P.Y, gtk_get_current_event_time);
+end;
+
+procedure TGittanGtkTitleBar.WindowMove;
+begin
+  BeginMove;
+end;
+
+procedure TGittanGtkTitleBar.WindowZoom;
+begin
+  ToggleMaximized;
+end;
+
+procedure TGittanGtkTitleBar.WindowMenu;
+begin
+  ShowWindowMenu;
 end;
 
 procedure TGittanGtkTitleBar.ShowWindowMenu;
@@ -286,7 +472,7 @@ end;
 
 { Lines a pixel wide, as the caption buttons of GNOME and Windows 11
   draw them: a dash, a square, two squares, a cross. }
-procedure TGittanGtkTitleBar.DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+procedure TGittanGtkTitleBar.DrawGlyph(ACanvas: TCanvas; AGlyph: TGittanTitleGlyph; const AR: TRect;
   AColor: TColor);
 var
   CX, CY, H, D: integer;
@@ -294,31 +480,83 @@ begin
   CX := (AR.Left + AR.Right) div 2;
   CY := (AR.Top + AR.Bottom) div 2;
   H := Scale96ToForm(5);
-  Canvas.Pen.Color := AColor;
-  Canvas.Pen.Width := 1;
-  Canvas.Pen.Style := psSolid;
-  Canvas.Brush.Style := bsClear;
+  ACanvas.Pen.Color := AColor;
+  ACanvas.Pen.Width := 1;
+  ACanvas.Pen.Style := psSolid;
+  ACanvas.Brush.Style := bsClear;
   case AGlyph of
     tgMinimize:
-      Canvas.Line(CX - H, CY, CX + H + 1, CY);
+      ACanvas.Line(CX - H, CY, CX + H + 1, CY);
     tgMaximize:
-      Canvas.Rectangle(CX - H, CY - H, CX + H + 1, CY + H + 1);
+      ACanvas.Rectangle(CX - H, CY - H, CX + H + 1, CY + H + 1);
     tgRestore:
       begin
         { The front square, and the back one's top and right edges
           behind it. }
         D := Scale96ToForm(2);
-        Canvas.Rectangle(CX - H, CY - H + D, CX + H - D + 1, CY + H + 1);
-        Canvas.Polyline([Types.Point(CX - H + D, CY - H + D - 1),
+        ACanvas.Rectangle(CX - H, CY - H + D, CX + H - D + 1, CY + H + 1);
+        ACanvas.Polyline([Types.Point(CX - H + D, CY - H + D - 1),
           Types.Point(CX - H + D, CY - H), Types.Point(CX + H, CY - H),
           Types.Point(CX + H, CY + H - D), Types.Point(CX + H - D + 1, CY + H - D)]);
       end;
     tgClose:
       begin
-        Canvas.Line(CX - H, CY - H, CX + H + 1, CY + H + 1);
-        Canvas.Line(CX - H, CY + H, CX + H + 1, CY - H - 1);
+        ACanvas.Line(CX - H, CY - H, CX + H + 1, CY + H + 1);
+        ACanvas.Line(CX - H, CY + H, CX + H + 1, CY - H - 1);
       end;
   end;
+end;
+
+{ The LCL's popup runs a loop of its own until the menu closes, and pops
+  it up with the current event, of which a menu opened for the one beside
+  it from the message loop has none. The menu is popped up here instead,
+  under the name as a menu bar drops it (anchored at the strip's bottom
+  left corner, shifted right to the name), with the event that stepped
+  to it when there is no current one; the LCL's deactivate handler still
+  closes it (OnClose). Its signals are connected before it shows. }
+procedure TGittanGtkTitleBar.TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
+  const AName: TRect);
+var
+  Menu: PGtkWidget;
+  Event: PGdkEvent;
+begin
+  TrackStrip := nil;
+  TrackTop := nil;
+  APopup.HandleNeeded;
+  if not APopup.HandleAllocated or not AStrip.HandleAllocated then
+  begin
+    inherited TrackMenu(AStrip, APopup, AName);
+    Exit;
+  end;
+  Menu := TGtk3Menu(APopup.Handle).Widget;
+  MotionKnown := False;
+  TrackStrip := AStrip;
+  TrackTop := PGtkMenuShell(Menu);
+  WatchMenu(Menu);
+  g_signal_handlers_disconnect_matched(PGObject(Menu),
+    [G_SIGNAL_MATCH_FUNC], 0, 0, nil, @MenuDeactivate, nil);
+  g_signal_connect_data(PGObject(Menu), 'deactivate',
+    TGCallback(@MenuDeactivate), nil, nil, G_CONNECT_DEFAULT);
+  Event := gtk_get_current_event;
+  if Event = nil then
+    Event := StepEvent
+  else if StepEvent <> nil then
+    gdk_event_free(StepEvent);
+  StepEvent := nil;
+  DropPending;
+  if Stepping then
+  begin
+    Stepping := False;
+    PendingMenu := Menu;
+    PendingWidget := TGtk3Widget(AStrip.Handle).Widget;
+    PendingDx := AName.Left;
+    PendingEvent := Event;
+    PendingSource := g_timeout_add(StepDelay, @PopupPending, nil);
+    Exit;
+  end;
+  PopupMenuAt(Menu, TGtk3Widget(AStrip.Handle).Widget, AName.Left, Event);
+  if Event <> nil then
+    gdk_event_free(Event);
 end;
 
 procedure TGittanGtkTitleBar.HideNativeMenu;

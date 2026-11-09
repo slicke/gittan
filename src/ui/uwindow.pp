@@ -375,6 +375,9 @@ begin
   {$IFDEF LCLGtk3}
   InstallTitleBar(Self, TGittanGtkTitleBar(FOwnBar));
   {$ENDIF}
+  {$IF DEFINED(LCLWin32) OR DEFINED(LCLGtk3)}
+  FOwnBar.PinnedMenu := App.Settings.MenuBar;
+  {$ENDIF}
 end;
 
 function TGittanWindow.GetFrame(AIndex: integer): TRepoFrame;
@@ -850,9 +853,9 @@ begin
   end;
 end;
 
-{ The shown frame's keys; on GTK Alt and a letter opens the menu with
-  that accelerator from the title bar, as the menu bar would have
-  before the bar hid its names. }
+{ The shown frame's keys; on GTK Alt and a letter shows the menu bar
+  with the menu of that accelerator open, as the native menu bar would
+  have before the bar hid its names. }
 procedure TGittanWindow.FormKeyDown(Sender: TObject; var Key: word; Shift: TShiftState);
 var
   Index: integer;
@@ -890,10 +893,16 @@ begin
     Key := 0;
     Exit;
   end;
-  if FForgeShown then
-    FForgeView.FormKeyDown(Sender, Key, Shift)
-  else
-    FActive.FormKeyDown(Sender, Key, Shift);
+  { The menu bar Alt showed takes the keys itself. }
+  {$IFDEF OWNBAR}
+  if not FOwnBar.MenuActive then
+  {$ENDIF}
+  begin
+    if FForgeShown then
+      FForgeView.FormKeyDown(Sender, Key, Shift)
+    else
+      FActive.FormKeyDown(Sender, Key, Shift);
+  end;
   {$IFDEF LCLGtk3}
   FAltAlone := (Key in [VK_MENU, VK_LMENU, VK_RMENU]) and (Shift * [ssCtrl, ssShift, ssMeta] = []);
   { F10 opens the menu, as GNOME's primary menu and Windows' menu bar. }
@@ -909,7 +918,8 @@ begin
 end;
 
 {$IFDEF LCLGtk3}
-{ Alt let go with no key pressed with it opens the whole menu. }
+{ Alt let go with no key pressed with it shows the menu bar, or hides
+  it again. }
 procedure TGittanWindow.FormKeyUp(Sender: TObject; var Key: word; Shift: TShiftState);
 begin
   if (Key in [VK_MENU, VK_LMENU, VK_RMENU]) and FAltAlone then

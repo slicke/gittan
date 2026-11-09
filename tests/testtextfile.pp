@@ -8,7 +8,8 @@ unit testtextfile;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.textfile;
+  Classes, SysUtils, {$IFDEF UNIX}BaseUnix, {$ENDIF}fpcunit, testregistry, testhelpers,
+  gittan.textfile;
 
 type
   TTextFileTest = class(TTestCase)
@@ -18,6 +19,7 @@ type
     procedure TestBareLine;
     procedure TestNextLine;
     procedure TestUnescapeC;
+    procedure TestWriteThroughLink;
   end;
 
 implementation
@@ -45,6 +47,40 @@ begin
     DeleteFile(Path);
   end;
 end;
+
+{ A symbolic link stays a link, relative or through another one, and
+  the file it leads to gets the text. }
+procedure TTextFileTest.TestWriteThroughLink;
+{$IFDEF UNIX}
+var
+  Dir, Target: string;
+  Link: RawByteString;
+begin
+  Dir := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-textfile-' +
+    IntToStr(GetProcessID) + '-' + IntToStr(Random(MaxInt));
+  ForceDirectories(Dir + '/real');
+  try
+    Target := Dir + '/real/settings.json';
+    AssertTrue(WriteFileReplacing(Target, 'old'));
+    AssertEquals(0, fpSymlink('real/settings.json', PChar(Dir + '/link')));
+    AssertEquals(0, fpSymlink('link', PChar(Dir + '/link2')));
+    AssertTrue(WriteFileReplacing(Dir + '/link2', 'new'));
+    AssertEquals('new', string(ReadFileBytes(Target)));
+    AssertTrue('still a link', FileGetSymLinkTarget(Dir + '/link2', Link));
+    AssertEquals('link', string(Link));
+    AssertTrue(FileGetSymLinkTarget(Dir + '/link', Link));
+    { One that leads nowhere yet gets its file. }
+    AssertEquals(0, fpSymlink('real/later.json', PChar(Dir + '/dangling')));
+    AssertTrue(WriteFileReplacing(Dir + '/dangling', 'made'));
+    AssertEquals('made', string(ReadFileBytes(Dir + '/real/later.json')));
+  finally
+    RemoveTree(Dir);
+  end;
+end;
+{$ELSE}
+begin
+end;
+{$ENDIF}
 
 procedure TTextFileTest.TestSplitLf;
 var

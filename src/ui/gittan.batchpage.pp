@@ -805,6 +805,7 @@ begin
         SetLength(Result, n + 1);
         Result[n].Path := FGone[r].Path;
         Result[n].Branch := FGone[r].Branches[b].Name;
+        Result[n].Tip := FGone[r].Branches[b].Tip;
         Inc(n);
       end;
 end;

@@ -19,9 +19,17 @@
   OnClick runs first as a menu bar runs it when the menu opens, so the
   checks and the enabled states are those of the moment; each item of
   the popup clicks the item it copies, so the menu's own handlers run
-  with their own item as Sender. Alt and a letter drops the menu with
-  that accelerator the same way, from the menu button (OpenMenuByKey).
-  The menu bar itself stays on the window, hidden, for its shortcuts.
+  with their own item as Sender. The menu bar itself stays on the
+  window, hidden, for its shortcuts.
+
+  Alt alone or F10 shows TGittanMenuStrip above the bar instead (OpenMenu),
+  a menu bar of its own drawn in the bar's colors: the menus' names, each
+  dropping its menu copied the same way, Left and Right moving between
+  them, also while one is open (a descendant's TrackMenu sees the keys and
+  the mouse in the open menu). Alt and a letter shows it with that menu
+  open (OpenMenuByKey). It goes again once a menu closes, the focus
+  leaves it or the window is deactivated, and gives the focus back to the
+  control that had it.
 
   The tabs: the shown one is a filled, rounded box, a hovered one a
   fainter box, the others their names with a faint line between two of
@@ -69,6 +77,102 @@ type
     maximize while the window is maximized). }
   TGittanTitleGlyph = (tgMinimize, tgMaximize, tgRestore, tgClose);
 
+  TGittanOwnTitleBar = class;
+
+  { TGittanMenuStrip }
+
+  {** The menu bar Alt shows above the title bar: the names of the
+    window's menus in a row, each dropping its menu as a popup, gone
+    again once a command is chosen or it loses the focus. }
+  TGittanMenuStrip = class(TCustomControl)
+  private
+    FBar: TGittanOwnTitleBar;
+    { The visible top items of the menu bar, and where their names are. }
+    FItems: array of TMenuItem;
+    FRects: array of TRect;
+    { The name under the mouse or chosen with the keys, the one whose
+      menu is open, and the one to open once the open one has closed
+      (Left, Right, or the mouse on another name). }
+    FHot, FOpen, FStepTo: integer;
+    { The menu to open next is on its way (OpenAsync): the strip stays. }
+    FPending: boolean;
+    { Kept shown (View > Menu Bar): it then gives the focus back rather
+      than going, and has the caption buttons. }
+    FPinned: boolean;
+    { The caption buttons under the mouse and pressed, where the strip
+      sees the mouse on them itself (GTK); a press on the empty part
+      that a drag past a few pixels turns into a move of the window. }
+    FButtonHot, FButtonPressed: TGittanTitlePart;
+    FDragArmed: boolean;
+    FPressPoint: TPoint;
+    { Shown from the keyboard: the names underline their accelerators. }
+    FKeys: boolean;
+    FPopup: TPopupMenu;
+    { The control that had the focus before, which gets it back. }
+    FPrevFocus: TWinControl;
+    procedure Collect;
+    function IndexAt(X, Y: integer): integer;
+    function IndexOfKey(AKey: char): integer;
+    procedure SetHot(AIndex: integer);
+    procedure SetPrevFocus(AControl: TWinControl);
+    procedure SetPinned(AValue: boolean);
+    procedure ShowStrip;
+    procedure PopupItemClick(Sender: TObject);
+    procedure PopupClose(Sender: TObject);
+    procedure OpenAsync(Data: PtrInt);
+  protected
+    procedure Notification(AComponent: TComponent; Operation: TOperation); override;
+    procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+      const AXProportion, AYProportion: double); override;
+    procedure Paint; override;
+    procedure KeyDown(var Key: word; Shift: TShiftState); override;
+    procedure MouseMove(Shift: TShiftState; X, Y: integer); override;
+    procedure MouseLeave; override;
+    procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+      override;
+    procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
+      override;
+    procedure DoExit; override;
+    procedure ExitAsync(Data: PtrInt);
+  public
+    constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
+    {** Shows the strip over the title bar with the focus, the name at
+      AIndex marked; AKeys underlines the accelerators. }
+    procedure Activate(AIndex: integer; AKeys: boolean);
+    {** Drops the menu of the name at AIndex under it. }
+    procedure OpenItem(AIndex: integer);
+    {** Hides the strip; ARestore gives the focus back to the control
+      that had it. }
+    procedure Dismiss(ARestore: boolean);
+    {** While a menu is open: opens the next menu (ADelta 1) or the one
+      before (-1) once it has closed. True when the caller is to close
+      the open one. }
+    function StepMenu(ADelta: integer): boolean;
+    {** While a menu is open: the mouse at AScreen over another name opens
+      that one once the open one has closed. True when the caller is to
+      close the open one. }
+    function HoverAt(const AScreen: TPoint): boolean;
+    {** The open menu has closed: the next opens when one was asked for
+      (StepMenu, HoverAt), else the strip goes. The popup's OnClose calls
+      it; a descendant that pops the menu up itself calls it from the
+      menu's own signal. Once per menu: a second call does nothing. }
+    procedure MenuClosed;
+    {** Whether a menu of the strip is open, or the next on its way. }
+    function MenuOpen: boolean;
+    {** The index of the name at X, Y of the strip, -1 for none. }
+    function NameAt(X, Y: integer): integer;
+    {** The caption button at X, Y of the strip, which has them while it
+      is kept (Pinned); tpNone for none. }
+    function CaptionPart(X, Y: integer): TGittanTitlePart;
+    {** Where the caption button APart is, empty while the strip has
+      none. }
+    function ButtonRect(APart: TGittanTitlePart): TRect;
+    {** Kept shown over the title bar (View > Menu Bar), rather than
+      shown by Alt and gone once done with. }
+    property Pinned: boolean read FPinned write SetPinned;
+  end;
+
   { TGittanOwnTitleBar }
 
   TGittanOwnTitleBar = class(TCustomControl)
@@ -99,6 +203,8 @@ type
     FHotIndex, FPressedIndex: integer;
     FMenuOpen: boolean;
     FPopup: TPopupMenu;
+    { The menu bar Alt shows, made the first time. }
+    FStrip: TGittanMenuStrip;
     FActive: boolean;
     FSide, FMain, FText, FDim, FTabFill, FTabBorder, FButtonHot, FMark: TColor;
     FBandPos, FBandTotal: integer;
@@ -116,7 +222,9 @@ type
     function TabsShown: integer;
     function TabRect(AIndex: integer): TRect;
     function CrossRect(const ATab: TRect): TRect;
-    procedure CopyItems(ASource, ATarget: TMenuItem);
+    function Strip: TGittanMenuStrip;
+    function GetPinnedMenu: boolean;
+    procedure SetPinnedMenu(AValue: boolean);
     procedure PopupItemClick(Sender: TObject);
     procedure PopupClose(Sender: TObject);
     procedure DropMenu(AOnly: TMenuItem);
@@ -140,13 +248,30 @@ type
     {** Whether the window is maximized: the maximize button then shows
       the restore glyph. }
     function Maximized: boolean; virtual; abstract;
-    {** Draws AGlyph centered in AR in AColor, and leaves the canvas's
-      font as it found it. }
-    procedure DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+    {** Draws AGlyph centered in AR on ACanvas (the bar's, or the menu
+      strip's) in AColor, and leaves the canvas's font as the bar's. }
+    procedure DrawGlyph(ACanvas: TCanvas; AGlyph: TGittanTitleGlyph; const AR: TRect;
       AColor: TColor); virtual; abstract;
     {** A click released on a caption button the bar itself saw the mouse
       on (on Windows the form sees it instead, and this is not called). }
     procedure CaptionButtonClick(APart: TGittanTitlePart); virtual;
+    {** Drops APopup, a menu of AStrip, under AName, the name's place in
+      the strip; a descendant lets Left, Right and the mouse on the
+      strip's names move to another menu while it is open (StepMenu,
+      HoverAt). It may return before the menu has closed (GTK) or after
+      (Windows). }
+    procedure TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
+      const AName: TRect); virtual;
+    {** What a press on the menu strip's empty part does where the strip
+      sees it itself (GTK): moves the window (a drag), maximizes or
+      restores it (a double click), drops the window menu (a right
+      click). Nothing here: on Windows the form answers it as caption. }
+    procedure WindowMove; virtual;
+    procedure WindowZoom; virtual;
+    procedure WindowMenu; virtual;
+    {** The menu strip has just been made, with its handle (Windows lets
+      the form answer the mouse on its empty part and its buttons). }
+    procedure StripMade(AStrip: TGittanMenuStrip); virtual;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -156,11 +281,23 @@ type
     {** Places the menu button, the tabs, the plus and the caption
       buttons; again after the tabs changed. }
     procedure Layout;
-    {** Drops the whole menu from the menu button. }
+    {** Shows the menu bar over the bar with its first name marked (Alt
+      alone, F10), or hides it again while it is shown. }
     procedure OpenMenu;
-    {** Drops the menu whose name has the accelerator AKey; False when
-      none has it. }
+    {** Shows the menu bar and drops the menu whose name has the
+      accelerator AKey; False when none has it. }
     function OpenMenuByKey(AKey: char): boolean;
+    {** Whether the menu bar has the keys (Alt showed it or gave it the
+      focus, or a menu of it is open): the window leaves them to it. }
+    function MenuActive: boolean;
+    {** The menu bar kept shown over the bar (View > Menu Bar); Alt then
+      gives it the focus. }
+    property PinnedMenu: boolean read GetPinnedMenu write SetPinnedMenu;
+    {** The menu bar Alt shows, nil before it was first needed. }
+    property MenuStrip: TGittanMenuStrip read FStrip;
+    {** Repaints the menu strip too, which draws the caption buttons while
+      it is kept, with the bar's state. }
+    procedure Invalidate; override;
     {** The tabs, left to right: ACaptions are their names, AHints their
       tooltips (the paths), AMarks those with news (a dot before the
       name), AActive the one shown; AFixed when they are a view's own,
@@ -217,7 +354,7 @@ type
   TGittanTabBar = class(TGittanOwnTitleBar)
   protected
     function Maximized: boolean; override;
-    procedure DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+    procedure DrawGlyph(ACanvas: TCanvas; AGlyph: TGittanTitleGlyph; const AR: TRect;
       AColor: TColor); override;
   public
     constructor Create(AOwner: TComponent); override;
@@ -230,7 +367,7 @@ const
 implementation
 
 uses
-  Math, LCLIntf, LCLType, gittan.statusbar, gittan.theme, gittan.puzzle;
+  Math, LCLIntf, LCLType, LazUTF8, gittan.statusbar, gittan.theme, gittan.puzzle;
 
 const
   Pad = 8;
@@ -261,6 +398,12 @@ const
     11, GNOME) hides its first pixels. }
   MinBandFill = 16;
   CloseHot = $1C2BC4; { RGB(196, 43, 28) }
+  { The menu bar: its height and the room either side of a name. }
+  StripHeight = 28;
+  StripItemPad = 9;
+  { How far a press on the strip's empty part moves before the window
+    follows it (GTK), as GTK's drag threshold. }
+  StripDragThreshold = 8;
 
 { TGittanOwnTitleBar }
 
@@ -287,6 +430,10 @@ begin
   if FActive = AValue then
     Exit;
   FActive := AValue;
+  { The menu bar goes with the window's activation, but not for its own
+    menu, which may take it on some window systems. }
+  if not FActive and (FStrip <> nil) and not FStrip.MenuOpen then
+    FStrip.Dismiss(False);
   Invalidate;
 end;
 
@@ -469,8 +616,9 @@ begin
   H := Height;
   W := Scale96ToForm(ButtonWidth);
   { A row of tabs only: the caption buttons and the menu button take no
-    room, their rects empty at the edges. }
-  if FTabsOnly then
+    room, their rects empty at the edges; the same for the caption
+    buttons while the menu strip is kept, which has them. }
+  if FTabsOnly or PinnedMenu then
     W := 0;
   FCloseRect := Types.Rect(Width - W, 0, Width, H);
   FMaxRect := Types.Rect(FCloseRect.Left - W, 0, FCloseRect.Left, H);
@@ -482,7 +630,8 @@ begin
   else
     FForgeRect := Types.Rect(0, 0, 0, 0);
   S := Scale96ToForm(PlusSize);
-  if FTabsOnly then
+  { No menu button beside a menu bar: Qt's, or the strip kept shown. }
+  if FTabsOnly or PinnedMenu then
     FMenuRect := Types.Rect(Scale96ToForm(Pad - Gap), (H - S) div 2,
       Scale96ToForm(Pad - Gap), (H + S) div 2)
   else
@@ -611,7 +760,7 @@ begin
   if Button <> mbLeft then
     Exit;
   case Part of
-    tpMenu: OpenMenu;
+    tpMenu: DropMenu(nil);
     tpTab:
       if Assigned(FOnTabSelect) then
         FOnTabSelect(Self, Index);
@@ -717,10 +866,12 @@ procedure TGittanOwnTitleBar.CaptionButtonClick(APart: TGittanTitlePart);
 begin
 end;
 
-{ ASource's items as items of ATarget that click them: captions, keys,
-  checks and enabled states as they are now, and submenus copied in
-  turn. A separator stays one. }
-procedure TGittanOwnTitleBar.CopyItems(ASource, ATarget: TMenuItem);
+{ ASource's items as items of ATarget, owned by AOwner, that run AClick:
+  captions, keys, checks and enabled states as they are now, and
+  submenus copied in turn. A separator stays one. Each item's Tag is
+  the item it copies. }
+procedure CopyMenuItems(ASource, ATarget: TMenuItem; AOwner: TComponent;
+  AClick: TNotifyEvent);
 var
   i: integer;
   Src, Item: TMenuItem;
@@ -730,7 +881,7 @@ begin
     Src := ASource.Items[i];
     if not Src.Visible then
       Continue;
-    Item := TMenuItem.Create(FPopup);
+    Item := TMenuItem.Create(AOwner);
     Item.Caption := Src.Caption;
     if not Src.IsLine then
     begin
@@ -741,9 +892,9 @@ begin
       Item.GroupIndex := Src.GroupIndex;
       Item.Tag := PtrInt(Src);
       if Src.Count > 0 then
-        CopyItems(Src, Item)
+        CopyMenuItems(Src, Item, AOwner, AClick)
       else
-        Item.OnClick := @PopupItemClick;
+        Item.OnClick := AClick;
     end;
     ATarget.Add(Item);
   end;
@@ -780,7 +931,7 @@ begin
   begin
     if Assigned(AOnly.OnClick) then
       AOnly.Click;
-    CopyItems(AOnly, FPopup.Items);
+    CopyMenuItems(AOnly, FPopup.Items, FPopup, @PopupItemClick);
   end
   else
     for i := 0 to Menu.Items.Count - 1 do
@@ -791,7 +942,7 @@ begin
         Menu.Items[i].Click;
       Item := TMenuItem.Create(FPopup);
       Item.Caption := Menu.Items[i].Caption;
-      CopyItems(Menu.Items[i], Item);
+      CopyMenuItems(Menu.Items[i], Item, FPopup, @PopupItemClick);
       FPopup.Items.Add(Item);
     end;
   FMenuOpen := True;
@@ -801,33 +952,102 @@ begin
   FPopup.PopUp(P.X, P.Y);
 end;
 
+function TGittanOwnTitleBar.Strip: TGittanMenuStrip;
+begin
+  if FStrip = nil then
+  begin
+    FStrip := TGittanMenuStrip.Create(Self);
+    FStrip.Visible := False;
+    FStrip.Align := alTop;
+    FStrip.Parent := Parent;
+    StripMade(FStrip);
+  end;
+  Result := FStrip;
+end;
+
+procedure TGittanOwnTitleBar.TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
+  const AName: TRect);
+var
+  P: TPoint;
+begin
+  P := AStrip.ClientToScreen(Types.Point(AName.Left, AStrip.Height));
+  APopup.PopUp(P.X, P.Y);
+end;
+
+function TGittanOwnTitleBar.MenuActive: boolean;
+begin
+  Result := (FStrip <> nil) and FStrip.Visible and (FStrip.Focused or FStrip.MenuOpen);
+end;
+
+procedure TGittanOwnTitleBar.Invalidate;
+begin
+  inherited Invalidate;
+  if (FStrip <> nil) and FStrip.Visible then
+    FStrip.Invalidate;
+end;
+
+procedure TGittanOwnTitleBar.WindowMove;
+begin
+end;
+
+procedure TGittanOwnTitleBar.StripMade(AStrip: TGittanMenuStrip);
+begin
+end;
+
+procedure TGittanOwnTitleBar.WindowZoom;
+begin
+end;
+
+procedure TGittanOwnTitleBar.WindowMenu;
+begin
+end;
+
+function TGittanOwnTitleBar.GetPinnedMenu: boolean;
+begin
+  Result := (FStrip <> nil) and FStrip.Pinned;
+end;
+
+procedure TGittanOwnTitleBar.SetPinnedMenu(AValue: boolean);
+begin
+  if FTabsOnly or (Parent = nil) or (not AValue and (FStrip = nil)) then
+    Exit;
+  Strip.Pinned := AValue;
+  { The menu button goes while the strip is kept, the tabs moving left
+    into its room. }
+  if FMenuOpen then
+    FPopup.Close;
+  SetHot(tpNone, -1);
+  Layout;
+  Invalidate;
+end;
+
 procedure TGittanOwnTitleBar.OpenMenu;
 begin
-  DropMenu(nil);
+  if FTabsOnly or (Parent = nil) then
+    Exit;
+  if MenuActive then
+    FStrip.Dismiss(True)
+  else
+    Strip.Activate(0, True);
 end;
 
 function TGittanOwnTitleBar.OpenMenuByKey(AKey: char): boolean;
 var
-  Menu: TMainMenu;
-  i, p: integer;
-  S: string;
+  Index: integer;
 begin
   Result := False;
-  Menu := MenuOf(GetParentForm(Self));
-  if Menu = nil then
+  if FTabsOnly or (Parent = nil) then
     Exit;
-  for i := 0 to Menu.Items.Count - 1 do
-  begin
-    if not Menu.Items[i].Visible then
-      Continue;
-    S := Menu.Items[i].Caption;
-    p := System.Pos('&', S);
-    if (p > 0) and (p < Length(S)) and (UpCase(S[p + 1]) = UpCase(AKey)) then
-    begin
-      DropMenu(Menu.Items[i]);
-      Exit(True);
-    end;
-  end;
+  { A strip not shown yet has no handle, and Collect measures the names
+    on its canvas: without one it gathers nothing and the key is lost. }
+  Strip.HandleNeeded;
+  FStrip.Collect;
+  Index := FStrip.IndexOfKey(AKey);
+  if Index < 0 then
+    Exit;
+  FStrip.Activate(Index, True);
+  FStrip.OpenItem(Index);
+  Result := True;
 end;
 
 procedure TGittanOwnTitleBar.Paint;
@@ -858,7 +1078,7 @@ var
       Canvas.Brush.Color := Back;
       Canvas.FillRect(AR);
     end;
-    DrawGlyph(AGlyph, AR, Fore);
+    DrawGlyph(Canvas, AGlyph, AR, Fore);
   end;
 
   procedure Line(X1, Y1, X2, Y2: integer; AColor: TColor);
@@ -920,7 +1140,7 @@ begin
   TextY := (Height - Canvas.TextHeight('Xg')) div 2 + 1;
 
   { The menu button: three lines. }
-  if not FTabsOnly then
+  if not FTabsOnly and not PinnedMenu then
   begin
     if FMenuOpen or (FHotPart = tpMenu) then
       HotBox(FMenuRect, FButtonHot);
@@ -1122,7 +1342,7 @@ begin
     end;
   end;
 
-  if not FTabsOnly then
+  if not FTabsOnly and not PinnedMenu then
   begin
     DrawButton(tpMinimize, FMinRect, tgMinimize);
     if Maximized then
@@ -1155,6 +1375,598 @@ begin
     Height := Scale96ToScreen(TitleBarHeight);
 end;
 
+{ TGittanMenuStrip }
+
+{ S without its accelerator marks (&& stays one &), with AKey the
+  position in the result of the letter after the first single &, 0 for
+  none. }
+function MenuText(const S: string; out AKey: integer): string;
+var
+  i: integer;
+begin
+  Result := '';
+  AKey := 0;
+  i := 1;
+  while i <= Length(S) do
+  begin
+    if (S[i] = '&') and (i < Length(S)) then
+    begin
+      Inc(i);
+      if (S[i] <> '&') and (AKey = 0) then
+        AKey := Length(Result) + 1;
+    end;
+    Result := Result + S[i];
+    Inc(i);
+  end;
+end;
+
+constructor TGittanMenuStrip.Create(AOwner: TComponent);
+begin
+  inherited Create(AOwner);
+  FBar := AOwner as TGittanOwnTitleBar;
+  ControlStyle := ControlStyle + [csOpaque];
+  TabStop := False;
+  FHot := -1;
+  FOpen := -1;
+  FStepTo := -1;
+  FButtonHot := tpNone;
+  FButtonPressed := tpNone;
+  FPopup := TPopupMenu.Create(Self);
+  FPopup.OnClose := @PopupClose;
+end;
+
+destructor TGittanMenuStrip.Destroy;
+begin
+  Application.RemoveAsyncCalls(Self);
+  SetPrevFocus(nil);
+  inherited Destroy;
+end;
+
+procedure TGittanMenuStrip.Notification(AComponent: TComponent; Operation: TOperation);
+begin
+  inherited Notification(AComponent, Operation);
+  if (Operation = opRemove) and (AComponent = FPrevFocus) then
+    FPrevFocus := nil;
+end;
+
+{ Kept from the start, the strip is made in FormCreate, which scales its
+  height once more afterwards; the height is set again, as the bar's. }
+procedure TGittanMenuStrip.DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+  const AXProportion, AYProportion: double);
+begin
+  inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
+  if AMode = lapAutoAdjustForDPI then
+    Height := Scale96ToScreen(StripHeight);
+end;
+
+procedure TGittanMenuStrip.SetPrevFocus(AControl: TWinControl);
+begin
+  if FPrevFocus <> nil then
+    FPrevFocus.RemoveFreeNotification(Self);
+  if AControl = Self then
+    AControl := nil;
+  FPrevFocus := AControl;
+  if FPrevFocus <> nil then
+    FPrevFocus.FreeNotification(Self);
+end;
+
+{ The menu bar's visible top items, and their names' places. }
+procedure TGittanMenuStrip.Collect;
+var
+  Form: TCustomForm;
+  i, X, W, K: integer;
+begin
+  SetLength(FItems, 0);
+  SetLength(FRects, 0);
+  Form := GetParentForm(Self);
+  if (Form = nil) or (Form.Menu = nil) or not HandleAllocated then
+    Exit;
+  Canvas.Font := FBar.Font;
+  X := Scale96ToForm(Pad);
+  for i := 0 to Form.Menu.Items.Count - 1 do
+  begin
+    if not Form.Menu.Items[i].Visible then
+      Continue;
+    W := Canvas.TextWidth(MenuText(Form.Menu.Items[i].Caption, K)) +
+      2 * Scale96ToForm(StripItemPad);
+    SetLength(FItems, Length(FItems) + 1);
+    SetLength(FRects, Length(FRects) + 1);
+    FItems[High(FItems)] := Form.Menu.Items[i];
+    FRects[High(FRects)] := Types.Rect(X, Scale96ToForm(2), X + W,
+      Height - Scale96ToForm(2));
+    Inc(X, W);
+  end;
+  if FHot > High(FItems) then
+    FHot := -1;
+end;
+
+function TGittanMenuStrip.IndexAt(X, Y: integer): integer;
+var
+  i: integer;
+begin
+  Result := -1;
+  if (Y < 0) or (Y >= Height) then
+    Exit;
+  for i := 0 to High(FRects) do
+    if (X >= FRects[i].Left) and (X < FRects[i].Right) then
+      Exit(i);
+end;
+
+function TGittanMenuStrip.NameAt(X, Y: integer): integer;
+begin
+  if CaptionPart(X, Y) <> tpNone then
+    Result := -1
+  else
+    Result := IndexAt(X, Y);
+end;
+
+function TGittanMenuStrip.ButtonRect(APart: TGittanTitlePart): TRect;
+var
+  W, i: integer;
+begin
+  Result := Types.Rect(0, 0, 0, 0);
+  if not FPinned then
+    Exit;
+  W := Scale96ToForm(ButtonWidth);
+  case APart of
+    tpClose: i := 1;
+    tpMaximize: i := 2;
+    tpMinimize: i := 3;
+  else
+    Exit;
+  end;
+  Result := Types.Rect(Width - i * W, 0, Width - (i - 1) * W, Height);
+end;
+
+function TGittanMenuStrip.CaptionPart(X, Y: integer): TGittanTitlePart;
+var
+  Part: TGittanTitlePart;
+begin
+  for Part in [tpMinimize, tpMaximize, tpClose] do
+    if ButtonRect(Part).Contains(Types.Point(X, Y)) then
+      Exit(Part);
+  Result := tpNone;
+end;
+
+function TGittanMenuStrip.IndexOfKey(AKey: char): integer;
+var
+  i, K: integer;
+  S: string;
+begin
+  Result := -1;
+  for i := 0 to High(FItems) do
+  begin
+    S := MenuText(FItems[i].Caption, K);
+    if (K > 0) and (UpCase(S[K]) = UpCase(AKey)) then
+      Exit(i);
+  end;
+end;
+
+procedure TGittanMenuStrip.SetHot(AIndex: integer);
+begin
+  if FHot = AIndex then
+    Exit;
+  FHot := AIndex;
+  Invalidate;
+end;
+
+{ Over the title bar, which moves down by the strip's height while it is
+  shown; the focus is the strip's, the control that had it noted. }
+procedure TGittanMenuStrip.ShowStrip;
+begin
+  if Visible or (Parent = nil) then
+    Exit;
+  Height := Scale96ToForm(StripHeight);
+  Parent.DisableAlign;
+  try
+    Visible := True;
+    Top := 0;
+    FBar.Top := Height;
+  finally
+    Parent.EnableAlign;
+  end;
+end;
+
+procedure TGittanMenuStrip.SetPinned(AValue: boolean);
+begin
+  if FPinned = AValue then
+    Exit;
+  FPinned := AValue;
+  if FPinned then
+    ShowStrip
+  else if Visible and not Focused and not MenuOpen then
+    Visible := False;
+end;
+
+procedure TGittanMenuStrip.Activate(AIndex: integer; AKeys: boolean);
+begin
+  if Parent = nil then
+    Exit;
+  if not Focused then
+    SetPrevFocus(Screen.ActiveControl);
+  ShowStrip;
+  Collect;
+  if Length(FItems) = 0 then
+  begin
+    Dismiss(True);
+    Exit;
+  end;
+  FKeys := AKeys;
+  FHot := Max(0, Min(AIndex, High(FItems)));
+  Invalidate;
+  if CanFocus then
+    SetFocus;
+end;
+
+procedure TGittanMenuStrip.Dismiss(ARestore: boolean);
+begin
+  Application.RemoveAsyncCalls(Self);
+  FHot := -1;
+  FOpen := -1;
+  FStepTo := -1;
+  FPending := False;
+  if not Visible then
+    Exit;
+  { The focus goes back before the strip hides, which would hand it on
+    to a control of its own choosing, and before a chosen command runs,
+    which acts on the focused control (Edit > Copy). }
+  if ARestore and (FPrevFocus <> nil) and FPrevFocus.CanFocus then
+    FPrevFocus.SetFocus;
+  SetPrevFocus(nil);
+  if FPinned then
+  begin
+    FKeys := False;
+    Invalidate;
+  end
+  else
+    Visible := False;
+end;
+
+{ The menu under its name, its top item's OnClick run first, as a menu
+  bar runs it when the menu opens. }
+procedure TGittanMenuStrip.OpenItem(AIndex: integer);
+var
+  Src: TMenuItem;
+begin
+  if (FOpen >= 0) or (AIndex < 0) or (AIndex > High(FItems)) then
+    Exit;
+  Src := FItems[AIndex];
+  if not Src.Enabled then
+    Exit;
+  if Assigned(Src.OnClick) then
+    Src.Click;
+  FPopup.Items.Clear;
+  CopyMenuItems(Src, FPopup.Items, FPopup, @PopupItemClick);
+  if FPopup.Items.Count = 0 then
+    Exit;
+  FOpen := AIndex;
+  FHot := AIndex;
+  FStepTo := -1;
+  Invalidate;
+  Update;
+  FBar.TrackMenu(Self, FPopup, FRects[AIndex]);
+end;
+
+procedure TGittanMenuStrip.OpenAsync(Data: PtrInt);
+begin
+  FPending := False;
+  if Visible then
+    OpenItem(Data);
+end;
+
+procedure TGittanMenuStrip.PopupItemClick(Sender: TObject);
+var
+  Item: TMenuItem;
+begin
+  Item := TMenuItem(TMenuItem(Sender).Tag);
+  Dismiss(True);
+  Item.Click;
+end;
+
+{ Closed for another menu (Left, Right, the mouse on another name): that
+  one opens; else (Escape, a click elsewhere, a command chosen) the
+  strip goes. }
+procedure TGittanMenuStrip.PopupClose(Sender: TObject);
+begin
+  MenuClosed;
+end;
+
+procedure TGittanMenuStrip.MenuClosed;
+var
+  Index: integer;
+begin
+  if FOpen < 0 then
+    Exit;
+  FOpen := -1;
+  if FStepTo >= 0 then
+  begin
+    Index := FStepTo;
+    FStepTo := -1;
+    FHot := Index;
+    Invalidate;
+    FPending := True;
+    Application.QueueAsyncCall(@OpenAsync, Index);
+  end
+  else
+    Dismiss(True);
+end;
+
+function TGittanMenuStrip.MenuOpen: boolean;
+begin
+  Result := (FOpen >= 0) or FPending;
+end;
+
+function TGittanMenuStrip.StepMenu(ADelta: integer): boolean;
+var
+  N: integer;
+begin
+  N := Length(FItems);
+  Result := (FOpen >= 0) and (N > 1);
+  if Result then
+  begin
+    FStepTo := (FOpen + ADelta + N) mod N;
+    FKeys := True;
+  end;
+end;
+
+function TGittanMenuStrip.HoverAt(const AScreen: TPoint): boolean;
+var
+  P: TPoint;
+  Index: integer;
+begin
+  Result := False;
+  if (FOpen < 0) or not HandleAllocated then
+    Exit;
+  P := ScreenToClient(AScreen);
+  Index := IndexAt(P.X, P.Y);
+  if (Index < 0) or (Index = FOpen) or not FItems[Index].Enabled then
+    Exit;
+  FStepTo := Index;
+  Result := True;
+end;
+
+procedure TGittanMenuStrip.KeyDown(var Key: word; Shift: TShiftState);
+var
+  N, Index: integer;
+begin
+  inherited KeyDown(Key, Shift);
+  N := Length(FItems);
+  if (Key = 0) or (N = 0) then
+    Exit;
+  case Key of
+    VK_LEFT: SetHot((Max(FHot, 0) - 1 + N) mod N);
+    VK_RIGHT: SetHot((FHot + 1) mod N);
+    VK_HOME: SetHot(0);
+    VK_END: SetHot(N - 1);
+    VK_DOWN, VK_UP, VK_RETURN, VK_SPACE: OpenItem(Max(FHot, 0));
+    VK_ESCAPE: Dismiss(True);
+    VK_A..VK_Z, VK_0..VK_9:
+      begin
+        if Shift * [ssCtrl, ssMeta, ssShift] <> [] then
+          Exit;
+        Index := IndexOfKey(Chr(Key));
+        if Index < 0 then
+          Exit;
+        FKeys := True;
+        SetHot(Index);
+        OpenItem(Index);
+      end;
+    else
+      Exit;
+  end;
+  Key := 0;
+end;
+
+procedure TGittanMenuStrip.MouseMove(Shift: TShiftState; X, Y: integer);
+var
+  Index: integer;
+begin
+  inherited MouseMove(Shift, X, Y);
+  Index := NameAt(X, Y);
+  if (FOpen < 0) and (Index >= 0) then
+    SetHot(Index);
+  if CaptionPart(X, Y) <> FButtonHot then
+  begin
+    FButtonHot := CaptionPart(X, Y);
+    Invalidate;
+  end;
+  if FDragArmed and (ssLeft in Shift) and
+    ((Abs(X - FPressPoint.X) >= Scale96ToForm(StripDragThreshold)) or
+    (Abs(Y - FPressPoint.Y) >= Scale96ToForm(StripDragThreshold))) then
+  begin
+    FDragArmed := False;
+    FBar.WindowMove;
+  end;
+  { A click on a name of the kept strip may take the focus; the control
+    that has it now gets it back once the menu is done with. }
+  if not Focused and (FOpen < 0) then
+    SetPrevFocus(Screen.ActiveControl);
+end;
+
+{ A press is forgotten with the mouse gone: without capture (GTK) the
+  release outside is never seen. }
+procedure TGittanMenuStrip.MouseLeave;
+begin
+  inherited MouseLeave;
+  FDragArmed := False;
+  if (FButtonHot <> tpNone) or (FButtonPressed <> tpNone) then
+  begin
+    FButtonHot := tpNone;
+    FButtonPressed := tpNone;
+    Invalidate;
+  end;
+  if not Focused and (FOpen < 0) then
+    SetHot(-1);
+end;
+
+procedure TGittanMenuStrip.MouseDown(Button: TMouseButton; Shift: TShiftState;
+  X, Y: integer);
+var
+  Index: integer;
+begin
+  inherited MouseDown(Button, Shift, X, Y);
+  Index := NameAt(X, Y);
+  if Index >= 0 then
+  begin
+    if Button = mbLeft then
+    begin
+      SetHot(Index);
+      OpenItem(Index);
+    end;
+    Exit;
+  end;
+  { The caption buttons act on release; the empty part is the caption
+    (on Windows the form answers it, and this is not called). }
+  if CaptionPart(X, Y) <> tpNone then
+  begin
+    if Button = mbLeft then
+    begin
+      FButtonPressed := CaptionPart(X, Y);
+      Invalidate;
+    end;
+    Exit;
+  end;
+  case Button of
+    mbLeft:
+      if ssDouble in Shift then
+      begin
+        FDragArmed := False;
+        FBar.WindowZoom;
+      end
+      else
+      begin
+        FDragArmed := True;
+        FPressPoint := Types.Point(X, Y);
+      end;
+    mbRight: FBar.WindowMenu;
+  end;
+end;
+
+procedure TGittanMenuStrip.MouseUp(Button: TMouseButton; Shift: TShiftState;
+  X, Y: integer);
+var
+  Pressed: TGittanTitlePart;
+begin
+  inherited MouseUp(Button, Shift, X, Y);
+  FDragArmed := False;
+  Pressed := FButtonPressed;
+  if Pressed = tpNone then
+    Exit;
+  FButtonPressed := tpNone;
+  Invalidate;
+  if (Button = mbLeft) and (CaptionPart(X, Y) = Pressed) then
+    FBar.CaptionButtonClick(Pressed);
+end;
+
+{ The focus went elsewhere: the strip goes, once the focus has moved, but
+  not for its own menu, which may take it on some window systems. }
+procedure TGittanMenuStrip.DoExit;
+begin
+  inherited DoExit;
+  if FOpen < 0 then
+    Application.QueueAsyncCall(@ExitAsync, 0);
+end;
+
+procedure TGittanMenuStrip.ExitAsync(Data: PtrInt);
+begin
+  if Visible and not MenuOpen and (FStepTo < 0) and not Focused then
+    Dismiss(False);
+end;
+
+procedure TGittanMenuStrip.Paint;
+var
+  Split, i, K, TextY, X1, X2, Y: integer;
+  R: TRect;
+  S: string;
+  Ink: TColor;
+
+  procedure PaintButton(APart: TGittanTitlePart; AGlyph: TGittanTitleGlyph;
+    AInk: TColor);
+  var
+    BR: TRect;
+    Fore: TColor;
+  begin
+    BR := ButtonRect(APart);
+    Fore := AInk;
+    if (FBar.FHotButton = APart) or (FBar.FPressedButton = APart) or
+      (FButtonHot = APart) or (FButtonPressed = APart) then
+    begin
+      Canvas.Brush.Style := bsSolid;
+      if APart = tpClose then
+      begin
+        Canvas.Brush.Color := CloseHot;
+        Fore := clWhite;
+      end
+      else
+        Canvas.Brush.Color := FBar.FButtonHot;
+      Canvas.FillRect(BR);
+    end;
+    FBar.DrawGlyph(Canvas, AGlyph, BR, Fore);
+    Canvas.Font := FBar.Font;
+  end;
+
+begin
+  Collect;
+  if (FBar.FSplitControl <> nil) and (FBar.FSplitControl.Parent <> nil) then
+    Split := FBar.FSplitControl.Left + FBar.FSplitControl.Width
+  else
+    Split := 0;
+  Canvas.Brush.Style := bsSolid;
+  Canvas.Brush.Color := FBar.FSide;
+  Canvas.FillRect(Types.Rect(0, 0, Split, Height));
+  Canvas.Brush.Color := FBar.FMain;
+  Canvas.FillRect(Types.Rect(Split, 0, Width, Height));
+  Canvas.Font := FBar.Font;
+  TextY := (Height - Canvas.TextHeight('Xg')) div 2;
+  for i := 0 to High(FItems) do
+  begin
+    R := FRects[i];
+    if (i = FHot) or (i = FOpen) then
+    begin
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := FBar.FButtonHot;
+      Canvas.Pen.Color := FBar.FButtonHot;
+      Canvas.RoundRect(R.Left, R.Top, R.Right, R.Bottom, Scale96ToForm(8),
+        Scale96ToForm(8));
+    end;
+    if FBar.FActive and FItems[i].Enabled then
+      Ink := FBar.FText
+    else
+      Ink := FBar.FDim;
+    S := MenuText(FItems[i].Caption, K);
+    Canvas.Brush.Style := bsClear;
+    Canvas.Font.Color := Ink;
+    X1 := R.Left + Scale96ToForm(StripItemPad);
+    Canvas.TextOut(X1, TextY, S);
+    { The accelerator underlined, as a menu bar shows it from the keys. }
+    if FKeys and (K > 0) then
+    begin
+      Inc(X1, Canvas.TextWidth(Copy(S, 1, K - 1)));
+      X2 := X1 + Canvas.TextWidth(Copy(S, K, UTF8CodepointSize(@S[K])));
+      Y := TextY + Canvas.TextHeight('X');
+      Canvas.Pen.Color := Ink;
+      Canvas.Pen.Width := Max(1, Scale96ToForm(1));
+      Canvas.Line(X1, Y, X2, Y);
+      Canvas.Pen.Width := 1;
+    end;
+  end;
+  { The caption buttons while the strip is kept, in the bar's state (the
+    form sees the mouse on them on Windows) or the strip's own. }
+  if FPinned then
+  begin
+    if FBar.FActive then
+      Ink := FBar.FText
+    else
+      Ink := FBar.FDim;
+    PaintButton(tpMinimize, tgMinimize, Ink);
+    if FBar.Maximized then
+      PaintButton(tpMaximize, tgRestore, Ink)
+    else
+      PaintButton(tpMaximize, tgMaximize, Ink);
+    PaintButton(tpClose, tgClose, Ink);
+  end;
+end;
+
 { TGittanTabBar }
 
 constructor TGittanTabBar.Create(AOwner: TComponent);
@@ -1168,7 +1980,7 @@ begin
   Result := False;
 end;
 
-procedure TGittanTabBar.DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+procedure TGittanTabBar.DrawGlyph(ACanvas: TCanvas; AGlyph: TGittanTitleGlyph; const AR: TRect;
   AColor: TColor);
 begin
 end;

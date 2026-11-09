@@ -53,6 +53,14 @@ begin
     Lines.Add(#9'gpgsign = false');
     Lines.Add('[tag]');
     Lines.Add(#9'gpgsign = false');
+    {$IFDEF HAIKU}
+    { HaikuPorts' git now and then fails a push with "pthread_join
+      failed" and "error in sideband demultiplexer": send-pack reads the
+      side band in a thread of its own. Without the side band it starts
+      none. }
+    Lines.Add('[sendpack]');
+    Lines.Add(#9'sideband = false');
+    {$ENDIF}
     Lines.SaveToFile(Result);
   finally
     Lines.Free;

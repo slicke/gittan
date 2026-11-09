@@ -148,6 +148,7 @@ begin
     S.Width := 800;
     S.Height := 600;
     S.Maximized := True;
+    S.MenuBar := True;
     S.TreeWidth := 240;
     S.RepoFilesOpen := True;
     S.SubmodulesOpen := False;
@@ -209,6 +210,7 @@ begin
     AssertEquals(800, S.Width);
     AssertEquals(600, S.Height);
     AssertTrue(S.Maximized);
+    AssertTrue(S.MenuBar);
     AssertEquals(240, S.TreeWidth);
     AssertTrue(S.RepoFilesOpen);
     AssertFalse(S.SubmodulesOpen);
@@ -506,6 +508,20 @@ begin
     S.Load;
     AssertEquals('a file cut short is none', 3, S.ContextLines);
     AssertEquals(0, S.Width);
+    { Its text is kept before a save writes the defaults over it. }
+    AssertEquals('settings.json, state.json', S.DamagedFiles);
+    S.Save;
+    AssertEquals('{"diff": {"contextLines": 5,', string(ReadFileBytes(
+      IncludeTrailingPathDelimiter(FDir) + 'settings.json' + DamagedSuffix)));
+    AssertEquals('["not", "an", "object"]', string(ReadFileBytes(
+      IncludeTrailingPathDelimiter(FDir) + 'state.json' + DamagedSuffix)));
+  finally
+    S.Free;
+  end;
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertEquals('the saved ones parse', '', S.DamagedFiles);
   finally
     S.Free;
   end;

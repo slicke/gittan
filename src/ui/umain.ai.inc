@@ -6,30 +6,33 @@
   OpenAI-compatible API. Nothing of it shows until the settings turn
   the features on (AI page, off by default, since the changes go to the
   agent's provider) and the agent they pick can be asked (its command
-  found; for the API a model named). The first feature is AI at the
-  right end of the Commit
-  header, and Commit > Write Commit Message (Shift+Cmd+K): the agent
+  found; for the API a model named). The menu items are in the AI menu.
+  The first feature is AI at the right end of the Commit header, and
+  Write Commit Message (Shift+Cmd+K): the agent
   writes the message for the ticked files, which goes into the field
   when the field is as it was when it was asked. Either again while it
   writes stops it.
 
-  The second is View > Review Changes with AI (Alt+Cmd+R): the agent
+  The second is Review Changes (Alt+Cmd+R): the agent
   reviews what the change view compares, and its findings are cards in
   the change view among a pull request's threads (see umain.reviews.inc),
-  kept for that comparison until the next review or Clear AI Review.
+  kept for that comparison until the next review or Clear Review.
 
   The third is the sparkle in the filter field (where something is), the
   fourth Resolve with the agent in a conflict's list (umain.conflicts.inc):
   the agent writes the lines that take the conflict's place, which are
   written as a pick of the list is, so Undo Discard puts it back. The
-  fifth is Commit > Split Changes into Commits: the agent groups the
+  fifth is Split into Commits: the agent groups the
   changed files into commits with their messages, and a pick from the
   plan ticks one commit's files and fills in its message. The sixth is
   Fix on a finding's card: the agent changes the file as the finding
   asks, written as a discard is, so Undo Discard takes it back. The
-  seventh is Go > Explain Line History with AI (and the editor menu's):
+  seventh is Explain Line History (and the editor menu's):
   the agent reads the history of the lines (git log -L) and explains
-  how they came to be, a card under them among the review's. }
+  how they came to be, a card under them among the review's. The
+  eighth is Summarize Changes: the agent says what the
+  commits and the diff the change view compares changed, shown in the
+  AI notice (ShowAIAnswer), which any answer in Markdown can use. }
 
 { The agent the settings pick, made from its fields there: its command
   by the path they give, else where it is found (or the API's server),
@@ -204,6 +207,7 @@ procedure TRepoFrame.UpdateAIReviewItems;
 begin
   if FAIReviewItem = nil then
     Exit;
+  FAIMenu.Visible := AIAvailable;
   FAIReviewItem.Visible := AIAvailable;
   FAIClearItem.Visible := AIAvailable;
   if FWhyItem <> nil then
@@ -212,8 +216,25 @@ begin
     if FWhyJob <> nil then
       FWhyItem.Caption := rsWhyStopMenu
     else
-      FWhyItem.Caption := rsWhyMenu;
+      FWhyItem.Caption := rsWhyAIMenu;
   end;
+  if FSummarizeItem <> nil then
+  begin
+    FSummarizeItem.Visible := AIAvailable;
+    FSummarizeItem.Enabled := FRepo.Root <> '';
+    if FSummaryJob <> nil then
+      FSummarizeItem.Caption := rsSummarizeStopMenu
+    else
+      FSummarizeItem.Caption := rsSummarizeMenu;
+  end;
+  { The same in the summary's header, at the right of its title. }
+  if not AIAvailable or (FRepo.Root = '') then
+    FSummary.Action := ''
+  else if FSummaryJob <> nil then
+    FSummary.Action := rsSummarizeStopLink
+  else
+    FSummary.Action := rsSummarizeLink;
+  FSummary.ActionHint := Format(rsSummarizeHint, [AgentName]);
   if FAIReviewJob <> nil then
     FAIReviewItem.Caption := rsAIReviewStopMenu
   else
@@ -1016,4 +1037,120 @@ begin
   FWhyJob.Stop(False);
   FBlameZombies.Add(FWhyJob);
   FWhyJob := nil;
+end;
+
+{ ---------------------------------------------------------------------------
+  The AI notice, and summarizing the changes
+  --------------------------------------------------------------------------- }
+
+{ The notice with the sparkle, its dots moving: what an agent is doing
+  when the answer is to be read there. It takes no focus and stays
+  until it is closed; the job goes on without it, and its answer shows
+  it again. }
+procedure TRepoFrame.ShowAIBusy(const ATitle: string; AStop: TNotifyEvent);
+begin
+  FAINotice.MarkColor := AgentColor;
+  FAINotice.Popup(ATitle, '', True);
+  FAIStop := AStop;
+  if Assigned(AStop) then
+    FAINotice.SetButtons([rsAIStop]);
+end;
+
+procedure TRepoFrame.ShowAIAnswer(const ATitle, AMarkdown, APlain: string);
+begin
+  FAIStop := nil;
+  FAINotice.MarkColor := AgentColor;
+  FAINotice.PopupMarkdown(ATitle, AMarkdown, APlain);
+  FAINotice.SetButtons([rsAICopy]);
+end;
+
+{ Busy, its one button stops the agent; over an answer it copies it. }
+procedure TRepoFrame.AINoticeButton(Sender: TObject; AIndex: integer);
+begin
+  if FAINotice.Busy then
+  begin
+    if Assigned(FAIStop) then
+      FAIStop(Self);
+  end
+  else
+  begin
+    Clipboard.AsText := FAINotice.PlainDetail;
+    StatusNote(rsAICopied);
+  end;
+end;
+
+{ A commit the answer names (LinkCommits) is shown as a click on one in
+  the summary shows it; the answer stays beside it. }
+procedure TRepoFrame.AINoticeLink(Sender: TObject; const AURL: string);
+begin
+  if (Pos(CommitLinkScheme, AURL) = 1) and (FRepo.Root <> '') then
+    ShowBlameCommit(Copy(AURL, Length(CommitLinkScheme) + 1, MaxInt));
+end;
+
+procedure TRepoFrame.MenuSummarizeClick(Sender: TObject);
+begin
+  if FSummaryJob <> nil then
+  begin
+    AbandonSummaryJob;
+    FAINotice.Close;
+    FStatus.ShowMessage('', stNormal, 0);
+    UpdateAIReviewItems;
+  end
+  else
+    StartSummaryJob;
+end;
+
+{ Summarizes what the change view compares, as a review reviews it: the
+  commits since the base, or a range's, and the diff. }
+procedure TRepoFrame.StartSummaryJob;
+var
+  Paths: TStringList;
+  i: integer;
+begin
+  if (FSummaryJob <> nil) or not AIAvailable or (FRepo.Root = '') then
+    Exit;
+  Paths := TStringList.Create;
+  try
+    for i := 0 to High(FStats) do
+      Paths.Add(FStats[i].Path);
+    FSummaryJob := TGittanSummaryJob.Create(FRepo.Root, FAI, FRepo.Base, FRepo.IsRange,
+      Paths);
+  finally
+    Paths.Free;
+  end;
+  FSummaryJob.OnDone := @SummaryJobDone;
+  FSummaryJob.Start;
+  FStatus.ShowBusy(Format(rsSummarizing, [AgentName]), HintSparkle);
+  ShowAIBusy(Format(rsSummarizingTitle, [AgentName]), @MenuSummarizeClick);
+  UpdateAIReviewItems;
+end;
+
+procedure TRepoFrame.SummaryJobDone(Sender: TObject);
+var
+  Job: TGittanSummaryJob;
+begin
+  Job := TGittanSummaryJob(Sender);
+  if Job <> FSummaryJob then
+    Exit;
+  FSummaryJob := nil;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  FStatus.ShowMessage('', stNormal, 0);
+  if Job.Ok then
+    ShowAIAnswer(Format(rsSummaryTitle, [Job.AgentName]), Job.Markdown, Job.Text)
+  else
+  begin
+    FAINotice.Close;
+    BannerError(Format(rsSummaryFailed, [Job.AgentName]), Job.Error);
+  end;
+  UpdateAIReviewItems;
+end;
+
+procedure TRepoFrame.AbandonSummaryJob;
+begin
+  if FSummaryJob = nil then
+    Exit;
+  FSummaryJob.Stop(False);
+  FBlameZombies.Add(FSummaryJob);
+  FSummaryJob := nil;
 end;

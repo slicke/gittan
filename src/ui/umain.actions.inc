@@ -419,6 +419,14 @@ end;
   or names no version, is left to the errors of the git calls. }
 procedure TRepoFrame.CheckSettingsReset;
 begin
+  { A file that did not parse: its text is kept, and said where. }
+  if App.Settings.DamagedFiles <> '' then
+  begin
+    MarkNews;
+    FBanner.DetailFont.Assign(Edit.Font);
+    FBanner.Add(rsSettingsDamaged, Format(rsSettingsDamagedDetail,
+      [App.Settings.DamagedFiles, DamagedSuffix, App.Settings.Dir]), bkInfo);
+  end;
   if not App.Settings.OldIniFound then
     Exit;
   MarkNews;
@@ -649,6 +657,8 @@ begin
     AbandonSplitJob;
     AbandonFixJob;
     AbandonWhyJob;
+    AbandonSummaryJob;
+    FAINotice.Close;
     FCommitPlan := nil;
   end;
   UpdateFindAction;
@@ -907,6 +917,21 @@ procedure TRepoFrame.ViewMenuClick(Sender: TObject);
 begin
   FFoldMenu.Enabled := FoldingShown and Edit.Visible;
   FImageMenu.Enabled := FImageDiff.Visible and FImageDiff.Overlays;
+  if FMenuBarItem <> nil then
+    FMenuBarItem.Checked := App.Settings.MenuBar;
+end;
+
+{ The menu bar over the title bar kept, or back to coming with Alt; one
+  setting for the window, kept at once. }
+procedure TRepoFrame.MenuMenuBarClick(Sender: TObject);
+begin
+  App.Settings.MenuBar := not App.Settings.MenuBar;
+  FMenuBarItem.Checked := App.Settings.MenuBar;
+  App.Settings.Save;
+  {$IFDEF OWNBAR}
+  if OwnBar <> nil then
+    OwnBar.PinnedMenu := App.Settings.MenuBar;
+  {$ENDIF}
 end;
 
 procedure TRepoFrame.MenuOnlyChangesClick(Sender: TObject);

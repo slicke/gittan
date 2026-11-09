@@ -1610,6 +1610,14 @@ begin
         Break;
       end;
     end;
+    { gh's other names for a subcommand (pr new, pr co, release new,
+      run ls) are that subcommand here. }
+    if Sub = 'new' then
+      Sub := 'create'
+    else if Sub = 'co' then
+      Sub := 'checkout'
+    else if Sub = 'ls' then
+      Sub := 'list';
     if (Sub <> '') and (Pos(' ' + Sub + ' ', Allowed[c, 1]) > 0) then
     begin
       AReason := 'gh ' + Cmd + ' ' + Sub + ' is not open to extensions';

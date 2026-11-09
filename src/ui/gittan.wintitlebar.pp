@@ -20,8 +20,11 @@
 
   The menu stays on the window, under the bar: commands are looked up
   in it and its shortcuts work. The bar's menu button drops a copy of it
-  as a popup, and Alt with a letter drops the menu it underlines there
-  instead of the hidden bar.
+  as a popup; Alt alone and F10 show the bar's own menu bar over it
+  instead of the hidden one, and Alt with a letter shows it with the
+  menu it underlines open. While a menu of it is open (TrackPopupMenuEx,
+  modal) a message filter hook lets Left and Right and the mouse on
+  another name move to the next menu, as in a menu bar.
   Windows still draws the hidden bar, and the line under it (white in
   dark mode; MetaDarkStyle paints over it at the top of the client area,
   now the window's top), over the client area when the window is
@@ -49,9 +52,12 @@ type
     FGlyphFont: string;
   protected
     function Maximized: boolean; override;
-    procedure DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+    procedure DrawGlyph(ACanvas: TCanvas; AGlyph: TGittanTitleGlyph; const AR: TRect;
       AColor: TColor); override;
     procedure CreateWnd; override;
+    procedure TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
+      const AName: TRect); override;
+    procedure StripMade(AStrip: TGittanMenuStrip); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -83,10 +89,106 @@ const
 var
   Bar: TGittanWinTitleBar;
   FormWnd: HWND;
-  OldFormProc, OldBarProc: WNDPROC;
+  OldFormProc, OldBarProc, OldStripProc: WNDPROC;
   { Where the client area would start under the menu bar, from the
     window's top, as WM_NCCALCSIZE found it. }
   MenuBottom: integer;
+  { The hook while a menu of the menu strip is open, and the strip. }
+  MenuHook: HHOOK;
+  HookStrip: TGittanMenuStrip;
+  { Where the mouse was: Windows sends a WM_MOUSEMOVE with the pointer
+    standing still when a menu opens, which took a menu reached with
+    Left or Right back to the name under the pointer. }
+  LastMousePt: TPoint;
+
+const
+  MsgfMenu = 2;
+  MnGetHMenu = $01E1;
+
+function EndMenuLoop: BOOL; stdcall; external 'user32' name 'EndMenu';
+
+{ The open menus' windows of this thread, counted; ADeepest the topmost,
+  the submenu opened last. }
+function OpenMenuWindows(out ADeepest: HWND): integer;
+var
+  W: HWND;
+  Pid: DWORD;
+begin
+  Result := 0;
+  ADeepest := 0;
+  W := FindWindowExW(0, 0, '#32768', nil);
+  while W <> 0 do
+  begin
+    if IsWindowVisible(W) and (GetWindowThreadProcessId(W, @Pid) = GetCurrentThreadId) then
+    begin
+      if ADeepest = 0 then
+        ADeepest := W;
+      Inc(Result);
+    end;
+    W := FindWindowExW(0, W, '#32768', nil);
+  end;
+end;
+
+{ Whether the item marked in the menu of the window AMenuWnd opens a
+  submenu, which Right then opens. }
+function MarkedHasSubmenu(AMenuWnd: HWND): boolean;
+var
+  M: HMENU;
+  i: integer;
+begin
+  Result := False;
+  if AMenuWnd = 0 then
+    Exit;
+  M := HMENU(SendMessageW(AMenuWnd, MnGetHMenu, 0, 0));
+  if M = 0 then
+    Exit;
+  for i := 0 to GetMenuItemCount(M) - 1 do
+    if GetMenuState(M, i, MF_BYPOSITION) and MF_HILITE <> 0 then
+      Exit(GetSubMenu(M, i) <> 0);
+end;
+
+{ The menu's modal loop: Left in the strip's menu itself and Right on an
+  item without a submenu go to the menu beside it, and the mouse on
+  another name of the strip to that one; the open menu ends, and the
+  strip opens the next once it has. }
+function MenuFilter(Code: longint; WParam: WPARAM; LParam: LPARAM): LRESULT; stdcall;
+var
+  Msg: PMsg;
+  Deepest: HWND;
+  Step: boolean;
+begin
+  if (Code = MsgfMenu) and (HookStrip <> nil) then
+  begin
+    Msg := PMsg(LParam);
+    Step := False;
+    case Msg^.message of
+      WM_KEYDOWN:
+        if Msg^.wParam = VK_LEFT then
+        begin
+          if OpenMenuWindows(Deepest) <= 1 then
+            Step := HookStrip.StepMenu(-1);
+        end
+        else if Msg^.wParam = VK_RIGHT then
+        begin
+          OpenMenuWindows(Deepest);
+          if not MarkedHasSubmenu(Deepest) then
+            Step := HookStrip.StepMenu(1);
+        end;
+      WM_MOUSEMOVE:
+        if (Msg^.pt.X <> LastMousePt.X) or (Msg^.pt.Y <> LastMousePt.Y) then
+        begin
+          LastMousePt := Msg^.pt;
+          Step := HookStrip.HoverAt(Msg^.pt);
+        end;
+    end;
+    if Step then
+    begin
+      EndMenuLoop;
+      Exit(1);
+    end;
+  end;
+  Result := CallNextHookEx(MenuHook, Code, WParam, LParam);
+end;
 
 { The resize border's thickness, as Windows sizes it for the window. }
 function FrameThickness(AWnd: HWND; AVertical: boolean): integer;
@@ -175,6 +277,24 @@ begin
   Result := CallWindowProcW(OldBarProc, Wnd, Msg, WParam, LParam);
 end;
 
+{ The menu strip's window: its names are its own, the rest (the empty
+  part, the caption buttons while it is kept, the resize edge at the
+  top) goes to the form, which answers them as the bar's. }
+function StripProc(Wnd: HWND; Msg: UINT; WParam: WPARAM; LParam: LPARAM): LRESULT; stdcall;
+var
+  P: TPoint;
+begin
+  if (Msg = WM_NCHITTEST) and (Bar <> nil) and (Bar.MenuStrip <> nil) then
+  begin
+    P := Types.Point(GET_X_LPARAM(LParam), GET_Y_LPARAM(LParam));
+    Windows.ScreenToClient(Wnd, P);
+    if (Bar.MenuStrip.NameAt(P.X, P.Y) < 0) or
+      (not IsZoomed(FormWnd) and (P.Y < FrameThickness(FormWnd, True))) then
+      Exit(HTTRANSPARENT);
+  end;
+  Result := CallWindowProcW(OldStripProc, Wnd, Msg, WParam, LParam);
+end;
+
 function FormProc(Wnd: HWND; Msg: UINT; WParam: WPARAM; LParam: LPARAM): LRESULT; stdcall;
 var
   Params: PNCCalcSizeParams;
@@ -183,6 +303,7 @@ var
   R: TRect;
   Track: TTrackMouseEvent;
   Part: TGittanTitlePart;
+  Strip: TGittanMenuStrip;
 begin
   case Msg of
     WM_NCCALCSIZE:
@@ -220,6 +341,22 @@ begin
               Exit(HTTOPRIGHT)
             else
               Exit(HTTOP);
+          end;
+        end;
+        { The menu strip over the bar: its names are its own, its caption
+          buttons (while it is kept) the buttons, the rest the caption. }
+        Strip := Bar.MenuStrip;
+        if (Strip <> nil) and Strip.Visible then
+        begin
+          P := Strip.ScreenToClient(Types.Point(GET_X_LPARAM(LParam), GET_Y_LPARAM(LParam)));
+          if (P.Y >= 0) and (P.Y < Strip.Height) and (P.X >= 0) and (P.X < Strip.Width) then
+          begin
+            Part := Strip.CaptionPart(P.X, P.Y);
+            if Part <> tpNone then
+              Exit(PartCode(Part));
+            if Strip.NameAt(P.X, P.Y) >= 0 then
+              Exit(HTCLIENT);
+            Exit(HTCAPTION);
           end;
         end;
         P := Bar.ScreenToClient(Types.Point(GET_X_LPARAM(LParam), GET_Y_LPARAM(LParam)));
@@ -269,9 +406,9 @@ begin
         Exit(0);
       end;
     WM_SYSCOMMAND:
-      { Alt and a letter would open the hidden menu bar; the bar opens
-        the menu instead, and Alt alone or F10 (no letter) the whole
-        menu from its menu button, as a menu bar would take the focus. }
+      { Alt and a letter would open the hidden menu bar; the bar shows
+        its own with that menu open instead, and Alt alone or F10 (no
+        letter) shows it with the focus, or hides it again. }
       if (WParam and $FFF0 = SC_KEYMENU) and (Bar <> nil) then
       begin
         if LParam = 0 then
@@ -336,6 +473,36 @@ begin
   inherited Destroy;
 end;
 
+procedure TGittanWinTitleBar.TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
+  const AName: TRect);
+begin
+  HookStrip := AStrip;
+  GetCursorPos(LastMousePt);
+  MenuHook := SetWindowsHookExW(WH_MSGFILTER, HOOKPROC(@MenuFilter), 0,
+    GetCurrentThreadId);
+  try
+    { The LCL's popup is TrackPopupMenuEx, which returns once the menu
+      has closed. }
+    inherited TrackMenu(AStrip, APopup, AName);
+  finally
+    if MenuHook <> 0 then
+      UnhookWindowsHookEx(MenuHook);
+    MenuHook := 0;
+    HookStrip := nil;
+  end;
+end;
+
+{ Outside the class: inside a control's method WNDPROC is its WndProc. }
+procedure InstallStripProc(AWnd: HWND);
+begin
+  OldStripProc := WNDPROC(SetWindowLongPtrW(AWnd, GWLP_WNDPROC, LONG_PTR(@StripProc)));
+end;
+
+procedure TGittanWinTitleBar.StripMade(AStrip: TGittanMenuStrip);
+begin
+  InstallStripProc(AStrip.Handle);
+end;
+
 procedure TGittanWinTitleBar.CreateWnd;
 begin
   inherited CreateWnd;
@@ -364,7 +531,7 @@ begin
   end;
 end;
 
-procedure TGittanWinTitleBar.DrawGlyph(AGlyph: TGittanTitleGlyph; const AR: TRect;
+procedure TGittanWinTitleBar.DrawGlyph(ACanvas: TCanvas; AGlyph: TGittanTitleGlyph; const AR: TRect;
   AColor: TColor);
 var
   S: string;
@@ -376,13 +543,13 @@ begin
   else
     S := GlyphClose;
   end;
-  Canvas.Font.Name := FGlyphFont;
-  Canvas.Font.Height := -Scale96ToForm(10);
-  Canvas.Font.Color := AColor;
-  Canvas.Brush.Style := bsClear;
-  Canvas.TextOut(AR.Left + (AR.Width - Canvas.TextWidth(S)) div 2,
-    AR.Top + (AR.Height - Canvas.TextHeight(S)) div 2, S);
-  Canvas.Font := Font;
+  ACanvas.Font.Name := FGlyphFont;
+  ACanvas.Font.Height := -Scale96ToForm(10);
+  ACanvas.Font.Color := AColor;
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.TextOut(AR.Left + (AR.Width - ACanvas.TextWidth(S)) div 2,
+    AR.Top + (AR.Height - ACanvas.TextHeight(S)) div 2, S);
+  ACanvas.Font := Font;
 end;
 
 end.

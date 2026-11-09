@@ -498,12 +498,18 @@ begin
 end;
 
 { The subject of the fixup commit for the step: "fixup! <subject>",
-  which the autosquash reads, or, when another step has the same
-  subject and would be found first, "fixup! <id>". }
+  which the autosquash reads, or "fixup! <id>" when another step has
+  the same subject and would be found first, or when the step is a
+  fixup itself, whose subject would name the commit it is for (which
+  need not be among the steps) and not the step. }
 function FixupSubject(const ASteps: TGittanRebaseSteps; AStep: integer): string;
 var
   i: integer;
+  Action: TGittanRebaseAction;
 begin
+  FixupTarget(ASteps[AStep].Subject, Action);
+  if Action <> raPick then
+    Exit('fixup! ' + ASteps[AStep].Hash);
   for i := 0 to AStep - 1 do
     if ASteps[i].Subject = ASteps[AStep].Subject then
       Exit('fixup! ' + ASteps[AStep].Hash);

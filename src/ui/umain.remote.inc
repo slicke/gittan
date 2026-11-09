@@ -40,6 +40,7 @@ begin
   FPullItem.Enabled := Can;
   FPushItem.Enabled := Can;
   FForcePushItem.Enabled := Can and FHasUpstream;
+  FPushNoVerifyItem.Enabled := Can;
   FRemotesItem.Enabled := Can;
   FIssueTrackerItem.Enabled := Can;
   FCloneItem.Enabled := (FRemoteJob = nil) and (FCommitJob = nil);
@@ -50,7 +51,7 @@ begin
 end;
 
 procedure TRepoFrame.StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode;
-  const AArg, ARemote: string);
+  const AArg, ARemote: string; ANoVerify: boolean);
 var
   Remote, Ref: string;
 begin
@@ -71,6 +72,7 @@ begin
     FPendingMode := AMode;
     FPendingArg := AArg;
     FPendingRemoteName := ARemote;
+    FPendingNoVerify := ANoVerify;
     FStatus.ShowBusy(rsWaitingForFetch, HintFetch);
     Exit;
   end;
@@ -100,10 +102,12 @@ begin
     FRemoteHead := FRepo.CommitId('HEAD')
   else
     FRemoteHead := '';
-  { Deleting on a remote is a push too, and runs the hook. }
+  { Deleting on a remote is a push too, and runs the hook, unless it is
+    skipped. }
   FNoticeHook := (AKind in [rkPush, rkForcePush, rkPushBranch, rkPushTag, rkDeleteRemote,
-    rkDeleteRemoteTag]) and FRepo.HasHook('pre-push');
+    rkDeleteRemoteTag]) and not ANoVerify and FRepo.HasHook('pre-push');
   FRemoteJob := TGittanRemoteJob.Create(FRepo.Root, AKind, AMode, AArg, ARemote);
+  FRemoteJob.NoVerify := ANoVerify;
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
   if AKind = rkLfsFetch then
@@ -522,12 +526,17 @@ begin
   FRetryPath := AJob.Path;
   FRetryBranch := AJob.Branch;
   FRetryRefs := AJob.Refs;
+  FRetryNoVerify := AJob.NoVerify;
   FNoticeCommit := False;
   FStatus.ShowMessage(Title, stBad, StatusErrorSeconds);
   FNotice.DetailFont.Assign(Edit.Font);
   FNotice.Popup(Title, AJob.Error, False, nkBad);
   MarkNews;
-  FNotice.SetButtons([Again, rsCopyOutput]);
+  { The hook said no: the same push again without it. }
+  if AHookFailed then
+    FNotice.SetButtons([Again, rsCopyOutput, rsPushNoVerifyAction])
+  else
+    FNotice.SetButtons([Again, rsCopyOutput]);
 end;
 
 procedure TRepoFrame.NoticeButton(Sender: TObject; AIndex: integer);
@@ -557,12 +566,19 @@ begin
         else if FRetryKind = rkLfsFetch then
           StartLfsDownload(FRetryArg, FRetryRefs)
         else
-          StartRemote(FRetryKind, FRetryMode, FRetryArg, FRetryRemote);
+          StartRemote(FRetryKind, FRetryMode, FRetryArg, FRetryRemote, FRetryNoVerify);
       end;
     1:
       begin
         Clipboard.AsText := FNotice.PlainDetail;
         StatusNote(rsOutputCopied);
+      end;
+    { Shown only after a pre-push hook refused a push of this frame's. }
+    2:
+      begin
+        FNotice.Close;
+        if (FRetryRoot = FRepo.Root) and NoVerifyAsk then
+          StartRemote(FRetryKind, FRetryMode, FRetryArg, FRetryRemote, True);
       end;
   end;
 end;
@@ -806,7 +822,8 @@ begin
     if FPendingKind = rkFetchPull then
       StartPullFetch(StrToIntDef(FPendingArg, 0), FPendingRemoteName, FPendingBranch)
     else
-      StartRemote(FPendingKind, FPendingMode, FPendingArg, FPendingRemoteName);
+      StartRemote(FPendingKind, FPendingMode, FPendingArg, FPendingRemoteName,
+        FPendingNoVerify);
   end;
 end;
 
@@ -884,6 +901,38 @@ end;
 procedure TRepoFrame.MenuForcePushClick(Sender: TObject);
 begin
   ForcePushAsk;
+end;
+
+{ Whether to push without the pre-push hook: asked only when the hook is
+  Git LFS's (git lfs install writes "git lfs pre-push" into it, husky's
+  or another's may call it too), since skipping it leaves the LFS files
+  behind; any other hook is the user's to skip. }
+function TRepoFrame.NoVerifyAsk: boolean;
+var
+  Path, Hook: string;
+begin
+  Result := True;
+  Path := FRepo.HookPath('pre-push');
+  if (Path = '') or not FileExists(Path) then
+    Exit;
+  try
+    Hook := ReadFileBytes(Path);
+  except
+    Exit;
+  end;
+  if (Pos('git lfs', Hook) = 0) and (Pos('git-lfs', Hook) = 0) then
+    Exit;
+  Result := AskDlg(rsNoVerifyLfsTitle, rsNoVerifyLfs, mtWarning, [mrYes,
+    rsPushNoVerifyAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) = mrYes;
+end;
+
+{ Repository > Push Without Hooks: a plain push with --no-verify. }
+procedure TRepoFrame.MenuPushNoVerifyClick(Sender: TObject);
+begin
+  if (FRepo.Root = '') or (FRemoteJob <> nil) or (FCommitJob <> nil) then
+    Exit;
+  if NoVerifyAsk then
+    StartRemote(rkPush, pmAuto, '', '', True);
 end;
 
 { The status bar's "↑2 ↓5": pull and push with their counts, fetch,

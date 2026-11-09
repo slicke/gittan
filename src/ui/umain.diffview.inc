@@ -1039,6 +1039,8 @@ begin
     FGraph.Recenter;
   if FNotice <> nil then
     FNotice.Recenter;
+  if FAINotice <> nil then
+    FAINotice.Recenter;
   if FMdPreview.Visible then
     FMdPreview.Width := Round(EditorPanel.ClientWidth * FMdRatio);
   if FEditOld.Visible then

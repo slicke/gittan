@@ -517,7 +517,7 @@ begin
   { A merge is committed with git's message, filled into an empty field
     once; it goes when the merge does. A squash merge has one too, with
     no operation under way. }
-  if (FOperation = 'merging') or FRepo.SquashPending then
+  if (FOperation = 'merging') or FSquashPending then
   begin
     if (FMergeMessage = '') and MessageBlank then
     begin
@@ -650,7 +650,10 @@ begin
     not commit through Commit. }
   FCommitOptions.Visible := not Continuing and ((FOperation = '') or FHasCommitOption);
   FCommitOptions.Enabled := not Busy;
-  FAbortButton.Visible := (FOperation <> '') and (FOperation <> 'bisecting');
+  { A squash merge is no operation of git's, and is given up all the
+    same: its conflicts leave no other way back. }
+  FAbortButton.Visible := ((FOperation <> '') and (FOperation <> 'bisecting')) or
+    FSquashPending;
   FAbortButton.Enabled := not Busy;
   FSkipButton.Visible := Continuing;
   FSkipButton.Enabled := not Busy;

@@ -378,15 +378,28 @@ type
       and the editor menu's, the job while it runs, the comparison it
       was asked in (AIReviewKey) and the card it is to be, placed. }
     FWhyItem, FWhyEditItem: TMenuItem;
+    { The AI menu, shown while the features are on. }
+    FAIMenu: TMenuItem;
     FWhyJob: TGittanWhyJob;
     FWhyKey: string;
     FWhyThread: TGittanReviewThread;
+    { What an agent answers in Markdown (umain.ai.inc): a notice with
+      the sparkle, ShowAIBusy while it works and ShowAIAnswer for the
+      answer. View > Summarize Changes with AI is its first use, the
+      job while it runs. }
+    FAINotice: TGittanNotice;
+    FAIStop: TNotifyEvent;
+    FSummarizeItem: TMenuItem;
+    FSummaryJob: TGittanSummaryJob;
     { The width of a tab in the editors, in characters. }
     FTabSize: integer;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
     FRecentMenu, FCompareMenu, FTerminalItem, FUninstallCliItem: TMenuItem;
     FSnapshots: TGittanSnapshots;
     FWrapItem, FOnlyChangesItem, FSideItem, FIgnoreSpaceItem, FMdPreviewItem: TMenuItem;
+    { View > Menu Bar: the menu bar over the title bar kept (Windows and
+      GTK 3, where the title bar is the window's own). }
+    FMenuBarItem: TMenuItem;
     { View > Image: how a changed image is shown, one item per mode. }
     FImageMenu: TMenuItem;
     FImageModeItems: array[TGittanImageMode] of TMenuItem;
@@ -625,13 +638,16 @@ type
     FMarkHash, FMarkName: string;
     FMarkDate: TDateTime;
     FMergeMessage: string;
+    { A squash merge is staged and not yet committed, as of the last
+      refresh (TGittanRepo.SquashPending). }
+    FSquashPending: boolean;
     { Fetch, pull and push (umain.remote.inc): the job while it runs,
       the commits ahead and HEAD when it started, the menu items, and
       the list the status bar's counts drop up. }
     FRemoteJob: TGittanRemoteJob;
     FRemoteAhead: integer;
     FRemoteHead: string;
-    FFetchItem, FPullItem, FPushItem, FForcePushItem: TMenuItem;
+    FFetchItem, FPullItem, FPushItem, FForcePushItem, FPushNoVerifyItem: TMenuItem;
     { Commit > Commit abc1234: the commit menu of the commit shown, and in
       its place Pick a Commit in the Graph... while none is. }
     FBranchCommitMenu, FPickCommitItem: TMenuItem;
@@ -1013,6 +1029,8 @@ type
       path and branch, for Try Again after an add. }
     FRetryRoot, FRetryPath, FRetryBranch: string;
     FRetrySubmodules: boolean;
+    { The failed push skipped the pre-push hook, and Push Again does too. }
+    FRetryNoVerify: boolean;
     { A Git LFS download's commits, an empty one for the work tree: the
       one StartRemote hands its job (FLfsRefs), the failed one's for Try
       Again (FRetryRefs), and the sides of the image or binary file shown
@@ -1060,6 +1078,7 @@ type
     FPendingKind: TGittanRemoteKind;
     FPendingMode: TGittanPullMode;
     FPendingArg, FPendingRemoteName, FPendingBranch: string;
+    FPendingNoVerify: boolean;
     { The list a click on the status bar's pull request drops down; each
       row's tag is what it does (the pa* constants). }
     FPullPopup: TGittanPopupList;
@@ -1749,6 +1768,7 @@ type
     procedure MenuZoomOutClick(Sender: TObject);
     procedure MenuZoomResetClick(Sender: TObject);
     procedure MenuFontClick(Sender: TObject);
+    procedure MenuMenuBarClick(Sender: TObject);
     procedure OpenSettings(APage: TSettingsPage);
     procedure PreviewSettings(AFont: TFont; ATheme, ATabSize: integer);
     procedure ApplyEditorFont(AFont: TFont);
@@ -1832,6 +1852,21 @@ type
     procedure AbandonWhyJob;
     procedure MenuWhyClick(Sender: TObject);
     procedure MenuWhyEditClick(Sender: TObject);
+    {** Shows the AI notice busy under ATitle, with Stop as its button
+      when AStop is given: a click on it calls AStop. }
+    procedure ShowAIBusy(const ATitle: string; AStop: TNotifyEvent = nil);
+    {** Shows AMarkdown, an agent's answer, in the AI notice under
+      ATitle, with Copy as its button, which copies APlain when given
+      (the answer before LinkCommits). }
+    procedure ShowAIAnswer(const ATitle, AMarkdown: string; const APlain: string = '');
+    procedure AINoticeButton(Sender: TObject; AIndex: integer);
+    procedure AINoticeLink(Sender: TObject; const AURL: string);
+    {** Has the agent summarize what the change view compares, the
+      answer shown with ShowAIAnswer; stops it while it summarizes. }
+    procedure StartSummaryJob;
+    procedure SummaryJobDone(Sender: TObject);
+    procedure AbandonSummaryJob;
+    procedure MenuSummarizeClick(Sender: TObject);
     procedure MenuWrapClick(Sender: TObject);
     procedure MenuFoldClick(Sender: TObject);
     procedure ViewMenuClick(Sender: TObject);
@@ -2310,7 +2345,7 @@ type
     function BisectStartAt(const ABad, AGood: string): boolean;
     procedure BisectEndClick;
     procedure StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode = pmAuto;
-      const AArg: string = ''; const ARemote: string = '');
+      const AArg: string = ''; const ARemote: string = ''; ANoVerify: boolean = False);
     procedure RemoteJobDone(Sender: TObject);
     procedure RemoteJobOutput(Sender: TObject);
     procedure NoticeTimerTimer(Sender: TObject);
@@ -2324,6 +2359,8 @@ type
     procedure MenuPushClick(Sender: TObject);
     procedure ForcePushAsk;
     procedure MenuForcePushClick(Sender: TObject);
+    function NoVerifyAsk: boolean;
+    procedure MenuPushNoVerifyClick(Sender: TObject);
     procedure SyncClick(const AScreenRect: TRect);
     function BaseActionRef: string;
     procedure BaseClick(const AScreenRect: TRect);
@@ -2653,7 +2690,7 @@ resourcestring
   rsFile = '&File';
   rsRepoMenu = '&Repository';
   rsCommitMenuTitle = 'Co&mmit';
-  rsChangesMenu = 'C&hanges';
+  rsChangesMenu = '&Changes';
   rsOpen = '&Open...';
   rsOpenRepo = 'Open &Repository...';
   rsNewTab = 'New &Tab';
@@ -2808,6 +2845,7 @@ resourcestring
   rsZoomOut = 'Zoom &Out';
   rsZoomReset = 'Actual Si&ze';
   rsFont = 'Fo&nt...';
+  rsMenuBar = '&Menu Bar';
   rsSyntaxTheme = 'Syntax T&heme';
   rsTagline = 'See what changed in a git repository';
   rsGo = '&Go';
@@ -2914,9 +2952,10 @@ resourcestring
     'hooks (this commit only), Co-authors credits the people who worked on it with you ' +
     '(this commit only)';
   rsWriteMessage = '✦ AI';
-  rsAIReviewMenu = 'Review Changes with AI';
-  rsAIReviewStopMenu = 'Stop AI Review';
-  rsAIClearMenu = 'Clear AI Review';
+  rsAIMenuTitle = 'AI';
+  rsAIReviewMenu = 'Review Changes';
+  rsAIReviewStopMenu = 'Stop Reviewing Changes';
+  rsAIClearMenu = 'Clear Review';
   rsAIReviewing = '%s is reviewing the changes...';
   rsAIReviewFailed = '%s could not review the changes';
   rsAIReviewNone = '%s found nothing to point out.';
@@ -2937,7 +2976,7 @@ resourcestring
   rsResolvedAI = '%s resolved the conflict at line %d of %s: %s';
   rsResolvedAILast = '%s resolved the last conflict in %s, now marked resolved: %s';
   rsResolvedAIUndo = 'Changes > Undo Discard puts it back';
-  rsSplitMenu = 'Split Changes into Commits...';
+  rsSplitMenu = 'Split into Commits...';
   rsAbsorbMenu = 'Put Changes into Their Commits...';
   rsSplitStopMenu = 'Stop Splitting into Commits';
   rsSplitting = '%s is splitting the changes into commits...';
@@ -2959,7 +2998,20 @@ resourcestring
   rsFixed = '%s fixed %s: %s';
   rsFixEditing = '%s''s fix was not used: %s is being edited.';
   rsFixWriteFailed = 'Could not write the fix: %s';
+  rsSummarizeMenu = 'Summarize Changes';
+  rsSummarizeStopMenu = 'Stop Summarizing Changes';
+  rsSummarizeLink = '✦ Summarize';
+  rsSummarizeStopLink = '✦ Stop';
+  rsSummarizeHint = 'Summarize the changes with %s';
+  rsSummarizing = '%s is summarizing the changes...';
+  rsSummarizingTitle = '%s is summarizing the changes';
+  rsSummaryTitle = 'The changes, summarized by %s';
+  rsSummaryFailed = '%s could not summarize the changes';
+  rsAIStop = 'Stop';
+  rsAICopy = 'Copy';
+  rsAICopied = 'Copied the answer as Markdown';
   rsWhyMenu = 'Explain Line History with AI';
+  rsWhyAIMenu = 'Explain Line History';
   rsWhyStopMenu = 'Stop Explaining Line History';
   rsWhyNeedsChanges = 'Show a file''s changes first: the history is of the selected lines, ' +
     'or of the line at the caret.';
@@ -3032,6 +3084,11 @@ resourcestring
   rsNoticeDeleting = 'Deleting %s on the remote';
   rsHookFailed = 'The pre-push hook failed';
   rsPushAgain = 'Push Again';
+  rsPushNoVerifyMenu = 'Push Without Hooks';
+  rsPushNoVerifyAction = 'Push Without Hooks';
+  rsNoVerifyLfsTitle = 'Push Without Hooks';
+  rsNoVerifyLfs = 'The pre-push hook uploads the Git LFS files too. Without it the remote ' +
+    'gets the commits but not the files they point to, until a push with the hook runs.';
   rsPullAgain = 'Pull Again';
   rsFetchAgain = 'Fetch Again';
   rsTryAgain = 'Try Again';
@@ -3096,6 +3153,8 @@ resourcestring
     'someone else''s work maybe, which the forced push would lose. Pull them in first?';
   rsGitTooOld = 'git %s is older than %d.%d';
   rsSettingsReset = 'Your settings were reset';
+  rsSettingsDamaged = 'A settings file could not be read';
+  rsSettingsDamagedDetail = '%0:s is not valid JSON, so what it holds starts from the defaults. Its text is kept as a copy named with %1:s at the end, in %2:s.';
   rsSettingsResetDetail = 'Gittan now keeps its settings in settings.json and state.json, and does not read the gittan.ini of earlier builds. Pick your options again in Settings; the old file is still in %s.';
   rsGitTooOldDetail = 'Gittan needs git %d.%d or later, and some of what it does fails with ' +
     'this one (%s). Update git, or set a newer one in Settings > Tools.';
@@ -3455,7 +3514,7 @@ resourcestring
   rsTagDeleteAsk = 'Delete the tag %s here? The remotes keep theirs.';
   rsTagDeleted = 'Deleted the tag %s';
   rsTagDeleteRemoteAsk = 'Delete the tag %s on %s, for everyone who uses it? The local one stays.';
-  rsStashMenu = 'Stas&h';
+  rsStashMenu = '&Stash';
   rsStashAllItem = '&Stash Changes...';
   rsStashChosenItem = 'Stash &Included Files...';
   rsPopStashItem = '&Pop Latest Stash';
@@ -3560,6 +3619,7 @@ resourcestring
   rsAllResolvedCommit = 'All conflicts resolved: commit the merge';
   rsAllResolvedContinue = 'All conflicts resolved: continue %s';
   rsNounMerge = 'the merge';
+  rsNounSquash = 'the squash merge';
   rsNounRebase = 'the rebase';
   rsNounCherryPick = 'the cherry-pick';
   rsNounRevert = 'the revert';
@@ -4485,6 +4545,8 @@ begin
   FSummary.OnBaseClick := @SummaryBaseClick;
   FSummary.OnSyncClick := @SummarySyncClick;
   FSummary.OnTotalsClick := @SummaryTotalsClick;
+  FSummary.OnAction := @MenuSummarizeClick;
+  FSummary.ShowHint := True;
   FSummary.OnBehindAction := @SummaryBehindAction;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
   FSummary.OnIssueClick := @SummaryIssueClick;
@@ -4662,6 +4724,14 @@ begin
   FNotice.Parent := Self;
   FNotice.SetIcon(App.Icon);
   FNotice.OnButton := @NoticeButton;
+  { An agent's answers: the same panel with the sparkle, kept until it
+    is closed. }
+  FAINotice := TGittanNotice.Create(Self);
+  FAINotice.Parent := Self;
+  FAINotice.Mark := nmSparkle;
+  FAINotice.Sticky := True;
+  FAINotice.OnButton := @AINoticeButton;
+  FAINotice.OnLink := @AINoticeLink;
   FNoticeTimer := TTimer.Create(Self);
   FNoticeTimer.Enabled := False;
   FNoticeTimer.Interval := NoticeDelay;
@@ -4700,6 +4770,9 @@ begin
   CocoaConfigMenu.appMenu.customMenus := FAppMenuItem;
   {$ENDIF}
   FWindow.Menu := FMainMenu;
+  { Hidden once the menus are made, not before (BuildMenu), and before
+    a repository opens, which the new tab's page is without. }
+  FAIMenu.Visible := AIAvailable;
   {$IFDEF OWNBAR}
   { The title bar lists the menus and runs its shade to this frame's
     splitter. }
@@ -4863,6 +4936,7 @@ begin
   AbandonSplitJob;
   AbandonFixJob;
   AbandonWhyJob;
+  AbandonSummaryJob;
   FreeAndNil(FAI);
   StopCommitJob(True);
   FreeAndNil(FDroppedCommits);
@@ -5247,6 +5321,8 @@ begin
     { The notice's accent is the light one in both, its red a softer one. }
     FNotice.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, RGBToColor(0, 110, 230),
       RGBToColor(241, 112, 112));
+    FAINotice.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, RGBToColor(0, 110, 230),
+      RGBToColor(241, 112, 112));
     FPullBar := RGBToColor(40, 80, 130);
     FLinkColor := RGBToColor(78, 161, 255);
   end
@@ -5258,6 +5334,8 @@ begin
     FHeader.ConflictNav.SetColors(P.Shade, RGBToColor(248, 240, 255),
       RGBToColor(190, 160, 220), RGBToColor(110, 50, 160), RGBToColor(155, 63, 200));
     FNotice.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent,
+      RGBToColor(200, 40, 40));
+    FAINotice.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent,
       RGBToColor(200, 40, 40));
     FPullBar := RGBToColor(205, 225, 250);
     FLinkColor := RGBToColor(0, 102, 204);
@@ -5908,6 +5986,7 @@ begin
     @MenuPushClick);
   FForcePushItem := AddItem(RepoMenu, rsForcePushMenu, ShortCut(VK_P, [ssModifier, ssShift,
     ssAlt]), @MenuForcePushClick);
+  FPushNoVerifyItem := AddItem(RepoMenu, rsPushNoVerifyMenu, 0, @MenuPushNoVerifyClick);
   FFetchItem := AddItem(RepoMenu, rsFetchMenu, ShortCut(VK_F, [ssModifier, ssAlt]),
     @MenuFetchClick);
   RepoMenu.Add(NewLine);
@@ -5938,11 +6017,6 @@ begin
   FCommitItem := AddItem(CommitMenu, rsCommitMenu, ShortCut(VK_K, [ssModifier]),
     @MenuCommitClick);
   FCommitItem.Enabled := False;
-  FMessageItem := AddItem(CommitMenu, rsWriteMessageMenu, ShortCut(VK_K, [ssModifier,
-    ssShift]), @MessageActionClick);
-  FMessageItem.Visible := False;
-  FSplitItem := AddItem(CommitMenu, rsSplitMenu, 0, @MenuSplitClick);
-  FSplitItem.Visible := False;
   FAbsorbItem := AddItem(CommitMenu, rsAbsorbMenu, 0, @MenuAbsorbClick);
   FAbsorbItem.Enabled := False;
   CommitMenu.Add(NewLine);
@@ -6118,11 +6192,6 @@ begin
     @MenuReviewCommentsClick);
   FReviewItem.Checked := FShowComments;
   FReviewItem.Enabled := Assigned(FForge);
-  FAIReviewItem := AddItem(ViewMenu, rsAIReviewMenu, ShortCut(VK_R, [ssModifier, ssAlt]),
-    @MenuAIReviewClick);
-  FAIReviewItem.Visible := False;
-  FAIClearItem := AddItem(ViewMenu, rsAIClearMenu, 0, @MenuAIClearClick);
-  FAIClearItem.Visible := False;
   ViewMenu.Add(NewLine);
   AddItem(ViewMenu, rsZoomIn, ShortCut(VK_OEM_PLUS, [ssModifier]), @MenuZoomInClick);
   AddItem(ViewMenu, rsZoomOut, ShortCut(VK_OEM_MINUS, [ssModifier]), @MenuZoomOutClick);
@@ -6142,6 +6211,11 @@ begin
     Item.Checked := i = FSyntaxTheme;
     FThemeItems[i] := Item;
   end;
+  {$IF DEFINED(LCLWin32) OR DEFINED(LCLGtk3)}
+  ViewMenu.Add(NewLine);
+  FMenuBarItem := AddItem(ViewMenu, rsMenuBar, 0, @MenuMenuBarClick);
+  FMenuBarItem.Checked := App.Settings.MenuBar;
+  {$ENDIF}
 
   GoMenu := TMenuItem.Create(Main);
   GoMenu.Caption := rsGo;
@@ -6183,8 +6257,6 @@ begin
     @MenuHistoryClick);
   FTimelapseItem := AddItem(GoMenu, rsTimelapse, ShortCut(VK_H, [ssModifier, ssAlt]),
     @MenuTimelapseClick);
-  FWhyItem := AddItem(GoMenu, rsWhyMenu, 0, @MenuWhyClick);
-  FWhyItem.Visible := False;
   FGoFileHistoryItem := AddItem(GoMenu, rsGoFileHistory, 0, @MenuGoFileHistoryClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);
@@ -6198,6 +6270,25 @@ begin
   FOlderCommitItem := AddItem(GoMenu, rsOlderCommit, ShortCut(VK_F9, []), @MenuOlderCommitClick);
   FNewerCommitItem := AddItem(GoMenu, rsNewerCommit, ShortCut(VK_F9, [ssShift]),
     @MenuNewerCommitClick);
+
+  { What an agent does (umain.ai.inc), all in one menu that shows while
+    the AI features are on (UpdateAIReviewItems): the commit's message
+    and its split, the review of the changes, and what is to be read.
+    It is made visible and hidden later, since Cocoa places the menus
+    after one made hidden one place too early. }
+  FAIMenu := TMenuItem.Create(Main);
+  FAIMenu.Caption := rsAIMenuTitle;
+  Main.Items.Add(FAIMenu);
+  FMessageItem := AddItem(FAIMenu, rsWriteMessageMenu, ShortCut(VK_K, [ssModifier,
+    ssShift]), @MessageActionClick);
+  FSplitItem := AddItem(FAIMenu, rsSplitMenu, 0, @MenuSplitClick);
+  FAIMenu.Add(NewLine);
+  FAIReviewItem := AddItem(FAIMenu, rsAIReviewMenu, ShortCut(VK_R, [ssModifier, ssAlt]),
+    @MenuAIReviewClick);
+  FAIClearItem := AddItem(FAIMenu, rsAIClearMenu, 0, @MenuAIClearClick);
+  FAIMenu.Add(NewLine);
+  FSummarizeItem := AddItem(FAIMenu, rsSummarizeMenu, 0, @MenuSummarizeClick);
+  FWhyItem := AddItem(FAIMenu, rsWhyAIMenu, 0, @MenuWhyClick);
 
   ToolsMenu := TMenuItem.Create(Main);
   ToolsMenu.Caption := rsTools;
@@ -7394,6 +7485,8 @@ begin
   AbandonSplitJob;
   AbandonFixJob;
   AbandonWhyJob;
+  AbandonSummaryJob;
+  FAINotice.Close;
   FAIThreads := nil;
   FAIThreadsKey := '';
   FExtThreads := nil;
@@ -7699,6 +7792,7 @@ begin
   FBehind := ASnap.Behind;
   FRewritten := ASnap.Rewritten;
   FOperation := ASnap.Operation;
+  FSquashPending := ASnap.SquashPending;
   FBisect := ASnap.Bisect;
   FRebaseBranch := ASnap.RebaseBranch;
   if (FOperation = 'rebasing') and (FRebaseBranch <> '') and ASnap.Detached then
