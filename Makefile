@@ -101,13 +101,17 @@ else ifeq ($(shell uname -s),FreeBSD)
   QJS_OS := freebsd
   QJS_HOST_CPU := $(shell uname -m | sed -e s/amd64/x86_64/ -e s/arm64/aarch64/)
   QJS_LIBS := libqjs.so.[0-9]*.[0-9]*.[0-9]* libtqshim.so
-  QJS_RPATH := -k-rpath=\$$ORIGIN
+  # FPC links on the BSDs and Haiku through a shell, with the -k options
+  # as they are, so the shell would take $ORIGIN for a variable and leave
+  # the rpath empty: fpc gets \$ORIGIN, as Gittan.lpi gives it.
+  QJS_RPATH := -k-rpath=\\\$$ORIGIN
 else ifeq ($(shell uname -s),Haiku)
   # Haiku says BePC for 32-bit x86 and arm64 where FPC says i386 and aarch64.
   QJS_OS := haiku
   QJS_HOST_CPU := $(shell uname -m | sed -e s/BePC/i386/ -e s/arm64/aarch64/)
   QJS_LIBS := libqjs.so.[0-9]*.[0-9]*.[0-9]* libtqshim.so
-  QJS_RPATH := -k-rpath=\$$ORIGIN
+  # Through a shell, as on FreeBSD.
+  QJS_RPATH := -k-rpath=\\\$$ORIGIN
 else
   QJS_OS := linux
   QJS_HOST_CPU := $(shell uname -m)

@@ -1170,6 +1170,8 @@ const
       the watchdog budget restarts rather than count host/user time. }
   JS_WATCHDOG_GAP_MS = 500;
   JS_MEMORY_LIMIT_BYTES = 64 shl 20; // 64 MB across all extension contexts
+  { Not on Haiku, where quickjs-ng cannot measure an allocation
+    (js__malloc_usable_size gives 0) and counts its overhead alone. }
 
 {** Interrupt hook polled by quickjs-ng between bytecodes; returning 1 aborts
     the running script with an uncatchable InterruptError. "Continuous

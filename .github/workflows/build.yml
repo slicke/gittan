@@ -20,9 +20,11 @@ on:
 #                      Gittan-linux-amd64.deb and Gittan-linux-x86_64.rpm
 #   - Linux (arm64):   the same as Gittan-linux-arm64.tar.gz, .deb and
 #                      Gittan-linux-aarch64.rpm
-# Two legs the release does not wait for, added to it when they make it:
+# Legs the release does not wait for, added to it when they make it:
 #   - Windows (arm64): Gittan-windows-arm64.zip  (Gittan.exe + lexlib/, FPC 3.3.1)
-#   - Haiku (x86_64):  Gittan-haiku-x86_64.tar.gz (qt6, built in a QEMU VM)
+#   - Haiku (x86_64):  Gittan-haiku-x86_64.hpkg and .tar.gz (qt6, built in a
+#                      QEMU VM)
+#   - FreeBSD (amd64): Gittan-freebsd-amd64.tar.gz (gtk3, built in a VM)
 #
 # As in Trndi, a push to main publishes a release: the version job takes the
 # next build number from the "build-<n>" tags (100 when there is none), and
@@ -730,10 +732,25 @@ jobs:
             [ $TRY = 3 ] && exit 1
           done
           test -x Gittan || { echo "::error::Gittan was not built"; exit 1; }
-          # The tests run but do not stop the leg: their program has ended
-          # at once with exit code 3 and no output on Haiku, which is not
-          # yet understood.
-          make test || echo "::warning::The tests failed on Haiku (exit $?)"
+          # The tests stop the leg, as on the others. (They used to end at
+          # once with exit code 3: the Makefile's rpath lost $ORIGIN in
+          # FPC's link through a shell, so libqjs was not found.) Git on
+          # Haiku now and then fails a run when several go at once (a push
+          # with "pthread_join failed", one of TestAsyncReads' six reads
+          # coming back empty), a different test each time, so a failed
+          # round is run again: a failure in both stops the leg, one in the
+          # first alone is a warning.
+          if ! make test > /tmp/gittan-tests.log 2>&1; then
+            cat /tmp/gittan-tests.log
+            # The failed and erred tests' messages, not the ignored ones'.
+            FIRST=$(awk '/^List of (failures|errors):/ {on=1} /^List of ignored tests:/ {on=0}
+              on && /Message:/ {sub(/^ *Message: */, ""); print}' /tmp/gittan-tests.log | head -3 | tr '\n' ' ')
+            echo "The tests failed once; running them again"
+            make test
+            echo "::warning::A test failed on Haiku in the first round only: $FIRST"
+          else
+            cat /tmp/gittan-tests.log
+          fi
           mkdir -p dist/Gittan
           cp Gittan dist/Gittan/
           cp -r lexlib dist/Gittan/
@@ -767,11 +784,223 @@ jobs:
           tar -C dist -czf Gittan-${{ matrix.name }}.tar.gz Gittan
           ls -l Gittan-${{ matrix.name }}.tar.gz
 
+      # The same folder as a Haiku package, so pkgman brings Qt 6, libiconv
+      # and git with it and Deskbar lists Gittan. A package is mounted read
+      # only, which suits Gittan: it only reads beside its executable
+      # (lexlib/, the libraries). The step may fail without losing the
+      # tarball. The package is installed in the VM afterwards, which checks
+      # that its requirements resolve against HaikuPorts.
+      - name: Make the Haiku package
+        continue-on-error: true
+        shell: cpa.sh {0}
+        run: |
+          set -euo pipefail
+          VERSION='${{ needs.version.outputs.version }}'
+          [ -n "$VERSION" ] || VERSION="$(make -s version)"
+          HPKG="Gittan-${{ matrix.name }}.hpkg"
+          ROOT=dist/hpkg
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/apps" "$ROOT/data/deskbar/menu/Applications"
+          cp -r dist/Gittan "$ROOT/apps/Gittan"
+          # Relative, so it holds whether the package is installed for the
+          # system (/boot/system) or the user (~/config).
+          ln -s ../../../../apps/Gittan/Gittan "$ROOT/data/deskbar/menu/Applications/Gittan"
+          echo "Libraries Gittan links against:"
+          objdump -p "$ROOT/apps/Gittan/Gittan" | grep NEEDED || true
+          cat > "$ROOT/.PackageInfo" <<INFO
+          name gittan
+          version $VERSION-1
+          architecture x86_64
+          summary "Git Tree Analyzer & Navigator"
+          description "A free, native git client built around the diff. See what you changed as you change it, who wrote each line and the history behind it, then commit, sync and merge without leaving it. The AI features are off until you turn them on."
+          packager "Björn Lindh <https://github.com/slicke/gittan>"
+          vendor "Gittan"
+          copyrights { "Björn Lindh" }
+          licenses { "GNU GPL v3" }
+          urls { "https://gittan.app" }
+          provides {
+            gittan = $VERSION-1
+            app:Gittan = $VERSION
+          }
+          requires {
+            haiku
+            libqt6pas
+            lib:libiconv
+            cmd:git
+          }
+          INFO
+          # Made in dist/ and moved beside the tarball only once it installs
+          # and starts, so a broken package is not uploaded.
+          package create -C "$ROOT" "dist/$HPKG"
+          package list "dist/$HPKG"
+          pkgman install -y "$PWD/dist/$HPKG"
+          test -x /boot/system/apps/Gittan/Gittan || { echo "::error::The package installed no Gittan"; exit 1; }
+          (cd / && timeout 10 /boot/system/apps/Gittan/Gittan > /tmp/gittan-hpkg.log 2>&1) || true
+          cat /tmp/gittan-hpkg.log
+          if grep -qi "runtime_loader\|cannot open file\|could not load" /tmp/gittan-hpkg.log; then
+            echo "::error::Gittan from the package cannot load its libraries"; exit 1
+          fi
+          mv "dist/$HPKG" "$HPKG"
+          ls -l "$HPKG"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: Gittan-extra-${{ matrix.name }}
-          path: Gittan-${{ matrix.name }}.tar.gz
+          path: |
+            Gittan-${{ matrix.name }}.tar.gz
+            Gittan-${{ matrix.name }}.hpkg
+          if-no-files-found: error
+          retention-days: 14
+
+  # FreeBSD: no runner either, so vmactions boots a FreeBSD VM, rsyncs the
+  # workspace in and copies it back after `run`, as trndi-cli's leg does.
+  # 15.1, since the committed x86_64-freebsd QuickJS libraries were built
+  # there and an older FreeBSD may refuse them. FreeBSD's fpc package
+  # (3.2.3 on 15.1, FPC's 3.2 branch) is used as it is; its Lazarus is
+  # older than 5.0RC1, which is built from its tarball as on Haiku and
+  # kept in the cache
+  # (lazarus-freebsd/, a folder of the workspace so it is synced into the
+  # VM). gtk3, as on Linux. No arm64: FreeBSD's fpc package is amd64 only.
+  build-freebsd:
+    name: Build (freebsd-amd64, best effort)
+    needs: version
+    if: always() && (needs.version.result == 'success' || needs.version.result == 'skipped')
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 90
+    env:
+      GITTAN_BUILD: ${{ needs.version.outputs.build_number }}
+      GITTAN_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Restore the Lazarus build
+        id: lazarus-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: lazarus-freebsd
+          key: toolchain-freebsd-gtk3-lazarus-5.0RC1-fpc3.2
+
+      - name: Stamp the build number
+        if: env.GITTAN_BUILD != ''
+        run: |
+          set -euo pipefail
+          perl -pi -e 's|(<UseVersionInfo Value="True"/>)|$1<RevisionNr Value="$ENV{GITTAN_BUILD}"/>|' Gittan.lpi
+          grep -q "<RevisionNr Value=\"$GITTAN_BUILD\"/>" Gittan.lpi
+
+      # One step, as vmactions runs its commands in the VM only within it.
+      # The fpc package alone, which has the compiler and its units: the
+      # other fpc-* packages bring fpc-devel, a 3.3.1 snapshot of FPC main
+      # that takes fpc's place, and its TProcess.CloseInput leaves the
+      # input open once the Input stream is made (FPC issue #41845, fixed
+      # on 2026-11-05), so a git alias reading its input waited for ever
+      # in TestInputClosed. FreeBSD's fpc.cfg does not
+      # search /usr/local/lib, where the packages put GTK and the other
+      # libraries, so ~/.fpc.cfg, read before it, includes it and adds that.
+      - name: Build, test and package in the FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: '15.1'
+          usesh: true
+          envs: 'GITTAN_BUILD GITTAN_VERSION VENDOR_PACKAGES'
+          prepare: |
+            pkg install -y bash gmake curl git perl5 gtk3 fpc
+          run: |
+            set -eu
+            fpc -iV
+            git --version
+            FPCCFG=$(ls /usr/local/etc/fpc.cfg /etc/fpc.cfg 2>/dev/null | head -1)
+            printf '#INCLUDE %s\n-Fl/usr/local/lib\n' "$FPCCFG" > ~/.fpc.cfg
+            if [ -x lazarus-freebsd/lazbuild ]; then
+              echo "lazbuild from the cache"
+            else
+              mkdir -p lazarus-freebsd
+              curl -fsSL --connect-timeout 30 --retry 3 -o lazarus.tar.gz \
+                "https://download.lazarus-ide.org/Lazarus%20Zip%20_%20GZip/Lazarus%205.0RC1/lazarus-5.0RC1-0.tar.gz"
+              tar xzf lazarus.tar.gz -C lazarus-freebsd --strip-components=1
+              rm lazarus.tar.gz
+              (cd lazarus-freebsd && gmake lazbuild LCL_PLATFORM=gtk3)
+            fi
+            # lazbuild does not find its own folder here ("Invalid Lazarus
+            # directory"), as on Haiku, and the Makefile quotes $(LAZBUILD),
+            # so a wrapper passes --lazarusdir.
+            printf '#!/bin/sh\nexec "%s/lazarus-freebsd/lazbuild" --lazarusdir="%s/lazarus-freebsd" "$@"\n' "$PWD" "$PWD" > lazbuild-freebsd
+            chmod +x lazbuild-freebsd
+            LAZBUILD="$PWD/lazbuild-freebsd"
+            "$LAZBUILD" --version
+            for LPK in $VENDOR_PACKAGES; do "$LAZBUILD" --add-package-link "$LPK"; done
+            gmake LAZBUILD="$LAZBUILD"
+            test -x Gittan
+            # The tests once hung here with nothing to show for it, so they
+            # run in the background under a watch: after 10 minutes the
+            # test program's processes are listed with their command lines
+            # (a git, gpg or ssh-keygen waiting on input names the test) and
+            # its threads' kernel stacks, then it is stopped.
+            gmake test &
+            MAKEPID=$!
+            WAITED=0
+            while kill -0 "$MAKEPID" 2>/dev/null && [ "$WAITED" -lt 600 ]; do
+              sleep 5; WAITED=$((WAITED + 5))
+            done
+            if kill -0 "$MAKEPID" 2>/dev/null; then
+              echo "::error::The tests still ran after 10 minutes"
+              ps -axww -o pid,ppid,stat,etime,command | grep -v ' \[[^]]*\]$'
+              # Every process under the test program, with its threads'
+              # stacks and its open files: a pipe's write end held open
+              # somewhere keeps a reader (cat in an alias) waiting.
+              # One ps for the pairs and awk for the tree (a walk with pgrep
+              # stalled here once), and each procstat under a time limit.
+              # One -o per column: FreeBSD's ps takes all after "pid=" in
+              # "-o pid=,ppid=,command=" for that column's header.
+              TREE=$(ps -ax -o pid= -o ppid= -o command= | awk '
+                { ppid[$1] = $2; if ($3 ~ /(^|\/)tests\/gittantests$/) root[$1] = 1 }
+                END { for (p in ppid) { q = p; for (i = 0; i < 20 && q != ""; i++) {
+                  if (q in root) { print p; break } q = ppid[q] } } }')
+              echo "The test program's processes: $(echo $TREE)"
+              for P in $TREE; do
+                echo "--- $P: $(ps -ww -o command= -p "$P")"
+                timeout 20 procstat -kk "$P" || true
+                timeout 20 procstat -f "$P" || true
+              done
+              pkill -f tests/gittantests || true
+              kill "$MAKEPID" 2>/dev/null || true
+              exit 1
+            fi
+            wait "$MAKEPID"
+            mkdir -p dist/Gittan
+            cp Gittan dist/Gittan/
+            cp -r lexlib dist/Gittan/
+            cp icons/png/gittan-256.png dist/Gittan/gittan.png
+            QJS=externals/quickjs/prebuilt/x86_64-freebsd
+            cp "$QJS"/libqjs.so.0.*.* dist/Gittan/libqjs.so.0
+            cp "$QJS"/libtqshim.so dist/Gittan/
+            cp externals/quickjs/LICENSE.quickjs-ng dist/Gittan/
+            cp LICENSE dist/Gittan/LICENSE.gittan
+            cp NOTICE dist/Gittan/
+            # Without a display Gittan cannot start, so ldd checks that the
+            # libraries resolve, the two beside it through the rpath.
+            ldd dist/Gittan/Gittan
+            if ldd dist/Gittan/Gittan | grep -q 'not found'; then
+              echo "::error::Gittan cannot find its libraries on FreeBSD"; exit 1
+            fi
+            tar -C dist -czf Gittan-freebsd-amd64.tar.gz Gittan
+            ls -l Gittan-freebsd-amd64.tar.gz
+
+      - name: Save the Lazarus build
+        if: always() && steps.lazarus-cache.outputs.cache-hit != 'true' && hashFiles('lazarus-freebsd/lazbuild') != ''
+        uses: actions/cache/save@v6
+        with:
+          path: lazarus-freebsd
+          key: ${{ steps.lazarus-cache.outputs.cache-primary-key }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: Gittan-extra-freebsd-amd64
+          path: Gittan-freebsd-amd64.tar.gz
           if-no-files-found: error
           retention-days: 14
 
@@ -997,6 +1226,12 @@ jobs:
             echo "- **Gittan-linux-x86_64.rpm** — Fedora and other RPM distributions: \`sudo dnf install ./Gittan-linux-x86_64.rpm\` (\`zypper install\` on openSUSE)."
             echo "- **Gittan-linux-amd64.tar.gz** — Linux amd64 without installing, needs GTK 3. Unpacked, it has no launcher or icon in the desktop's menu."
             echo "- **Gittan-linux-arm64.deb**, **Gittan-linux-aarch64.rpm** and **Gittan-linux-arm64.tar.gz** — the same for arm64 Linux, such as Raspberry Pi OS (64-bit): \`sudo apt install ./Gittan-linux-arm64.deb\`."
+            # The best-effort legs may still be building: a line each, which
+            # publish-extra replaces with the downloads, or removes when the
+            # leg made none. The comment, hidden on GitHub, is what it finds.
+            echo '- Haiku (64-bit): still being built; the downloads appear here when the build is done. <!-- extra:haiku -->'
+            echo '- FreeBSD (amd64): still being built; the download appears here when the build is done. <!-- extra:freebsd -->'
+            echo '- Windows on Arm: still being built; the download appears here when the build is done. <!-- extra:windows-arm64 -->'
             echo
             echo "Gittan runs the git command line tool, so git must be on your PATH."
           } > notes.md
@@ -1036,14 +1271,15 @@ jobs:
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
 
   # ===================== PUBLISH THE BEST-EFFORT LEGS =====================
-  # After the release is out, adds the packages of the legs that made it and
-  # a Downloads line for each; a leg that made none is left out. Runs when
+  # After the release is out, adds the packages of the legs that made it.
+  # publish lists each leg as still being built; here that line gives way
+  # to the leg's downloads, or goes when the leg made none. Runs when
   # publish did, whatever the legs' results.
   publish-extra:
     name: Add the best-effort packages
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [version, publish, build-extra, build-winarm]
+    needs: [version, publish, build-extra, build-freebsd, build-winarm]
     permissions:
       contents: write
     if: always() && needs.publish.result == 'success'
@@ -1066,30 +1302,54 @@ jobs:
           ls -l packages
           # A rerun uploads the packages again but does not list them twice.
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
-          ADDED=
+          perl -pi -e 's/\r//g' notes.md
+          cp notes.md notes.orig
+          # The lines of each leg go in lines/<key>, the key of its
+          # placeholder in the notes; lines/other for a package with none.
+          rm -rf lines && mkdir lines
           for F in packages/*; do
             [ -f "$F" ] || continue
+            NAME="$(basename "$F")"
             gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$F"
-            if grep -qF -- "**$(basename "$F")**" notes.md; then
-              echo "$(basename "$F") is listed already"
+            if grep -qF -- "**$NAME**" notes.md; then
+              echo "$NAME is listed already"
               continue
             fi
-            case "$(basename "$F")" in
-              Gittan-haiku-x86_64.tar.gz)
-                ADDED="$ADDED- **Gittan-haiku-x86_64.tar.gz** — Haiku (64-bit) without installing, needs Qt 6 from HaikuPorts (\`pkgman install libqt6pas\`). Unpack anywhere and run Gittan."$'\n' ;;
-              Gittan-windows-arm64.zip)
-                ADDED="$ADDED- **Gittan-windows-arm64.zip** — Windows 11 on Arm, native, without installing; built with a development version of Free Pascal (3.3.1). Unpack anywhere and run Gittan.exe."$'\n' ;;
-              *)
-                ADDED="$ADDED- **$(basename "$F")**"$'\n' ;;
+            case "$NAME" in
+              Gittan-haiku-*) KEY=haiku ;;
+              Gittan-freebsd-*) KEY=freebsd ;;
+              Gittan-windows-arm64*) KEY=windows-arm64 ;;
+              *) KEY=other ;;
             esac
+            case "$NAME" in
+              Gittan-haiku-x86_64.hpkg)
+                LINE="- **$NAME** — Haiku (64-bit) package. Install it with \`pkgman install $NAME\`, which also brings Qt 6 and git; Gittan is then in the Deskbar menu under Applications." ;;
+              Gittan-haiku-x86_64.tar.gz)
+                LINE="- **$NAME** — Haiku (64-bit) without installing, needs Qt 6 from HaikuPorts (\`pkgman install libqt6pas\`). Unpack anywhere and run Gittan." ;;
+              Gittan-freebsd-amd64.tar.gz)
+                LINE="- **$NAME** — FreeBSD 15.1 or later (amd64, GTK 3) without installing, needs GTK 3 and git (\`pkg install gtk3 git\`). Unpack anywhere and run Gittan." ;;
+              Gittan-windows-arm64.zip)
+                LINE="- **$NAME** — Windows 11 on Arm, native, without installing; built with a development version of Free Pascal (3.3.1). Unpack anywhere and run Gittan.exe." ;;
+              *)
+                LINE="- **$NAME**" ;;
+            esac
+            printf '%s\n' "$LINE" >> "lines/$KEY"
           done
-          [ -n "$ADDED" ] || { echo "No best-effort package to list; the notes stay as they are."; exit 0; }
-          # The lines go into the Downloads list, before the note on git
+          # Every leg has ended by now, so each placeholder gives way to its
+          # leg's lines, or goes when the leg made no package. Lines with no
+          # placeholder to take (a release from before them, or a package
+          # with no key) go at the end of the list, before the note on git
           # that ends it.
-          cp notes.md notes.orig
-          ADDED="$ADDED" perl -0pi -e 's/\r//g; s|\n\n(Gittan runs the git command line tool)|\n$ENV{ADDED}\n$1|' notes.md
+          for KEY in haiku freebsd windows-arm64 other; do
+            touch "lines/$KEY"
+            KEY="$KEY" perl -0pi -e '
+              open my $fh, "<", "lines/$ENV{KEY}" or die; local $/; my $add = <$fh>;
+              s/^[^\n]*<!-- extra:\Q$ENV{KEY}\E -->[^\n]*\n/$add/m
+                or (length $add and s/\n\n(Gittan runs the git command line tool)/\n$add\n$1/);
+            ' notes.md
+          done
           if cmp -s notes.md notes.orig; then
-            echo "::warning::The notes have no line on git to put the downloads before; they are left as they are"
+            echo "The notes stay as they are."
             exit 0
           fi
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md

@@ -1175,6 +1175,13 @@ procedure TExtQuickJSTest.TestMemoryLimitFailsAllocations;
 var
   v: JSValue;
 begin
+  {$IFDEF HAIKU}
+  // quickjs-ng counts what it allocates with malloc_usable_size, which it
+  // knows on macOS, Windows, Linux and FreeBSD only (js__malloc_usable_size
+  // in cutils.h); elsewhere it takes 0, so each allocation counts its 8
+  // bytes of overhead alone and the cap is not reached.
+  Ignore('QuickJS cannot measure its allocations on Haiku, so the memory limit does not hold');
+  {$ENDIF}
   JS_SetMemoryLimit(FRuntime, 1 shl 20); // 1 MB
   // Bounded loop: if the cap were ignored this ends after ~160MB of work
   // rather than hanging; with it in force allocation fails within a few
