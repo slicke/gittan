@@ -889,6 +889,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+          # The workspace, .git and all, is synced into the VM; the
+          # token is not to go with it. Nothing here fetches or pushes.
+          persist-credentials: false
 
       - name: Restore the Lazarus build
         id: lazarus-cache
