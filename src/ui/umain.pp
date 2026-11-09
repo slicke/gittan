@@ -4764,6 +4764,9 @@ begin
   CocoaConfigMenu.appMenu.customMenus := FAppMenuItem;
   {$ENDIF}
   FWindow.Menu := FMainMenu;
+  { Hidden once the menus are made, not before (BuildMenu), and before
+    a repository opens, which the new tab's page is without. }
+  FAIMenu.Visible := AIAvailable;
   {$IFDEF OWNBAR}
   { The title bar lists the menus and runs its shade to this frame's
     splitter. }
