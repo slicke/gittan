@@ -95,6 +95,10 @@ var
   { The hook while a menu of the menu strip is open, and the strip. }
   MenuHook: HHOOK;
   HookStrip: TGittanMenuStrip;
+  { Where the mouse was: Windows sends a WM_MOUSEMOVE with the pointer
+    standing still when a menu opens, which took a menu reached with
+    Left or Right back to the name under the pointer. }
+  LastMousePt: TPoint;
 
 const
   MsgfMenu = 2;
@@ -170,7 +174,11 @@ begin
             Step := HookStrip.StepMenu(1);
         end;
       WM_MOUSEMOVE:
-        Step := HookStrip.HoverAt(Msg^.pt);
+        if (Msg^.pt.X <> LastMousePt.X) or (Msg^.pt.Y <> LastMousePt.Y) then
+        begin
+          LastMousePt := Msg^.pt;
+          Step := HookStrip.HoverAt(Msg^.pt);
+        end;
     end;
     if Step then
     begin
@@ -433,6 +441,7 @@ procedure TGittanWinTitleBar.TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupM
   const AName: TRect);
 begin
   HookStrip := AStrip;
+  GetCursorPos(LastMousePt);
   MenuHook := SetWindowsHookExW(WH_MSGFILTER, HOOKPROC(@MenuFilter), 0,
     GetCurrentThreadId);
   try

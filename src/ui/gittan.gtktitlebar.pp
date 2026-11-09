@@ -115,6 +115,12 @@ var
   PendingMenu, PendingWidget: PGtkWidget;
   PendingDx: integer;
   PendingEvent: PGdkEvent;
+  { Where the pointer was at the last motion in the strip's menu, and
+    whether that is known: a motion with the pointer standing still (as
+    when a menu opens under it) does not take a menu reached with Left or
+    Right back to the name under the pointer. }
+  LastMotion: TPoint;
+  MotionKnown: boolean;
 
 const
   StepDelay = 30;
@@ -198,11 +204,22 @@ end;
 
 function MenuMotion(AWidget: PGtkWidget; AEvent: PGdkEventMotion;
   AData: gpointer): gboolean; cdecl;
+var
+  P: TPoint;
 begin
   Result := False;
   if (TrackStrip = nil) or (TrackTop = nil) or (AEvent = nil) then
     Exit;
-  if TrackStrip.HoverAt(Types.Point(Round(AEvent^.x_root), Round(AEvent^.y_root))) then
+  P := Types.Point(Round(AEvent^.x_root), Round(AEvent^.y_root));
+  { The first motion after a menu opens only says where the pointer is. }
+  if not MotionKnown or ((P.X = LastMotion.X) and (P.Y = LastMotion.Y)) then
+  begin
+    LastMotion := P;
+    MotionKnown := True;
+    Exit;
+  end;
+  LastMotion := P;
+  if TrackStrip.HoverAt(P) then
   begin
     EndForStep;
     Result := True;
@@ -494,6 +511,7 @@ begin
     Exit;
   end;
   Menu := TGtk3Menu(APopup.Handle).Widget;
+  MotionKnown := False;
   TrackStrip := AStrip;
   TrackTop := PGtkMenuShell(Menu);
   WatchMenu(Menu);
