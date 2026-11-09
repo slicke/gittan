@@ -226,6 +226,14 @@ begin
     else
       FSummarizeItem.Caption := rsSummarizeMenu;
   end;
+  { The same in the summary's header, at the right of its title. }
+  if not AIAvailable or (FRepo.Root = '') then
+    FSummary.Action := ''
+  else if FSummaryJob <> nil then
+    FSummary.Action := rsSummarizeStopLink
+  else
+    FSummary.Action := rsSummarizeLink;
+  FSummary.ActionHint := Format(rsSummarizeHint, [AgentName]);
   if FAIReviewJob <> nil then
     FAIReviewItem.Caption := rsAIReviewStopMenu
   else

@@ -216,6 +216,13 @@ type
     FTotalsRect: TRect;
     FTotalsHot: boolean;
     FOnTotalsClick: TGittanBranchClickEvent;
+    { A link at the right of the title row, as a section header's
+      action, whose click raises OnAction; shown while something is
+      compared. FActionRect is where it was last painted. }
+    FAction, FActionHint: string;
+    FActionRect: TRect;
+    FActionLinkHot: boolean;
+    FOnAction: TNotifyEvent;
     { How many commits of FBehindRef (the default branch) the branch
       lacks, 0 for no row; the row's Rebase and Merge pills as last
       painted, and the one under the mouse, -1 for none. FBehindConflicts
@@ -231,6 +238,8 @@ type
     FOnBehindAction: TGittanBehindActionEvent;
     procedure SetSyncHot(AValue: boolean);
     procedure SetTotalsHot(AValue: boolean);
+    procedure SetActionLinkHot(AValue: boolean);
+    procedure SetAction(const AValue: string);
     function BehindAt(X, Y: integer): integer;
     procedure SetBehindHot(AValue: integer);
     procedure PaintBehind(var Y: integer);
@@ -395,6 +404,14 @@ type
       their lines), which are drawn as a chip with a chevron while this
       is set and there are changed files. }
     property OnTotalsClick: TGittanBranchClickEvent read FOnTotalsClick write FOnTotalsClick;
+    {** A link at the right of the repository's name, in the link color
+      and underlined under the mouse, such as the AI summary's; '' for
+      none. It shows while there are changed files or a base. }
+    property Action: string read FAction write SetAction;
+    {** The hint over Action. }
+    property ActionHint: string read FActionHint write FActionHint;
+    {** A click on Action. }
+    property OnAction: TNotifyEvent read FOnAction write FOnAction;
     {** A click on Rebase or Merge in the row of SetBehind. }
     property OnBehindAction: TGittanBehindActionEvent read FOnBehindAction write FOnBehindAction;
     {** A click on a commit's row. }
@@ -1865,6 +1882,34 @@ begin
   Invalidate;
 end;
 
+procedure TGittanSummary.SetActionLinkHot(AValue: boolean);
+begin
+  if FActionLinkHot = AValue then
+    Exit;
+  FActionLinkHot := AValue;
+  if AValue then
+  begin
+    Cursor := crHandPoint;
+    Hint := FActionHint;
+  end
+  else
+  begin
+    Cursor := crDefault;
+    Hint := '';
+  end;
+  Invalidate;
+end;
+
+procedure TGittanSummary.SetAction(const AValue: string);
+begin
+  if FAction = AValue then
+    Exit;
+  FAction := AValue;
+  if FAction = '' then
+    SetActionLinkHot(False);
+  Invalidate;
+end;
+
 procedure TGittanSummary.SetTotalsHot(AValue: boolean);
 begin
   if FTotalsHot = AValue then
@@ -2026,6 +2071,18 @@ begin
       Inc(X, Canvas.TextWidth(FBase) + Px(ChevronWidth) div 2 + 1);
       DrawChevron(Canvas, X, TextY + BodyHeight div 2, FDim);
     end;
+  end;
+  FActionRect := Rect(0, 0, 0, 0);
+  if (FAction <> '') and ((Length(FStats) > 0) or (FBase <> '')) then
+  begin
+    TextY := Y + TitleHeight - BodyHeight - 3;
+    Canvas.Font.Color := FLink;
+    if FActionLinkHot then
+      Canvas.Font.Style := [fsUnderline];
+    X := Width - Px(Pad) - Canvas.TextWidth(FAction);
+    FActionRect := Bounds(X, TextY, Canvas.TextWidth(FAction), BodyHeight);
+    Canvas.TextOut(X, TextY, FAction);
+    Canvas.Font.Style := [];
   end;
   Inc(Y, TitleHeight + 6);
 
@@ -2622,6 +2679,7 @@ begin
   SetBaseHot((FBaseRect.Right > FBaseRect.Left) and PtInRect(FBaseRect, Point(X, Y)));
   SetSyncHot((FSyncRect.Right > FSyncRect.Left) and PtInRect(FSyncRect, Point(X, Y)));
   SetTotalsHot((FTotalsRect.Right > FTotalsRect.Left) and PtInRect(FTotalsRect, Point(X, Y)));
+  SetActionLinkHot((FActionRect.Right > FActionRect.Left) and PtInRect(FActionRect, Point(X, Y)));
   SetBackHot(Assigned(FOnBackClick) and PtInRect(FBackRect, Point(X, Y)));
   SetTrustHot(TrustShown and PtInRect(FTrustRect, Point(X, Y)));
   SetStepHot(StepAt(X, Y));
@@ -2631,7 +2689,7 @@ begin
   if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or FTrustHot or (FStepHot >= 0) or (FBehindHot >= 0) or FTextLinkHot or
     FDetailsHot or (FMoreHot >= 0) or (FCardLinkHot >= 0) then
     Cursor := crHandPoint
-  else if not (FBranchHot or FBaseHot or FSyncHot or FTotalsHot or FReviewHot) then
+  else if not (FBranchHot or FBaseHot or FSyncHot or FTotalsHot or FReviewHot or FActionLinkHot) then
     Cursor := crDefault;
 end;
 
@@ -2650,6 +2708,7 @@ begin
   SetBaseHot(False);
   SetSyncHot(False);
   SetTotalsHot(False);
+  SetActionLinkHot(False);
   SetBackHot(False);
   SetTrustHot(False);
   SetStepHot(-1);
@@ -2664,6 +2723,12 @@ var
   Key: string;
 begin
   inherited MouseUp(Button, Shift, X, Y);
+  if (Button = mbLeft) and (FActionRect.Right > FActionRect.Left) and Assigned(FOnAction) and
+    PtInRect(FActionRect, Point(X, Y)) then
+  begin
+    FOnAction(Self);
+    Exit;
+  end;
   if (Button = mbLeft) and BranchClickable and PtInRect(FBranchRect, Point(X, Y)) then
   begin
     FOnBranchClick(Self, Rect(ClientToScreen(FBranchRect.TopLeft).X,

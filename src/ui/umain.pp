@@ -2994,6 +2994,9 @@ resourcestring
   rsFixWriteFailed = 'Could not write the fix: %s';
   rsSummarizeMenu = 'Summarize Changes with AI';
   rsSummarizeStopMenu = 'Stop Summarizing Changes';
+  rsSummarizeLink = '✦ Summarize';
+  rsSummarizeStopLink = '✦ Stop';
+  rsSummarizeHint = 'Summarize the changes with %s';
   rsSummarizing = '%s is summarizing the changes...';
   rsSummarizingTitle = '%s is summarizing the changes';
   rsSummaryTitle = 'The changes, summarized by %s';
@@ -4532,6 +4535,8 @@ begin
   FSummary.OnBaseClick := @SummaryBaseClick;
   FSummary.OnSyncClick := @SummarySyncClick;
   FSummary.OnTotalsClick := @SummaryTotalsClick;
+  FSummary.OnAction := @MenuSummarizeClick;
+  FSummary.ShowHint := True;
   FSummary.OnBehindAction := @SummaryBehindAction;
   FSummary.OnOpenUrl := @SummaryOpenUrl;
   FSummary.OnIssueClick := @SummaryIssueClick;
