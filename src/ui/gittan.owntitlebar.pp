@@ -1038,7 +1038,10 @@ begin
   Result := False;
   if FTabsOnly or (Parent = nil) then
     Exit;
-  Strip.Collect;
+  { A strip not shown yet has no handle, and Collect measures the names
+    on its canvas: without one it gathers nothing and the key is lost. }
+  Strip.HandleNeeded;
+  FStrip.Collect;
   Index := FStrip.IndexOfKey(AKey);
   if Index < 0 then
     Exit;
