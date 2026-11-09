@@ -1047,11 +1047,11 @@ begin
     FAINotice.SetButtons([rsAIStop]);
 end;
 
-procedure TRepoFrame.ShowAIAnswer(const ATitle, AMarkdown: string);
+procedure TRepoFrame.ShowAIAnswer(const ATitle, AMarkdown, APlain: string);
 begin
   FAIStop := nil;
   FAINotice.MarkColor := AgentColor;
-  FAINotice.PopupMarkdown(ATitle, AMarkdown);
+  FAINotice.PopupMarkdown(ATitle, AMarkdown, APlain);
   FAINotice.SetButtons([rsAICopy]);
 end;
 
@@ -1068,6 +1068,14 @@ begin
     Clipboard.AsText := FAINotice.PlainDetail;
     StatusNote(rsAICopied);
   end;
+end;
+
+{ A commit the answer names (LinkCommits) is shown as a click on one in
+  the summary shows it; the answer stays beside it. }
+procedure TRepoFrame.AINoticeLink(Sender: TObject; const AURL: string);
+begin
+  if (Pos(CommitLinkScheme, AURL) = 1) and (FRepo.Root <> '') then
+    ShowBlameCommit(Copy(AURL, Length(CommitLinkScheme) + 1, MaxInt));
 end;
 
 procedure TRepoFrame.MenuSummarizeClick(Sender: TObject);
@@ -1120,7 +1128,7 @@ begin
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
   FStatus.ShowMessage('', stNormal, 0);
   if Job.Ok then
-    ShowAIAnswer(Format(rsSummaryTitle, [Job.AgentName]), Job.Text)
+    ShowAIAnswer(Format(rsSummaryTitle, [Job.AgentName]), Job.Markdown, Job.Text)
   else
   begin
     FAINotice.Close;

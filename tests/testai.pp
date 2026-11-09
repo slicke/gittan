@@ -86,6 +86,7 @@ type
     procedure TestWhyJob;
     procedure TestSummaryInput;
     procedure TestSummaryJob;
+    procedure TestLinkCommits;
   end;
 
 implementation
@@ -1338,6 +1339,35 @@ begin
   finally
     Job.Free;
   end;
+end;
+
+procedure TAiTest.TestLinkCommits;
+var
+  Full, Short, Url, Text, Error: string;
+begin
+  WriteFile('a.pas', 'one');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'Add a']);
+  AssertTrue(RunGitIn(FDir, ['rev-parse', 'HEAD'], Full, Error));
+  Full := Trim(Full);
+  Short := Copy(Full, 1, 7);
+  Url := CommitLinkScheme + Full;
+  AssertEquals('a word', 'Fixed in [' + Short + '](' + Url + ').',
+    LinkCommits(FDir, 'Fixed in ' + Short + '.'));
+  AssertEquals('a code span', '- [`' + Short + '`](' + Url + ') adds a',
+    LinkCommits(FDir, '- `' + Short + '` adds a'));
+  AssertEquals('the full hash', '(**[' + Full + '](' + Url + ')**)',
+    LinkCommits(FDir, '(**' + Full + '**)'));
+  Text := 'see 1234567 and deadbee and `' + Short + ' more` and x' + Short + ' and ' +
+    Short + 'x and src/' + Short + ' and ' + Short + '/a and v1.' + Short;
+  AssertEquals('no commit, or not by itself', Text, LinkCommits(FDir, Text));
+  Text := '[' + Short + '](https://example.com/' + Short + ') <https://x/' + Short +
+    '> <a href="' + Short + '">';
+  AssertEquals('links and tags', Text, LinkCommits(FDir, Text));
+  Text := 'a'#10'```'#10 + Short + #10'```'#10 + Short;
+  AssertEquals('fenced code', 'a'#10'```'#10 + Short + #10'```'#10'[' + Short + '](' +
+    Url + ')', LinkCommits(FDir, Text));
+  AssertEquals('ABCDEF1 is not lowercase', 'ABCDEF1', LinkCommits(FDir, 'ABCDEF1'));
 end;
 
 initialization

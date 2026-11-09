@@ -1851,9 +1851,11 @@ type
       when AStop is given: a click on it calls AStop. }
     procedure ShowAIBusy(const ATitle: string; AStop: TNotifyEvent = nil);
     {** Shows AMarkdown, an agent's answer, in the AI notice under
-      ATitle, with Copy as its button. }
-    procedure ShowAIAnswer(const ATitle, AMarkdown: string);
+      ATitle, with Copy as its button, which copies APlain when given
+      (the answer before LinkCommits). }
+    procedure ShowAIAnswer(const ATitle, AMarkdown: string; const APlain: string = '');
     procedure AINoticeButton(Sender: TObject; AIndex: integer);
+    procedure AINoticeLink(Sender: TObject; const AURL: string);
     {** Has the agent summarize what the change view compares, the
       answer shown with ShowAIAnswer; stops it while it summarizes. }
     procedure StartSummaryJob;
@@ -4714,6 +4716,7 @@ begin
   FAINotice.Mark := nmSparkle;
   FAINotice.Sticky := True;
   FAINotice.OnButton := @AINoticeButton;
+  FAINotice.OnLink := @AINoticeLink;
   FNoticeTimer := TTimer.Create(Self);
   FNoticeTimer.Enabled := False;
   FNoticeTimer.Interval := NoticeDelay;

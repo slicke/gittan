@@ -20,7 +20,7 @@ unit gittan.notice;
   The same panel shows what an AI agent answers (PopupMarkdown): Mark
   nmSparkle draws the agent's sparkle in place of Gittan's icon, and the
   answer, Markdown, is drawn under the title by a LazInk page (headings,
-  lists, code, links to the browser) as high as its text up to what the
+  lists, code, links to the browser, any other link to OnLink) as high as its text up to what the
   form has room for, scrolling the rest; its text can be selected and
   copied. A Sticky notice stays until its close button, so a click
   elsewhere does not lose an answer that took a while. }
@@ -44,11 +44,14 @@ type
   {** A click on the button at AIndex in SetButtons' list. }
   TGittanNoticeButtonEvent = procedure(Sender: TObject; AIndex: integer) of object;
 
+  {** A click on a link in an answer that is not to the web. }
+  TGittanNoticeLinkEvent = procedure(Sender: TObject; const AURL: string) of object;
+
   { TGittanNotice }
 
   TGittanNotice = class(TCustomControl)
   private
-    FTitle, FDetail: string;
+    FTitle, FDetail, FPlain: string;
     FKind: TGittanNoticeKind;
     FBusy, FCloseHot: boolean;
     FDots: integer;
@@ -67,6 +70,7 @@ type
     FButtonRects: array of TRect;
     FHotButton: integer;
     FOnButton: TGittanNoticeButtonEvent;
+    FOnLink: TGittanNoticeLinkEvent;
     FHook: TGittanPopupHook;
     procedure SetCloseHot(AValue: boolean);
     procedure SetHotButton(AValue: integer);
@@ -113,8 +117,10 @@ type
     {** Shows the notice with ATitle over AMarkdown drawn as Markdown, an
       agent's answer: not busy, as high as the text up to the room there
       is, without buttons until SetButtons gives some. Detail is then
-      AMarkdown, and PlainDetail too, for the clipboard. }
-    procedure PopupMarkdown(const ATitle, AMarkdown: string);
+      AMarkdown; PlainDetail, for the clipboard, is APlain, or AMarkdown
+      when that is empty: the answer as written when AMarkdown has links
+      added. }
+    procedure PopupMarkdown(const ATitle, AMarkdown: string; const APlain: string = '');
     {** The buttons at the bottom right, the first the default. }
     procedure SetButtons(const ACaptions: array of string);
     procedure Close;
@@ -138,6 +144,7 @@ type
     {** The detail's font: the editor's, so a hook's output lines up. }
     property DetailFont: TFont read GetDetailFont;
     property OnButton: TGittanNoticeButtonEvent read FOnButton write FOnButton;
+    property OnLink: TGittanNoticeLinkEvent read FOnLink write FOnLink;
   end;
 
 implementation
@@ -266,14 +273,16 @@ begin
     'pre code { background: transparent; padding: 0; }';
 end;
 
-{ An answer's links go to the browser, those to the web alone; the page
-  itself never leaves the answer. }
+{ An answer's links to the web go to the browser, any other to OnLink;
+  the page itself never leaves the answer. }
 procedure TGittanNotice.PageLinkActivate(Sender: TObject; const Link: TInkLinkInfo;
   var Handled: boolean);
 begin
   Handled := True;
   if (Pos('https://', LowerCase(Link.URL)) = 1) or (Pos('http://', LowerCase(Link.URL)) = 1) then
-    OpenURL(Link.URL);
+    OpenURL(Link.URL)
+  else if Assigned(FOnLink) then
+    FOnLink(Self, Link.URL);
 end;
 
 function TGittanNotice.HasMark: boolean;
@@ -313,7 +322,7 @@ end;
 function TGittanNotice.GetPlainDetail: string;
 begin
   if FMarkdown then
-    Result := FDetail
+    Result := FPlain
   else
     Result := FConsole.PlainText;
 end;
@@ -383,10 +392,13 @@ begin
   Reveal;
 end;
 
-procedure TGittanNotice.PopupMarkdown(const ATitle, AMarkdown: string);
+procedure TGittanNotice.PopupMarkdown(const ATitle, AMarkdown, APlain: string);
 begin
   FTitle := ATitle;
   FDetail := AMarkdown;
+  FPlain := APlain;
+  if FPlain = '' then
+    FPlain := AMarkdown;
   FBusy := False;
   FKind := nkNormal;
   FMarkdown := True;

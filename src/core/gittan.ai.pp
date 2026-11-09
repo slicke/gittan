@@ -372,6 +372,20 @@ function WhyInput(const ARoot, APath, ARef: string; AFrom, ATo: integer;
 function SummaryInput(const ARoot, ABase: string; ARange: boolean; APaths: TStrings;
   out AText, AError: string): boolean;
 
+const
+  {** The scheme of the links LinkCommits makes, the full hash after it. }
+  CommitLinkScheme = 'gittan-commit:';
+  {** The most hashes LinkCommits asks git about in one text. }
+  LinkCommitsMax = 64;
+
+{** AMarkdown with each commit hash it names (7 to 40 lowercase hex
+  digits, a word by itself or the whole of an inline code span) made a
+  link to CommitLinkScheme and the full hash, when git in the repository
+  at ARoot finds that commit. Fenced code, links, autolinks and HTML tags
+  are left as they are, as is a hash in a path or a URL (after a slash,
+  a dot, a colon and the like). }
+function LinkCommits(const ARoot, AMarkdown: string): string;
+
 {** The commits git's conflict in the repository at ARoot comes from, for
   APath: the commit being applied (the first of MERGE_HEAD,
   CHERRY_PICK_HEAD, REVERT_HEAD and REBASE_HEAD there is) with its
@@ -592,7 +606,7 @@ type
     FRange: boolean;
     FPaths: TStringList;
     FOk: boolean;
-    FText, FError: string;
+    FText, FMarkdown, FError: string;
   protected
     procedure Execute; override;
   public
@@ -601,8 +615,10 @@ type
     destructor Destroy; override;
     property Base: string read FBase;
     property Ok: boolean read FOk;
-    {** The summary, when Ok. }
+    {** The summary, when Ok, as the agent wrote it. }
     property Text: string read FText;
+    {** Text with the commits it names made links (LinkCommits), to show. }
+    property Markdown: string read FMarkdown;
     {** Why there is none, when not Ok. }
     property Error: string read FError;
   end;
@@ -1294,6 +1310,197 @@ begin
       '[The diff is cut here: %d of its %d bytes are left out. ' +
       'The summary above lists every file.]', Max(MessageDiffKeep div 4,
       MessageDiffKeep - Length(AText)));
+end;
+
+function IsHashText(const S: string): boolean;
+var
+  i: integer;
+begin
+  Result := (Length(S) >= 7) and (Length(S) <= 40);
+  if Result then
+    for i := 1 to Length(S) do
+      if not (S[i] in ['0'..'9', 'a'..'f']) then
+        Exit(False);
+end;
+
+function LinkCommits(const ARoot, AMarkdown: string): string;
+const
+  WordChars = ['0'..'9', 'a'..'z', 'A'..'Z'];
+  { Before or after these a hash is part of a path, a URL or a name. }
+  NotBefore = ['/', '\', '-', '_', ':', '#', '@', '=', '.', '&', '?', '%', '+', '~'];
+  NotAfter = ['/', '\', '-', '_', '@'];
+var
+  Found: TStringList;
+  Looked: integer;
+  Lines: TStringArray;
+  Text: TStringBuilder;
+  Fence: string;
+  n: integer;
+
+  { The full hash of the commit AHash names, '' when there is none. }
+  function Resolve(const AHash: string): string;
+  var
+    k: integer;
+    Output, Error: string;
+  begin
+    k := Found.IndexOfName(AHash);
+    if k >= 0 then
+      Exit(Found.ValueFromIndex[k]);
+    Result := '';
+    if Looked >= LinkCommitsMax then
+      Exit;
+    Inc(Looked);
+    if RunGitIn(ARoot, ['rev-parse', '--verify', '--quiet', AHash + '^{commit}'],
+      Output, Error) then
+      Result := Trim(Output);
+    if not IsHashText(Result) then
+      Result := '';
+    Found.Add(AHash + '=' + Result);
+  end;
+
+  function FenceOf(const ALine: string): string;
+  var
+    S: string;
+    k: integer;
+  begin
+    Result := '';
+    S := TrimLeft(ALine);
+    if (Length(ALine) - Length(S) > 3) or (Length(S) < 3) or not (S[1] in ['`', '~']) then
+      Exit;
+    k := 1;
+    while (k < Length(S)) and (S[k + 1] = S[1]) do
+      Inc(k);
+    if k >= 3 then
+      Result := Copy(S, 1, k);
+  end;
+
+  procedure LinkLine(const S: string);
+  var
+    i, j, k, Run: integer;
+    Word, Full: string;
+  begin
+    i := 1;
+    while i <= Length(S) do
+    begin
+      case S[i] of
+        '`':
+          begin
+            Run := 1;
+            while (i + Run <= Length(S)) and (S[i + Run] = '`') do
+              Inc(Run);
+            j := Pos(StringOfChar('`', Run), S, i + Run);
+            while (j > 0) and (j + Run <= Length(S)) and (S[j + Run] = '`') do
+            begin
+              k := j + Run;
+              while (k <= Length(S)) and (S[k] = '`') do
+                Inc(k);
+              j := Pos(StringOfChar('`', Run), S, k);
+            end;
+            if j = 0 then
+            begin
+              Text.Append(Copy(S, i, Run));
+              Inc(i, Run);
+              Continue;
+            end;
+            Word := Trim(Copy(S, i + Run, j - i - Run));
+            Full := '';
+            if IsHashText(Word) then
+              Full := Resolve(Word);
+            if Full <> '' then
+              Text.Append('[').Append(Copy(S, i, j + Run - i)).Append('](')
+                .Append(CommitLinkScheme).Append(Full).Append(')')
+            else
+              Text.Append(Copy(S, i, j + Run - i));
+            i := j + Run;
+          end;
+        '[':
+          begin
+            { A link as it is, its text and its target. }
+            j := Pos('](', S, i + 1);
+            k := 0;
+            if (j > 0) and (Pos(']', Copy(S, i + 1, j - i - 1)) = 0) then
+              k := Pos(')', S, j + 2);
+            if k = 0 then
+            begin
+              Text.Append('[');
+              Inc(i);
+              Continue;
+            end;
+            Text.Append(Copy(S, i, k - i + 1));
+            i := k + 1;
+          end;
+        '<':
+          begin
+            { An autolink or an HTML tag. }
+            j := 0;
+            if (i < Length(S)) and (S[i + 1] in ['a'..'z', 'A'..'Z', '/', '!']) then
+              j := Pos('>', S, i + 1);
+            if j = 0 then
+            begin
+              Text.Append('<');
+              Inc(i);
+              Continue;
+            end;
+            Text.Append(Copy(S, i, j - i + 1));
+            i := j + 1;
+          end;
+        '0'..'9', 'a'..'z', 'A'..'Z':
+          begin
+            j := i;
+            while (j <= Length(S)) and (S[j] in WordChars) do
+              Inc(j);
+            Word := Copy(S, i, j - i);
+            Full := '';
+            if IsHashText(Word) and ((i = 1) or not (S[i - 1] in NotBefore)) and
+              ((j > Length(S)) or not (S[j] in NotAfter)) then
+              Full := Resolve(Word);
+            if Full <> '' then
+              Text.Append('[').Append(Word).Append('](').Append(CommitLinkScheme)
+                .Append(Full).Append(')')
+            else
+              Text.Append(Word);
+            i := j;
+          end;
+      else
+        Text.Append(S[i]);
+        Inc(i);
+      end;
+    end;
+  end;
+
+begin
+  Found := TStringList.Create;
+  Text := TStringBuilder.Create;
+  try
+    Looked := 0;
+    Fence := '';
+    Lines := AMarkdown.Split([#10]);
+    for n := 0 to High(Lines) do
+    begin
+      if n > 0 then
+        Text.Append(#10);
+      if Fence <> '' then
+      begin
+        { A fence ends with at least as many of its marks. }
+        if (FenceOf(Lines[n]) <> '') and (FenceOf(Lines[n])[1] = Fence[1]) and
+          (Length(FenceOf(Lines[n])) >= Length(Fence)) and
+          (Trim(Lines[n]) = FenceOf(Lines[n])) then
+          Fence := '';
+        Text.Append(Lines[n]);
+      end
+      else if FenceOf(Lines[n]) <> '' then
+      begin
+        Fence := FenceOf(Lines[n]);
+        Text.Append(Lines[n]);
+      end
+      else
+        LinkLine(Lines[n]);
+    end;
+    Result := Text.ToString;
+  finally
+    Text.Free;
+    Found.Free;
+  end;
 end;
 
 { The number after AMark ('-' or '+') in the hunk header AHeader. }
@@ -2458,7 +2665,9 @@ begin
     FText := Trim(StringReplace(Answer, #13#10, #10, [rfReplaceAll]));
     FOk := FText <> '';
     if not FOk then
-      FError := Format(rsAgentNoAnswer, [AgentName]);
+      FError := Format(rsAgentNoAnswer, [AgentName])
+    else
+      FMarkdown := LinkCommits(FRoot, FText);
   end;
   Done;
 end;
