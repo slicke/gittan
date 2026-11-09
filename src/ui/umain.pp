@@ -2662,7 +2662,7 @@ resourcestring
   rsFile = '&File';
   rsRepoMenu = '&Repository';
   rsCommitMenuTitle = 'Co&mmit';
-  rsChangesMenu = 'C&hanges';
+  rsChangesMenu = '&Changes';
   rsOpen = '&Open...';
   rsOpenRepo = 'Open &Repository...';
   rsNewTab = 'New &Tab';
@@ -3470,7 +3470,7 @@ resourcestring
   rsTagDeleteAsk = 'Delete the tag %s here? The remotes keep theirs.';
   rsTagDeleted = 'Deleted the tag %s';
   rsTagDeleteRemoteAsk = 'Delete the tag %s on %s, for everyone who uses it? The local one stays.';
-  rsStashMenu = 'Stas&h';
+  rsStashMenu = '&Stash';
   rsStashAllItem = '&Stash Changes...';
   rsStashChosenItem = 'Stash &Included Files...';
   rsPopStashItem = '&Pop Latest Stash';
