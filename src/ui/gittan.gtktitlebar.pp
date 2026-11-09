@@ -30,7 +30,12 @@
   it shows the form, and lets the bar be a pixel high: the LCL subtracts
   the bar's height from the form's, and takes a height of 0 as the menu
   height of its own) and the bar's menu button drops a copy of the menu
-  as a popup. The caption glyphs are drawn with lines.
+  as a popup; Alt shows the bar's own menu bar over it. While a menu of
+  that one is open, its GtkMenu and the submenus' tell the strip of
+  Left and Right past their ends (move-current) and of the mouse on
+  another name (motion-notify-event, in root coordinates, which are the
+  screen's on X11), so the next menu opens as in a menu bar. The caption
+  glyphs are drawn with lines.
 
   The unit uses GTK; umain keeps it behind LCLGtk3. }
 unit gittan.gtktitlebar;
@@ -64,6 +69,8 @@ type
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: integer);
       override;
     procedure MouseLeave; override;
+    procedure TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
+      X, Y: integer); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -92,6 +99,80 @@ var
   { The bar the window's signals are connected to; nil once it is gone,
     so a late signal finds nothing. }
   LiveBar: TGittanGtkTitleBar;
+  { The strip whose menu is open, and its top GtkMenu. }
+  TrackStrip: TGittanMenuStrip;
+  TrackTop: PGtkMenuShell;
+
+{ Left in the strip's menu itself, or Right on an item without a
+  submenu: the menu beside it opens once this one has closed. }
+procedure MenuMoveCurrent(AShell: PGtkMenuShell; ADir: TGtkMenuDirectionType;
+  AData: gpointer); cdecl;
+var
+  Item: PGtkWidget;
+  Step: boolean;
+begin
+  if (TrackStrip = nil) or (TrackTop = nil) then
+    Exit;
+  Step := False;
+  case ADir of
+    GTK_MENU_DIR_PARENT:
+      if AShell = TrackTop then
+        Step := TrackStrip.StepMenu(-1);
+    GTK_MENU_DIR_CHILD:
+      begin
+        Item := gtk_menu_shell_get_selected_item(AShell);
+        if (Item = nil) or (gtk_menu_item_get_submenu(PGtkMenuItem(Item)) = nil) then
+          Step := TrackStrip.StepMenu(1);
+      end;
+  end;
+  if Step then
+  begin
+    g_signal_stop_emission_by_name(PGObject(AShell), 'move-current');
+    gtk_menu_shell_deactivate(TrackTop);
+  end;
+end;
+
+function MenuMotion(AWidget: PGtkWidget; AEvent: PGdkEventMotion;
+  AData: gpointer): gboolean; cdecl;
+begin
+  Result := False;
+  if (TrackStrip = nil) or (TrackTop = nil) or (AEvent = nil) then
+    Exit;
+  if TrackStrip.HoverAt(Types.Point(Round(AEvent^.x_root), Round(AEvent^.y_root))) then
+  begin
+    gtk_menu_shell_deactivate(TrackTop);
+    Result := True;
+  end;
+end;
+
+{ AMenu and every submenu under it tell the strip of the keys and the
+  mouse; connected once each. }
+procedure WatchMenu(AMenu: PGtkWidget);
+var
+  Children, L: PGList;
+  Sub: PGtkWidget;
+begin
+  if AMenu = nil then
+    Exit;
+  g_signal_handlers_disconnect_matched(PGObject(AMenu),
+    [G_SIGNAL_MATCH_FUNC], 0, 0, nil, @MenuMoveCurrent, nil);
+  g_signal_handlers_disconnect_matched(PGObject(AMenu),
+    [G_SIGNAL_MATCH_FUNC], 0, 0, nil, @MenuMotion, nil);
+  g_signal_connect_data(PGObject(AMenu), 'move-current',
+    TGCallback(@MenuMoveCurrent), nil, nil, G_CONNECT_DEFAULT);
+  g_signal_connect_data(PGObject(AMenu), 'motion-notify-event',
+    TGCallback(@MenuMotion), nil, nil, G_CONNECT_DEFAULT);
+  Children := gtk_container_get_children(PGtkContainer(AMenu));
+  L := Children;
+  while L <> nil do
+  begin
+    Sub := gtk_menu_item_get_submenu(PGtkMenuItem(L^.data));
+    if Sub <> nil then
+      WatchMenu(Sub);
+    L := L^.next;
+  end;
+  g_list_free(Children);
+end;
 
 { The GTK window of the form the bar is on; nil before it has one,
   unless AForce makes the form create it. }
@@ -161,6 +242,8 @@ destructor TGittanGtkTitleBar.Destroy;
 begin
   if LiveBar = Self then
     LiveBar := nil;
+  TrackStrip := nil;
+  TrackTop := nil;
   inherited Destroy;
 end;
 
@@ -319,6 +402,19 @@ begin
         Canvas.Line(CX - H, CY + H, CX + H + 1, CY - H - 1);
       end;
   end;
+end;
+
+procedure TGittanGtkTitleBar.TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
+  X, Y: integer);
+begin
+  inherited TrackMenu(AStrip, APopup, X, Y);
+  TrackStrip := nil;
+  TrackTop := nil;
+  if not APopup.HandleAllocated then
+    Exit;
+  TrackStrip := AStrip;
+  TrackTop := PGtkMenuShell(TGtk3Menu(APopup.Handle).Widget);
+  WatchMenu(PGtkWidget(TrackTop));
 end;
 
 procedure TGittanGtkTitleBar.HideNativeMenu;
