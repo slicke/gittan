@@ -29,7 +29,10 @@
   asks, written as a discard is, so Undo Discard takes it back. The
   seventh is Go > Explain Line History with AI (and the editor menu's):
   the agent reads the history of the lines (git log -L) and explains
-  how they came to be, a card under them among the review's. }
+  how they came to be, a card under them among the review's. The
+  eighth is View > Summarize Changes with AI: the agent says what the
+  commits and the diff the change view compares changed, shown in the
+  AI notice (ShowAIAnswer), which any answer in Markdown can use. }
 
 { The agent the settings pick, made from its fields there: its command
   by the path they give, else where it is found (or the API's server),
@@ -213,6 +216,15 @@ begin
       FWhyItem.Caption := rsWhyStopMenu
     else
       FWhyItem.Caption := rsWhyMenu;
+  end;
+  if FSummarizeItem <> nil then
+  begin
+    FSummarizeItem.Visible := AIAvailable;
+    FSummarizeItem.Enabled := FRepo.Root <> '';
+    if FSummaryJob <> nil then
+      FSummarizeItem.Caption := rsSummarizeStopMenu
+    else
+      FSummarizeItem.Caption := rsSummarizeMenu;
   end;
   if FAIReviewJob <> nil then
     FAIReviewItem.Caption := rsAIReviewStopMenu
@@ -1016,4 +1028,112 @@ begin
   FWhyJob.Stop(False);
   FBlameZombies.Add(FWhyJob);
   FWhyJob := nil;
+end;
+
+{ ---------------------------------------------------------------------------
+  The AI notice, and summarizing the changes
+  --------------------------------------------------------------------------- }
+
+{ The notice with the sparkle, its dots moving: what an agent is doing
+  when the answer is to be read there. It takes no focus and stays
+  until it is closed; the job goes on without it, and its answer shows
+  it again. }
+procedure TRepoFrame.ShowAIBusy(const ATitle: string; AStop: TNotifyEvent);
+begin
+  FAINotice.MarkColor := AgentColor;
+  FAINotice.Popup(ATitle, '', True);
+  FAIStop := AStop;
+  if Assigned(AStop) then
+    FAINotice.SetButtons([rsAIStop]);
+end;
+
+procedure TRepoFrame.ShowAIAnswer(const ATitle, AMarkdown: string);
+begin
+  FAIStop := nil;
+  FAINotice.MarkColor := AgentColor;
+  FAINotice.PopupMarkdown(ATitle, AMarkdown);
+  FAINotice.SetButtons([rsAICopy]);
+end;
+
+{ Busy, its one button stops the agent; over an answer it copies it. }
+procedure TRepoFrame.AINoticeButton(Sender: TObject; AIndex: integer);
+begin
+  if FAINotice.Busy then
+  begin
+    if Assigned(FAIStop) then
+      FAIStop(Self);
+  end
+  else
+  begin
+    Clipboard.AsText := FAINotice.PlainDetail;
+    StatusNote(rsAICopied);
+  end;
+end;
+
+procedure TRepoFrame.MenuSummarizeClick(Sender: TObject);
+begin
+  if FSummaryJob <> nil then
+  begin
+    AbandonSummaryJob;
+    FAINotice.Close;
+    FStatus.ShowMessage('', stNormal, 0);
+    UpdateAIReviewItems;
+  end
+  else
+    StartSummaryJob;
+end;
+
+{ Summarizes what the change view compares, as a review reviews it: the
+  commits since the base, or a range's, and the diff. }
+procedure TRepoFrame.StartSummaryJob;
+var
+  Paths: TStringList;
+  i: integer;
+begin
+  if (FSummaryJob <> nil) or not AIAvailable or (FRepo.Root = '') then
+    Exit;
+  Paths := TStringList.Create;
+  try
+    for i := 0 to High(FStats) do
+      Paths.Add(FStats[i].Path);
+    FSummaryJob := TGittanSummaryJob.Create(FRepo.Root, FAI, FRepo.Base, FRepo.IsRange,
+      Paths);
+  finally
+    Paths.Free;
+  end;
+  FSummaryJob.OnDone := @SummaryJobDone;
+  FSummaryJob.Start;
+  FStatus.ShowBusy(Format(rsSummarizing, [AgentName]), HintSparkle);
+  ShowAIBusy(Format(rsSummarizingTitle, [AgentName]), @MenuSummarizeClick);
+  UpdateAIReviewItems;
+end;
+
+procedure TRepoFrame.SummaryJobDone(Sender: TObject);
+var
+  Job: TGittanSummaryJob;
+begin
+  Job := TGittanSummaryJob(Sender);
+  if Job <> FSummaryJob then
+    Exit;
+  FSummaryJob := nil;
+  FBlameZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
+  FStatus.ShowMessage('', stNormal, 0);
+  if Job.Ok then
+    ShowAIAnswer(Format(rsSummaryTitle, [Job.AgentName]), Job.Text)
+  else
+  begin
+    FAINotice.Close;
+    BannerError(Format(rsSummaryFailed, [Job.AgentName]), Job.Error);
+  end;
+  UpdateAIReviewItems;
+end;
+
+procedure TRepoFrame.AbandonSummaryJob;
+begin
+  if FSummaryJob = nil then
+    Exit;
+  FSummaryJob.Stop(False);
+  FBlameZombies.Add(FSummaryJob);
+  FSummaryJob := nil;
 end;

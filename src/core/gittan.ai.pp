@@ -50,9 +50,10 @@ type
     find for a model that cannot read files, the lines in the files it
     named; atResolve resolves one conflict; atSplit groups the changed
     files into commits; atFix fixes what a review's finding points out;
-    atWhy explains how lines came to be as they are. }
+    atWhy explains how lines came to be as they are; atSummary says
+    what the commits and the diff it is given changed. }
   TGittanAITask = (atMessage, atReview, atFind, atLocate, atResolve, atSplit, atFix,
-    atWhy);
+    atWhy, atSummary);
 
   {** How many lines of each file a model was given (FindLinesInput). }
   TGittanLineCounts = array of integer;
@@ -71,6 +72,9 @@ const
   {** How many of the recent subjects show the agent the repository's
     style. }
   MessageSubjects = 10;
+  {** The most commits of a summary's range listed for the agent, the
+    newest. }
+  SummaryCommits = 200;
   {** The most findings of a review kept; the prompt asks for fewer. }
   ReviewMaxFindings = 10;
   {** The most files of an answer to where something is kept. }
@@ -357,6 +361,17 @@ function FixBlock(const AFileName: string; const ABefore, AAfter: TStringArray):
 function WhyInput(const ARoot, APath, ARef: string; AFrom, ATo: integer;
   out AText, AError: string): boolean;
 
+{** What the agent gets to summarize what the change view compares in
+  the repository at ARoot, ABase as ReviewChanges takes it: the commits
+  between (ABase..HEAD, a range's own two ends, none against HEAD; the
+  newest SummaryCommits, each with its short hash, author, date and
+  whole message), cut at half of MessageDiffKeep, then the summary and
+  the diff as ReviewChanges makes them, unnumbered, cut at what is left
+  of it. False, with git's reason in AError, when git failed; an empty
+  AText when there is neither a commit nor a difference. }
+function SummaryInput(const ARoot, ABase: string; ARange: boolean; APaths: TStrings;
+  out AText, AError: string): boolean;
+
 {** The commits git's conflict in the repository at ARoot comes from, for
   APath: the commit being applied (the first of MERGE_HEAD,
   CHERRY_PICK_HEAD, REVERT_HEAD and REBASE_HEAD there is) with its
@@ -569,7 +584,31 @@ type
     property Error: string read FError;
   end;
 
+  {** Has the agent summarize what the change view compares (see
+    SummaryInput); the answer is Markdown. }
+  TGittanSummaryJob = class(TGittanAgentJob)
+  private
+    FBase: string;
+    FRange: boolean;
+    FPaths: TStringList;
+    FOk: boolean;
+    FText, FError: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const ARoot: string; AAI: TGittanAI; const ABase: string;
+      ARange: boolean; APaths: TStrings);
+    destructor Destroy; override;
+    property Base: string read FBase;
+    property Ok: boolean read FOk;
+    {** The summary, when Ok. }
+    property Text: string read FText;
+    {** Why there is none, when not Ok. }
+    property Error: string read FError;
+  end;
+
 resourcestring
+  rsNothingToSummarize = 'There are no changes to summarize.';
   rsNothingToReview = 'There are no changes to review.';
   rsReviewNotRead = 'The answer was no list of findings: %s';
   rsFoundNotRead = 'The answer was no list of files: %s';
@@ -713,6 +752,17 @@ const
   WhyReadNote = 'You may read the repository''s files to see how the lines are used. ';
   WhyPromptEnd = 'Answer with at most three short paragraphs of Markdown alone, the ' +
     'history first, no headings, no preamble.';
+  SummaryPromptStart = 'Summarize the changes given below for someone who has not ' +
+    'followed them: the commits (newest first, each with its message), when there ' +
+    'are any, then the summary and the diff of everything that changed. Say what ' +
+    'changed and why, grouped by what it is about (a feature, a fix, a refactoring, ' +
+    'a dependency) rather than commit by commit or file by file, the most ' +
+    'important first, and name a commit by its short hash where it helps to find ' +
+    'the change. Say only what the commits and the diff show; where they are cut, ' +
+    'say that the summary covers a part. ';
+  SummaryReadNote = 'You may read the repository''s files to understand a change. ';
+  SummaryPromptEnd = 'Answer with Markdown alone: a sentence or two on the whole, ' +
+    'then a short list or a few short sections, no preamble, no closing remarks.';
 
 var
   AIClasses: array[TGittanAgent] of TGittanAIClass;
@@ -775,6 +825,11 @@ begin
         Result := WhyPromptStart + WhyReadNote + WhyPromptEnd
       else
         Result := WhyPromptStart + WhyPromptEnd;
+    atSummary:
+      if AReadsFiles then
+        Result := SummaryPromptStart + SummaryReadNote + SummaryPromptEnd
+      else
+        Result := SummaryPromptStart + SummaryPromptEnd;
     else { atLocate }
       Result := LocatePromptStart + LocatePromptEnd;
   end;
@@ -1165,32 +1220,80 @@ begin
     'The diff:' + LineEnding + KeepDiff(Diff);
 end;
 
+{ The summary and the diff of what the change view compares: a range
+  ABase diffed as it is, else the work tree's APaths against ABase (HEAD
+  when empty) through IndexDiff. }
+function ComparedDiff(const ARoot, ABase: string; ARange: boolean; APaths: TStrings;
+  out AStat, ADiff, AError: string): boolean;
+var
+  Base: string;
+  HasHead, HasParent: boolean;
+begin
+  if ARange then
+    Exit(RunGitIn(ARoot, ['diff', '--stat=100', ABase], AStat, AError) and
+      RunGitIn(ARoot, ['diff', '--no-ext-diff', '-M', ABase], ADiff, AError));
+  HeadState(ARoot, HasHead, HasParent);
+  Base := ABase;
+  if Base = '' then
+    if HasHead then
+      Base := 'HEAD'
+    else
+      Base := EmptyTreeId;
+  Result := IndexDiff(ARoot, Base, HasHead, APaths, AStat, ADiff, AError);
+end;
+
 function ReviewChanges(const ARoot, ABase: string; ARange: boolean; APaths: TStrings;
   out AText, AError: string): boolean;
 var
-  Base, Stat, Diff: string;
-  HasHead, HasParent: boolean;
+  Stat, Diff: string;
 begin
   AText := '';
-  if ARange then
-    Result := RunGitIn(ARoot, ['diff', '--stat=100', ABase], Stat, AError) and
-      RunGitIn(ARoot, ['diff', '--no-ext-diff', '-M', ABase], Diff, AError)
-  else
-  begin
-    HeadState(ARoot, HasHead, HasParent);
-    Base := ABase;
-    if Base = '' then
-      if HasHead then
-        Base := 'HEAD'
-      else
-        Base := EmptyTreeId;
-    Result := IndexDiff(ARoot, Base, HasHead, APaths, Stat, Diff, AError);
-  end;
+  Result := ComparedDiff(ARoot, ABase, ARange, APaths, Stat, Diff, AError);
   if not Result or (Trim(Diff) = '') then
     Exit;
   AText := 'The changes (git diff --stat):' + LineEnding + Stat + LineEnding +
     'The diff, each line numbered (N for the new side, O for the old):' + LineEnding +
     KeepDiff(NumberDiff(Diff));
+end;
+
+{ The commits a comparison with ABase spans, as git log takes them:
+  ABase..HEAD, a range's own ends with two dots (A...B compares B with
+  its merge base with A, whose commits are A..B's), none against HEAD. }
+function SummaryLogRange(const ABase: string; ARange: boolean): string;
+begin
+  if ABase = '' then
+    Result := ''
+  else if ARange then
+    Result := StringReplace(ABase, '...', '..', [])
+  else
+    Result := ABase + '..HEAD';
+end;
+
+function SummaryInput(const ARoot, ABase: string; ARange: boolean; APaths: TStrings;
+  out AText, AError: string): boolean;
+var
+  Range, Log, Stat, Diff: string;
+begin
+  AText := '';
+  Log := '';
+  Range := SummaryLogRange(ABase, ARange);
+  if (Range <> '') and not RunGitIn(ARoot, ['log', '--no-color', '-n',
+    IntToStr(SummaryCommits), '--format=commit %h%nAuthor: %an%nDate: %as%n%n%B', Range],
+    Log, AError) then
+    Exit(False);
+  Result := ComparedDiff(ARoot, ABase, ARange, APaths, Stat, Diff, AError);
+  if not Result then
+    Exit;
+  if Trim(Log) <> '' then
+    AText := 'The commits (git log ' + Range + ', newest first):' + LineEnding +
+      KeepText(Log, '[The commits are cut here: %d of their %d bytes are left out.]',
+      MessageDiffKeep div 2) + LineEnding;
+  if Trim(Diff) <> '' then
+    AText := AText + 'The changes (git diff --stat):' + LineEnding + Stat + LineEnding +
+      'The diff:' + LineEnding + KeepText(Diff,
+      '[The diff is cut here: %d of its %d bytes are left out. ' +
+      'The summary above lists every file.]', Max(MessageDiffKeep div 4,
+      MessageDiffKeep - Length(AText)));
 end;
 
 { The number after AMark ('-' or '+') in the hunk header AHeader. }
@@ -2300,6 +2403,54 @@ begin
   if Terminated then
     Exit;
   FOk := Ask(atWhy, Input, Answer, FError);
+  if Terminated then
+    Exit;
+  if FOk then
+  begin
+    FText := Trim(StringReplace(Answer, #13#10, #10, [rfReplaceAll]));
+    FOk := FText <> '';
+    if not FOk then
+      FError := Format(rsAgentNoAnswer, [AgentName]);
+  end;
+  Done;
+end;
+
+{ TGittanSummaryJob }
+
+constructor TGittanSummaryJob.Create(const ARoot: string; AAI: TGittanAI;
+  const ABase: string; ARange: boolean; APaths: TStrings);
+begin
+  inherited Create(ARoot, AAI);
+  FBase := ABase;
+  FRange := ARange;
+  FPaths := TStringList.Create;
+  FPaths.AddStrings(APaths);
+end;
+
+destructor TGittanSummaryJob.Destroy;
+begin
+  inherited Destroy;
+  FPaths.Free;
+end;
+
+procedure TGittanSummaryJob.Execute;
+var
+  Input, Answer: string;
+begin
+  if not SummaryInput(FRoot, FBase, FRange, FPaths, Input, FError) then
+  begin
+    Done;
+    Exit;
+  end;
+  if Input = '' then
+  begin
+    FError := rsNothingToSummarize;
+    Done;
+    Exit;
+  end;
+  if Terminated then
+    Exit;
+  FOk := Ask(atSummary, Input, Answer, FError);
   if Terminated then
     Exit;
   if FOk then

@@ -381,6 +381,14 @@ type
     FWhyJob: TGittanWhyJob;
     FWhyKey: string;
     FWhyThread: TGittanReviewThread;
+    { What an agent answers in Markdown (umain.ai.inc): a notice with
+      the sparkle, ShowAIBusy while it works and ShowAIAnswer for the
+      answer. View > Summarize Changes with AI is its first use, the
+      job while it runs. }
+    FAINotice: TGittanNotice;
+    FAIStop: TNotifyEvent;
+    FSummarizeItem: TMenuItem;
+    FSummaryJob: TGittanSummaryJob;
     { The width of a tab in the editors, in characters. }
     FTabSize: integer;
     FSyntaxMenu, FAutoLexerItem, FPlainTextItem: TMenuItem;
@@ -1839,6 +1847,19 @@ type
     procedure AbandonWhyJob;
     procedure MenuWhyClick(Sender: TObject);
     procedure MenuWhyEditClick(Sender: TObject);
+    {** Shows the AI notice busy under ATitle, with Stop as its button
+      when AStop is given: a click on it calls AStop. }
+    procedure ShowAIBusy(const ATitle: string; AStop: TNotifyEvent = nil);
+    {** Shows AMarkdown, an agent's answer, in the AI notice under
+      ATitle, with Copy as its button. }
+    procedure ShowAIAnswer(const ATitle, AMarkdown: string);
+    procedure AINoticeButton(Sender: TObject; AIndex: integer);
+    {** Has the agent summarize what the change view compares, the
+      answer shown with ShowAIAnswer; stops it while it summarizes. }
+    procedure StartSummaryJob;
+    procedure SummaryJobDone(Sender: TObject);
+    procedure AbandonSummaryJob;
+    procedure MenuSummarizeClick(Sender: TObject);
     procedure MenuWrapClick(Sender: TObject);
     procedure MenuFoldClick(Sender: TObject);
     procedure ViewMenuClick(Sender: TObject);
@@ -2969,6 +2990,15 @@ resourcestring
   rsFixed = '%s fixed %s: %s';
   rsFixEditing = '%s''s fix was not used: %s is being edited.';
   rsFixWriteFailed = 'Could not write the fix: %s';
+  rsSummarizeMenu = 'Summarize Changes with AI';
+  rsSummarizeStopMenu = 'Stop Summarizing Changes';
+  rsSummarizing = '%s is summarizing the changes...';
+  rsSummarizingTitle = '%s is summarizing the changes';
+  rsSummaryTitle = 'The changes, summarized by %s';
+  rsSummaryFailed = '%s could not summarize the changes';
+  rsAIStop = 'Stop';
+  rsAICopy = 'Copy';
+  rsAICopied = 'Copied the answer as Markdown';
   rsWhyMenu = 'Explain Line History with AI';
   rsWhyStopMenu = 'Stop Explaining Line History';
   rsWhyNeedsChanges = 'Show a file''s changes first: the history is of the selected lines, ' +
@@ -4677,6 +4707,13 @@ begin
   FNotice.Parent := Self;
   FNotice.SetIcon(App.Icon);
   FNotice.OnButton := @NoticeButton;
+  { An agent's answers: the same panel with the sparkle, kept until it
+    is closed. }
+  FAINotice := TGittanNotice.Create(Self);
+  FAINotice.Parent := Self;
+  FAINotice.Mark := nmSparkle;
+  FAINotice.Sticky := True;
+  FAINotice.OnButton := @AINoticeButton;
   FNoticeTimer := TTimer.Create(Self);
   FNoticeTimer.Enabled := False;
   FNoticeTimer.Interval := NoticeDelay;
@@ -4878,6 +4915,7 @@ begin
   AbandonSplitJob;
   AbandonFixJob;
   AbandonWhyJob;
+  AbandonSummaryJob;
   FreeAndNil(FAI);
   StopCommitJob(True);
   FreeAndNil(FDroppedCommits);
@@ -5262,6 +5300,8 @@ begin
     { The notice's accent is the light one in both, its red a softer one. }
     FNotice.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, RGBToColor(0, 110, 230),
       RGBToColor(241, 112, 112));
+    FAINotice.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, RGBToColor(0, 110, 230),
+      RGBToColor(241, 112, 112));
     FPullBar := RGBToColor(40, 80, 130);
     FLinkColor := RGBToColor(78, 161, 255);
   end
@@ -5273,6 +5313,8 @@ begin
     FHeader.ConflictNav.SetColors(P.Shade, RGBToColor(248, 240, 255),
       RGBToColor(190, 160, 220), RGBToColor(110, 50, 160), RGBToColor(155, 63, 200));
     FNotice.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent,
+      RGBToColor(200, 40, 40));
+    FAINotice.SetColors(P.Popup, P.Text, P.Dim, P.Hover, P.Border, P.Accent,
       RGBToColor(200, 40, 40));
     FPullBar := RGBToColor(205, 225, 250);
     FLinkColor := RGBToColor(0, 102, 204);
@@ -6139,6 +6181,8 @@ begin
   FAIReviewItem.Visible := False;
   FAIClearItem := AddItem(ViewMenu, rsAIClearMenu, 0, @MenuAIClearClick);
   FAIClearItem.Visible := False;
+  FSummarizeItem := AddItem(ViewMenu, rsSummarizeMenu, 0, @MenuSummarizeClick);
+  FSummarizeItem.Visible := False;
   ViewMenu.Add(NewLine);
   AddItem(ViewMenu, rsZoomIn, ShortCut(VK_OEM_PLUS, [ssModifier]), @MenuZoomInClick);
   AddItem(ViewMenu, rsZoomOut, ShortCut(VK_OEM_MINUS, [ssModifier]), @MenuZoomOutClick);
@@ -7415,6 +7459,8 @@ begin
   AbandonSplitJob;
   AbandonFixJob;
   AbandonWhyJob;
+  AbandonSummaryJob;
+  FAINotice.Close;
   FAIThreads := nil;
   FAIThreadsKey := '';
   FExtThreads := nil;

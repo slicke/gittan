@@ -649,6 +649,8 @@ begin
     AbandonSplitJob;
     AbandonFixJob;
     AbandonWhyJob;
+    AbandonSummaryJob;
+    FAINotice.Close;
     FCommitPlan := nil;
   end;
   UpdateFindAction;
