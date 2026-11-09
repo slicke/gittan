@@ -207,6 +207,7 @@ procedure TRepoFrame.UpdateAIReviewItems;
 begin
   if FAIReviewItem = nil then
     Exit;
+  FAIMenu.Visible := AIAvailable;
   FAIReviewItem.Visible := AIAvailable;
   FAIClearItem.Visible := AIAvailable;
   if FWhyItem <> nil then
@@ -215,7 +216,7 @@ begin
     if FWhyJob <> nil then
       FWhyItem.Caption := rsWhyStopMenu
     else
-      FWhyItem.Caption := rsWhyMenu;
+      FWhyItem.Caption := rsWhyAIMenu;
   end;
   if FSummarizeItem <> nil then
   begin

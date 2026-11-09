@@ -378,6 +378,8 @@ type
       and the editor menu's, the job while it runs, the comparison it
       was asked in (AIReviewKey) and the card it is to be, placed. }
     FWhyItem, FWhyEditItem: TMenuItem;
+    { The AI menu, shown while the features are on. }
+    FAIMenu: TMenuItem;
     FWhyJob: TGittanWhyJob;
     FWhyKey: string;
     FWhyThread: TGittanReviewThread;
@@ -2947,9 +2949,10 @@ resourcestring
     'hooks (this commit only), Co-authors credits the people who worked on it with you ' +
     '(this commit only)';
   rsWriteMessage = '✦ AI';
-  rsAIReviewMenu = 'Review Changes with AI';
-  rsAIReviewStopMenu = 'Stop AI Review';
-  rsAIClearMenu = 'Clear AI Review';
+  rsAIMenuTitle = 'AI';
+  rsAIReviewMenu = 'Review Changes';
+  rsAIReviewStopMenu = 'Stop Reviewing Changes';
+  rsAIClearMenu = 'Clear Review';
   rsAIReviewing = '%s is reviewing the changes...';
   rsAIReviewFailed = '%s could not review the changes';
   rsAIReviewNone = '%s found nothing to point out.';
@@ -2970,7 +2973,7 @@ resourcestring
   rsResolvedAI = '%s resolved the conflict at line %d of %s: %s';
   rsResolvedAILast = '%s resolved the last conflict in %s, now marked resolved: %s';
   rsResolvedAIUndo = 'Changes > Undo Discard puts it back';
-  rsSplitMenu = 'Split Changes into Commits...';
+  rsSplitMenu = 'Split into Commits...';
   rsAbsorbMenu = 'Put Changes into Their Commits...';
   rsSplitStopMenu = 'Stop Splitting into Commits';
   rsSplitting = '%s is splitting the changes into commits...';
@@ -2992,7 +2995,7 @@ resourcestring
   rsFixed = '%s fixed %s: %s';
   rsFixEditing = '%s''s fix was not used: %s is being edited.';
   rsFixWriteFailed = 'Could not write the fix: %s';
-  rsSummarizeMenu = 'Summarize Changes with AI';
+  rsSummarizeMenu = 'Summarize Changes';
   rsSummarizeStopMenu = 'Stop Summarizing Changes';
   rsSummarizeLink = '✦ Summarize';
   rsSummarizeStopLink = '✦ Stop';
@@ -3005,6 +3008,7 @@ resourcestring
   rsAICopy = 'Copy';
   rsAICopied = 'Copied the answer as Markdown';
   rsWhyMenu = 'Explain Line History with AI';
+  rsWhyAIMenu = 'Explain Line History';
   rsWhyStopMenu = 'Stop Explaining Line History';
   rsWhyNeedsChanges = 'Show a file''s changes first: the history is of the selected lines, ' +
     'or of the line at the caret.';
@@ -6004,11 +6008,6 @@ begin
   FCommitItem := AddItem(CommitMenu, rsCommitMenu, ShortCut(VK_K, [ssModifier]),
     @MenuCommitClick);
   FCommitItem.Enabled := False;
-  FMessageItem := AddItem(CommitMenu, rsWriteMessageMenu, ShortCut(VK_K, [ssModifier,
-    ssShift]), @MessageActionClick);
-  FMessageItem.Visible := False;
-  FSplitItem := AddItem(CommitMenu, rsSplitMenu, 0, @MenuSplitClick);
-  FSplitItem.Visible := False;
   FAbsorbItem := AddItem(CommitMenu, rsAbsorbMenu, 0, @MenuAbsorbClick);
   FAbsorbItem.Enabled := False;
   CommitMenu.Add(NewLine);
@@ -6184,13 +6183,6 @@ begin
     @MenuReviewCommentsClick);
   FReviewItem.Checked := FShowComments;
   FReviewItem.Enabled := Assigned(FForge);
-  FAIReviewItem := AddItem(ViewMenu, rsAIReviewMenu, ShortCut(VK_R, [ssModifier, ssAlt]),
-    @MenuAIReviewClick);
-  FAIReviewItem.Visible := False;
-  FAIClearItem := AddItem(ViewMenu, rsAIClearMenu, 0, @MenuAIClearClick);
-  FAIClearItem.Visible := False;
-  FSummarizeItem := AddItem(ViewMenu, rsSummarizeMenu, 0, @MenuSummarizeClick);
-  FSummarizeItem.Visible := False;
   ViewMenu.Add(NewLine);
   AddItem(ViewMenu, rsZoomIn, ShortCut(VK_OEM_PLUS, [ssModifier]), @MenuZoomInClick);
   AddItem(ViewMenu, rsZoomOut, ShortCut(VK_OEM_MINUS, [ssModifier]), @MenuZoomOutClick);
@@ -6256,8 +6248,6 @@ begin
     @MenuHistoryClick);
   FTimelapseItem := AddItem(GoMenu, rsTimelapse, ShortCut(VK_H, [ssModifier, ssAlt]),
     @MenuTimelapseClick);
-  FWhyItem := AddItem(GoMenu, rsWhyMenu, 0, @MenuWhyClick);
-  FWhyItem.Visible := False;
   FGoFileHistoryItem := AddItem(GoMenu, rsGoFileHistory, 0, @MenuGoFileHistoryClick);
   GoMenu.Add(NewLine);
   AddItem(GoMenu, rsNextChange, ShortCut(VK_F7, []), @MenuNextChangeClick);
@@ -6271,6 +6261,25 @@ begin
   FOlderCommitItem := AddItem(GoMenu, rsOlderCommit, ShortCut(VK_F9, []), @MenuOlderCommitClick);
   FNewerCommitItem := AddItem(GoMenu, rsNewerCommit, ShortCut(VK_F9, [ssShift]),
     @MenuNewerCommitClick);
+
+  { What an agent does (umain.ai.inc), all in one menu that shows while
+    the AI features are on (UpdateAIReviewItems): the commit's message
+    and its split, the review of the changes, and what is to be read.
+    It is made visible and hidden later, since Cocoa places the menus
+    after one made hidden one place too early. }
+  FAIMenu := TMenuItem.Create(Main);
+  FAIMenu.Caption := rsAIMenuTitle;
+  Main.Items.Add(FAIMenu);
+  FMessageItem := AddItem(FAIMenu, rsWriteMessageMenu, ShortCut(VK_K, [ssModifier,
+    ssShift]), @MessageActionClick);
+  FSplitItem := AddItem(FAIMenu, rsSplitMenu, 0, @MenuSplitClick);
+  FAIMenu.Add(NewLine);
+  FAIReviewItem := AddItem(FAIMenu, rsAIReviewMenu, ShortCut(VK_R, [ssModifier, ssAlt]),
+    @MenuAIReviewClick);
+  FAIClearItem := AddItem(FAIMenu, rsAIClearMenu, 0, @MenuAIClearClick);
+  FAIMenu.Add(NewLine);
+  FSummarizeItem := AddItem(FAIMenu, rsSummarizeMenu, 0, @MenuSummarizeClick);
+  FWhyItem := AddItem(FAIMenu, rsWhyAIMenu, 0, @MenuWhyClick);
 
   ToolsMenu := TMenuItem.Create(Main);
   ToolsMenu.Caption := rsTools;
