@@ -32,7 +32,7 @@
   "name": "Gittan",
   "alternateName": "Git Tree Analyzer & Navigator",
   "applicationCategory": "DeveloperApplication",
-  "operatingSystem": "macOS, Windows, Linux, Haiku",
+  "operatingSystem": "macOS, Windows, Linux, Haiku, FreeBSD",
   "url": "https://gittan.app/",
   "downloadUrl": "https://github.com/slicke/gittan/releases/latest",
   "image": "https://gittan.app/assets/shots/unified-dark.png",
@@ -476,8 +476,9 @@
         <li><b>Windows</b>The Windows installer needs no administrator for yourself alone, and adds Open in Gittan to folders' menu and the <code>gittan</code> command; it is not signed, so SmartScreen warns at first: More info, then Run anyway. The x64 build runs on Windows 11 on Arm too, emulated; Gittan-windows-arm64.zip runs there natively.</li>
         <li><b>Linux</b>On Linux the .deb (Debian, Ubuntu, Raspberry Pi OS 64-bit) and the .rpm (Fedora, openSUSE) put Gittan in the desktop's menu with its icon, and the .tar.gz runs where you unpack it; all use GTK 3, which every common desktop already has.</li>
         <li><b>macOS</b>The macOS build is signed ad hoc, so macOS blocks it at first: drag it to Applications, then run <code>xattr -cr /Applications/Gittan.app</code> in Terminal.</li>
-        <li><b>Haiku</b>On Haiku (64-bit), <a href="https://github.com/slicke/gittan/releases/latest/download/Gittan-haiku-x86_64.tar.gz">Gittan-haiku-x86_64.tar.gz</a> runs where you unpack it and needs Qt 6: <code>pkgman install libqt6pas</code>. The Windows on Arm and Haiku builds are added to a release when they build, so the newest release may lack one; the Releases page then has the latest that has it.</li>
-        <li><b>Older and newer builds</b>Older builds and release notes are on the <a href="https://github.com/slicke/gittan/releases">Releases page</a>. Every push to main is also built on <a href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">GitHub Actions</a>, where the artifacts of the newest run are the current development build.</li>
+        <li><b>Haiku</b>On Haiku (64-bit), <a href="https://github.com/slicke/gittan/releases/latest/download/Gittan-haiku-x86_64.hpkg">Gittan-haiku-x86_64.hpkg</a> is a package: <code>pkgman install Gittan-haiku-x86_64.hpkg</code> brings Qt 6 and git with it, and Gittan is then in the Deskbar menu under Applications. Without installing, <a href="https://github.com/slicke/gittan/releases/latest/download/Gittan-haiku-x86_64.tar.gz">Gittan-haiku-x86_64.tar.gz</a> runs where you unpack it and needs Qt 6: <code>pkgman install libqt6pas</code>.</li>
+        <li><b>FreeBSD</b>On FreeBSD 15.1 or later (amd64), <a href="https://github.com/slicke/gittan/releases/latest/download/Gittan-freebsd-amd64.tar.gz">Gittan-freebsd-amd64.tar.gz</a> runs where you unpack it and needs GTK 3 and git: <code>pkg install gtk3 git</code>. The Windows on Arm, Haiku and FreeBSD builds are added to a release when they build, so the newest release may lack one; the Releases page then has the latest that has it.</li>
+        <li><b>Other versions</b>Every release, with what changed in it, is on the <a href="https://github.com/slicke/gittan/releases">Releases page</a>. To try changes before they are released, open the newest run on <a href="https://github.com/slicke/gittan/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess">GitHub Actions</a> and download the file for your system under Artifacts, which needs a GitHub account.</li>
       </ul>
     </details>
   </div>

@@ -30,7 +30,7 @@
   "name": "Gittan",
   "alternateName": "Git Tree Analyzer & Navigator",
   "applicationCategory": "DeveloperApplication",
-  "operatingSystem": "macOS, Windows, Linux, Haiku",
+  "operatingSystem": "macOS, Windows, Linux, Haiku, FreeBSD",
   "url": "https://gittan.app/",
   "downloadUrl": "https://github.com/slicke/gittan/releases/latest",
   "image": "https://gittan.app/assets/shots/unified-dark.png",
@@ -201,6 +201,22 @@
       <p class="lead">Gittan has grown a lot this autumn. These are the larger additions, the newest first; the tour and the workflow below show most of them in place.</p>
     </div>
     <div class="facts c4">
+      <div>
+        <h3>Summarize the changes</h3>
+        <p>With the AI features on, AI &gt; Summarize Changes, or ✦ Summarize at the top right of the summary, has the agent say what the changes shown amount to: the commits since what you compare with, or what is not committed yet. The answer stays in a panel over the window, with Copy, and each commit it names is a link to it. The AI menu holds every AI feature in one place. <a href="#ai">More below</a>.</p>
+      </div>
+      <div>
+        <h3>A menu bar when you want one</h3>
+        <p>On Windows and Linux, <kbd>Alt</kbd> or <kbd>F10</kbd> shows a menu bar at the top of the window, as in Firefox: Left and Right move between the menus, and <kbd>Alt</kbd> with a letter opens that menu at once. It goes again when you are done, or View &gt; Menu Bar keeps it shown.</p>
+      </div>
+      <div>
+        <h3>Haiku package, FreeBSD build</h3>
+        <p>On Haiku, <code>pkgman install</code> takes Gittan as a package that brings Qt 6 and git with it and puts Gittan in the Deskbar menu. FreeBSD 15.1 or later on amd64 has a build of its own, on GTK 3. <a href="index.html#download">Download</a></p>
+      </div>
+      <div>
+        <h3>Push without hooks</h3>
+        <p>When a pre-push hook refuses a push, the notice offers Push Without Hooks, for that push alone; Repository &gt; Push Without Hooks does the same. When the hook is Git LFS's, Gittan warns first that the LFS files would not be uploaded.</p>
+      </div>
       <div>
         <h3>Signed commits</h3>
         <p>A shield beside each signed commit in the graph and on its card: verified, bad, or a key not known here, which the card explains. Set up signing with an SSH or GPG key in the Name and Email dialog, Test it first, and trust a key not known here on GitHub's word. <a href="#workflow" data-tab="b-signed">See it</a></p>
@@ -587,7 +603,7 @@
       <div class="story wide" id="ai">
         <div>
           <h3>Bring your own agent</h3>
-          <p>Gittan has no AI of its own, no account and no key. The AI features are off until you turn them on in the settings, and then they use what you bring: Claude Code or GitHub Copilot with your own sign-in, or any OpenAI-compatible API with your own key, OpenAI, OpenRouter or a local Ollama, where nothing leaves your computer. <b>✦ AI</b> in the Commit section writes the message for the ticked files, Review Changes with AI (<kbd>⌘⌥R</kbd>) puts what it finds under the lines it is about, and the agent can resolve a conflict, split the changes into commits, fix a finding, explain how a few lines came to be, or find where something is. It may read the repository but gets no tool that writes, runs a command or goes to the network: a fix or a resolution comes back as text that Gittan writes in, and Undo Discard takes it out again. Nothing is sent until you ask.</p>
+          <p>Gittan has no AI of its own, no account and no key. The AI features are off until you turn them on in the settings, and then they use what you bring: Claude Code or GitHub Copilot with your own sign-in, or any OpenAI-compatible API with your own key, OpenAI, OpenRouter or a local Ollama, where nothing leaves your computer. <b>✦ AI</b> in the Commit section writes the message for the ticked files, Review Changes with AI (<kbd>⌘⌥R</kbd>) puts what it finds under the lines it is about, and the agent can resolve a conflict, split the changes into commits, fix a finding, explain how a few lines came to be, or find where something is. Summarize Changes says what the changes shown amount to, in a panel with each commit it names as a link, and the AI menu holds all of these in one place. It may read the repository but gets no tool that writes, runs a command or goes to the network: a fix or a resolution comes back as text that Gittan writes in, and Undo Discard takes it out again. Nothing is sent until you ask.</p>
         </div>
         <div class="art" data-ui aria-hidden="true">
           <div class="mini settings">
@@ -622,7 +638,7 @@
       <div>
         <div class="sync lede" aria-hidden="true"><b>↑ 2</b>not pushed · <b>↓ 1</b>not pulled</div>
         <h3>Pull, push and fetch</h3>
-        <p><kbd>⌘⇧L</kbd> pulls, <kbd>⌘⇧P</kbd> pushes, <kbd>⌘⌥F</kbd> fetches, or use the buttons in the status bar; the open repository is also fetched every ten minutes. A pull only fast-forwards unless your git config says otherwise; a branch that went its own way asks Merge or Rebase, and can remember the answer for the repository. After a rebase, <kbd>⌘⌥⇧P</kbd> force-pushes with a lease, so nobody else's commits are lost.</p>
+        <p><kbd>⌘⇧L</kbd> pulls, <kbd>⌘⇧P</kbd> pushes, <kbd>⌘⌥F</kbd> fetches, or use the buttons in the status bar; the open repository is also fetched every ten minutes. A pull only fast-forwards unless your git config says otherwise; a branch that went its own way asks Merge or Rebase, and can remember the answer for the repository. After a rebase, <kbd>⌘⌥⇧P</kbd> force-pushes with a lease, so nobody else's commits are lost. When a pre-push hook refuses a push, the notice offers Push Without Hooks, for that push alone.</p>
       </div>
       <div>
         <h3>Branches</h3>
@@ -745,7 +761,7 @@
       <div class="story">
         <div>
           <h3>At home on each desktop</h3>
-          <p>Tabs sit in the title bar: beside the traffic lights on macOS, and in Gittan's own title bar with a menu button on Windows and Linux. The window keeps the system's shadow and rounded corners.</p>
+          <p>Tabs sit in the title bar: beside the traffic lights on macOS, and in Gittan's own title bar with a menu button on Windows and Linux, where <kbd>Alt</kbd> or <kbd>F10</kbd> shows a menu bar and View &gt; Menu Bar keeps it shown. The window keeps the system's shadow and rounded corners.</p>
         </div>
         <div class="art oswins">
           <figure class="os-linux"><picture>
