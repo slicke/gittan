@@ -147,7 +147,7 @@
             <source srcset="assets/shots/project-zoom-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/project-zoom-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/project-zoom-light.avif" type="image/avif">
-            <img src="assets/shots/project-zoom-light.png" width="1055" height="470" loading="lazy" alt="The Project page of Gittan itself: Lazarus, Gittan.lpi, version 0.15.0, 2 build modes and 6 packages, 2 changed since build-136; the build modes Default and Release with their output, platform, optimization and debug info and a Build button each, and the packages with where each comes from, such as vendor/lazink at 841eded, moved from 5020fd9 since the tag, and LCL from Lazarus">
+            <img src="assets/shots/project-zoom-light.png" width="1055" height="385" loading="lazy" alt="The Project page of trailhead: Node, package.json, 0.1.0, 7 dependencies, 4 changed since v0.1.0; npm as the package manager with an Install button, and the dependencies with the version asked for and the version resolved: @vueuse/core added, vue from 3.5.13 to 3.5.17, vite from 6.3.5 to 6.4.1 and vue-tsc from 2.2.8 to 2.2.10">
           </picture></div>
       </div>
     </div>
@@ -203,7 +203,7 @@
     <div class="facts c4">
       <div>
         <h3>Summarize the changes</h3>
-        <p>With the AI features on, AI &gt; Summarize Changes, or ✦ Summarize at the top right of the summary, has the agent say what the changes shown amount to: the commits since what you compare with, or what is not committed yet. The answer stays in a panel over the window, with Copy, and each commit it names is a link to it. The AI menu holds every AI feature in one place. <a href="#ai">More below</a>.</p>
+        <p>With the AI features on, AI &gt; Summarize Changes, or ✦ Summarize at the top right of the summary, has the agent say what the changes shown amount to: the commits since what you compare with, or what is not committed yet. The answer stays in a panel over the window, with Copy, and each commit it names is a link to it. The AI menu holds every AI feature in one place. <a href="#workflow" data-tab="b-summarize">See it</a></p>
       </div>
       <div>
         <h3>A menu bar when you want one</h3>
@@ -341,6 +341,7 @@
         <button role="tab" id="b-rebase" aria-selected="false" aria-controls="t-rebase" tabindex="-1"><b>Rebase</b></button>
         <button role="tab" id="b-bisect" aria-selected="false" aria-controls="t-bisect" tabindex="-1"><b>Bisect</b></button>
         <button role="tab" id="b-search" aria-selected="false" aria-controls="t-search" tabindex="-1"><b>Search</b></button>
+        <button role="tab" id="b-summarize" aria-selected="false" aria-controls="t-summarize" tabindex="-1"><b>Summarize with AI</b></button>
         <button role="tab" id="b-cleanup" aria-selected="false" aria-controls="t-cleanup" tabindex="-1"><b>Clean</b></button>
       </div>
       <div class="stage">
@@ -495,6 +496,15 @@
             <source srcset="assets/shots/graphmenu-dark.png" media="(prefers-color-scheme: dark)" data-dark>
             <source srcset="assets/shots/graphmenu-light.avif" type="image/avif">
             <img src="assets/shots/graphmenu-light.png" width="1280" height="800" loading="lazy" alt="The commit graph with the menu of Update Vue and Vite, add VueUse: Show Commit, Compare with Working Tree, Browse Files, Export Files as Archive, Mark for Comparison, Create Patch, Create Branch Here, Create Tag Here, Revert Commit, Rebase Interactively from Here, Fixup with the Included Files, Reset main to Here, Bisect, Add Note and Copy Commit Hash">
+          </picture></div>
+        </figure>
+        <figure id="t-summarize" role="tabpanel" aria-labelledby="b-summarize">
+          <figcaption><b>Summarize Changes</b> in the AI menu, or ✦ Summarize at the top right of the summary, has your agent say what the changes shown amount to: here everything since the tag v0.1.0, four commits and what is not committed yet, grouped by what it is about. Each commit it names is a link that shows that commit, Copy takes the text along, and the panel stays until you close it.</figcaption>
+          <div class="frame" data-ui><picture>
+            <source srcset="assets/shots/summarize-dark.avif" type="image/avif" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/summarize-dark.png" media="(prefers-color-scheme: dark)" data-dark>
+            <source srcset="assets/shots/summarize-light.avif" type="image/avif">
+            <img src="assets/shots/summarize-light.png" width="1280" height="800" loading="lazy" alt="The summary of trailhead compared with v0.1.0, and over it a panel headed The changes, summarized by Claude Code: two sentences on the whole, then a list of five points, weather on each card, favourites and regions, sample trails on start, the climb's unit and dependencies, with the commits 3bc4f5e, 4da5e9c, 5129c44 and 0ac0faf as links, and a Copy button">
           </picture></div>
         </figure>
         <figure id="t-search" role="tabpanel" aria-labelledby="b-search">
