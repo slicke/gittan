@@ -2456,8 +2456,9 @@ begin
 end;
 
 { A pre-push hook that refuses (husky's, say) stops the push, with its
-  output as the error and not as a rejection; the hook runs with
-  Gittan's PATH, so it finds node wherever nvm or the like put it. }
+  output as the error and not as a rejection, unless NoVerify skips it;
+  the hook runs with Gittan's PATH, so it finds node wherever nvm or the
+  like put it. }
 procedure TGitRepoTest.TestPushHook;
 var
   Remote, Output, Text: string;
@@ -2505,6 +2506,13 @@ begin
       DeleteFile(ExtractFileDir(ExcludeTrailingPathDelimiter(FDir)) + '/hook-path');
     end;
     {$endif}
+    { NoVerify pushes past the hook, which then does not run. }
+    FCollected := '';
+    FRepo.NoVerify := True;
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    AssertTrue(FCollected, Pos('hook says no', FCollected) = 0);
+    AssertTrue('pushed', Trim(Git(['ls-remote', '--heads', 'origin'])) <> '');
+    FRepo.NoVerify := False;
     DeleteFile(IncludeTrailingPathDelimiter(FDir) + SetDirSeparators('.git/hooks/pre-push'));
     AssertTrue(FRepo.Error, FRepo.Push(Rejected));
   finally

@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- Pushing without the pre-push hook: Repository > Push Without Hooks, and Push Without Hooks in the notice when the hook refused a push, push with --no-verify for that push alone. When the hook is Git LFS's, Gittan warns first that the LFS files would not be uploaded.
+- A Haiku package, Gittan-haiku-x86_64.hpkg: `pkgman install Gittan-haiku-x86_64.hpkg` brings Qt 6 and git with it, and Gittan is then in the Deskbar menu under Applications. The tarball is still there. Like the tarball, a release does not wait for it.
+- A FreeBSD build (amd64, GTK 3), Gittan-freebsd-amd64.tar.gz, for FreeBSD 15.1 or later with GTK 3 and git (`pkg install gtk3 git`). Like the Haiku and Windows on Arm builds, a release does not wait for it.
+
+## 0.17 (build-142, 2026-11-08)
+
+### Added
 - Signed commits show a shield in the commit graph and a line on the commit's card: filled with a check when git vouches for the signature, red for a bad or revoked one, outlined for a key not known here or a signature git could not check, which the card explains (an SSH signature wants an allowed signers file, an OpenPGP one gpg), rather than passing such a commit off as unsigned, as git's own letter does.
 - Signing your own commits is set up in the Name and Email dialog: sign with an SSH key (ssh-keygen comes with macOS, Linux and Windows, and GitHub, GitLab and the others verify it) or a GPG key, pick the key from those found in ~/.ssh, the ssh agent or gpg, and Test signs a throwaway commit to show the chain works before anything is saved. Saving writes commit.gpgsign, tag.gpgSign, gpg.format and user.signingkey at the identity's scope, and for an SSH key sets up the allowed signers file, so your commits show as verified in Gittan too. When gpg is missing the dialog says where to get it.
 - A commit signed with a key not known here can be trusted on GitHub's word: "Trust github.com's keys" on the commit's card, or Trust Signing Keys from github.com in its menu, asks GitHub who made the commit, fetches their GPG and SSH signing keys (a merge made on the web is GitHub's own key), puts the GPG keys into your gpg and the SSH keys into the allowed signers file, and shows those commits as verified, marked trusted through github.com. gpg's own trust settings are left alone; the fingerprints you trusted are kept in settings.json.
@@ -17,8 +24,6 @@
 - The Batch tab works without GitHub: the globe is always there, and without a hosting service it opens Batch alone, with a note and a link to the Hosting settings.
 - Commands of your own for a repository go in `.git/gittan/commands.toml`, which is never committed and needs no trust. The Commands page lists them under Personal, with Create… until the file exists, and the Config section lists the file. Its keys come before those of the committed files, and a table naming a script, target or tool command gives it your own key. A worktree shares the file with the main checkout.
 - `.gittan/repo.toml` says what a repository wants, for everyone who clones it, and needs no trust as nothing in it runs. It can name the kinds of project (`project =`, before the line of the same name in commands.toml), give the issue tracker for the links in commit messages (`[issues]`, when git config names none), set the subject's lengths, a message template and sign-off by default, ask for Conventional Commits subjects with `types` and `scopes`, and list protected branches. The Commit section says when a subject is not of the listed types or a protected branch is checked out, without stopping the commit. The whole `.gittan` folder is described in docs/gittan-folder/README.md.
-- A Haiku package, Gittan-haiku-x86_64.hpkg: `pkgman install Gittan-haiku-x86_64.hpkg` brings Qt 6 and git with it, and Gittan is then in the Deskbar menu under Applications. The tarball is still there. Like the tarball, a release does not wait for it.
-- A FreeBSD build (amd64, GTK 3), Gittan-freebsd-amd64.tar.gz, for FreeBSD 15.1 or later with GTK 3 and git (`pkg install gtk3 git`). Like the Haiku and Windows on Arm builds, a release does not wait for it.
 
 ### Changed
 - A dialog from an extension is headed by its own title, or the extension's name for `alert` and `confirm`, rather than by Extension "name"; a dim line with a puzzle piece beside the buttons says which extension it is from. What an extension logs with `console.log` shows the same way.

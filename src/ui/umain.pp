@@ -631,7 +631,7 @@ type
     FRemoteJob: TGittanRemoteJob;
     FRemoteAhead: integer;
     FRemoteHead: string;
-    FFetchItem, FPullItem, FPushItem, FForcePushItem: TMenuItem;
+    FFetchItem, FPullItem, FPushItem, FForcePushItem, FPushNoVerifyItem: TMenuItem;
     { Commit > Commit abc1234: the commit menu of the commit shown, and in
       its place Pick a Commit in the Graph... while none is. }
     FBranchCommitMenu, FPickCommitItem: TMenuItem;
@@ -1013,6 +1013,8 @@ type
       path and branch, for Try Again after an add. }
     FRetryRoot, FRetryPath, FRetryBranch: string;
     FRetrySubmodules: boolean;
+    { The failed push skipped the pre-push hook, and Push Again does too. }
+    FRetryNoVerify: boolean;
     { A Git LFS download's commits, an empty one for the work tree: the
       one StartRemote hands its job (FLfsRefs), the failed one's for Try
       Again (FRetryRefs), and the sides of the image or binary file shown
@@ -1060,6 +1062,7 @@ type
     FPendingKind: TGittanRemoteKind;
     FPendingMode: TGittanPullMode;
     FPendingArg, FPendingRemoteName, FPendingBranch: string;
+    FPendingNoVerify: boolean;
     { The list a click on the status bar's pull request drops down; each
       row's tag is what it does (the pa* constants). }
     FPullPopup: TGittanPopupList;
@@ -2310,7 +2313,7 @@ type
     function BisectStartAt(const ABad, AGood: string): boolean;
     procedure BisectEndClick;
     procedure StartRemote(AKind: TGittanRemoteKind; AMode: TGittanPullMode = pmAuto;
-      const AArg: string = ''; const ARemote: string = '');
+      const AArg: string = ''; const ARemote: string = ''; ANoVerify: boolean = False);
     procedure RemoteJobDone(Sender: TObject);
     procedure RemoteJobOutput(Sender: TObject);
     procedure NoticeTimerTimer(Sender: TObject);
@@ -2324,6 +2327,8 @@ type
     procedure MenuPushClick(Sender: TObject);
     procedure ForcePushAsk;
     procedure MenuForcePushClick(Sender: TObject);
+    function NoVerifyAsk: boolean;
+    procedure MenuPushNoVerifyClick(Sender: TObject);
     procedure SyncClick(const AScreenRect: TRect);
     function BaseActionRef: string;
     procedure BaseClick(const AScreenRect: TRect);
@@ -3032,6 +3037,11 @@ resourcestring
   rsNoticeDeleting = 'Deleting %s on the remote';
   rsHookFailed = 'The pre-push hook failed';
   rsPushAgain = 'Push Again';
+  rsPushNoVerifyMenu = 'Push Without Hooks';
+  rsPushNoVerifyAction = 'Push Without Hooks';
+  rsNoVerifyLfsTitle = 'Push Without Hooks';
+  rsNoVerifyLfs = 'The pre-push hook uploads the Git LFS files too. Without it the remote ' +
+    'gets the commits but not the files they point to, until a push with the hook runs.';
   rsPullAgain = 'Pull Again';
   rsFetchAgain = 'Fetch Again';
   rsTryAgain = 'Try Again';
@@ -5908,6 +5918,7 @@ begin
     @MenuPushClick);
   FForcePushItem := AddItem(RepoMenu, rsForcePushMenu, ShortCut(VK_P, [ssModifier, ssShift,
     ssAlt]), @MenuForcePushClick);
+  FPushNoVerifyItem := AddItem(RepoMenu, rsPushNoVerifyMenu, 0, @MenuPushNoVerifyClick);
   FFetchItem := AddItem(RepoMenu, rsFetchMenu, ShortCut(VK_F, [ssModifier, ssAlt]),
     @MenuFetchClick);
   RepoMenu.Add(NewLine);
