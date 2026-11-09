@@ -442,7 +442,20 @@ jobs:
           codesign --force --deep --sign - dist/macos/Gittan.app
           codesign --verify --deep --strict dist/macos/Gittan.app
           ln -s /Applications dist/macos/Applications
-          hdiutil create -volname Gittan -srcfolder dist/macos -ov -format UDZO "$DMG"
+          # hdiutil mounts a scratch image to fill it, and on the hosted
+          # runners something (XProtect, Spotlight) now and then holds that
+          # volume when it is to be detached: "create failed - Resource
+          # busy". It passes on a new try.
+          for try in 1 2 3 4 5; do
+            if hdiutil create -volname Gittan -srcfolder dist/macos -ov -format UDZO "$DMG"; then
+              break
+            fi
+            if [ "$try" = 5 ]; then
+              echo "hdiutil create failed five times" >&2
+              exit 1
+            fi
+            sleep $((try * 5))
+          done
 
       - name: Build and test (Windows)
         if: matrix.os_target == 'windows'
