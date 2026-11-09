@@ -408,8 +408,15 @@ section { padding: calc(var(--section-gap) / 2) 0; }
 .install summary:hover { color: var(--accent); }
 .install ul { margin: 28px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--gutter); row-gap: 22px; color: var(--muted); }
 .install li b { display: block; margin-bottom: 4px; color: var(--ink); }
-@media (max-width: 900px) { .dl, .install ul { grid-template-columns: 1fr; } }
-@media (max-width: 600px) { .dl .card { padding: 22px; } }
+/* Haiku and FreeBSD: a low row under the three cards, a line each, as their builds may miss a release. */
+.dl.also { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--gutter); margin-top: var(--gutter); }
+.dl.also .card { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 18px 28px; }
+.dl.also .os { gap: 10px; font-size: 1.25rem; }
+.dl.also .os svg { width: 20px; height: 20px; }
+.dl.also .file { margin: 0; }
+.dl.also .links { margin-left: auto; color: var(--muted); }
+@media (max-width: 900px) { .dl, .dl.also, .install ul { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .dl .card { padding: 22px; } .dl.also .card { padding: 16px 22px; } }
 
 /* ---------- footer: a picture of the product beside the closing line and the links ---------- */
 .foot { padding: calc(var(--section-gap) / 2) 0 0; }

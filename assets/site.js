@@ -31,16 +31,17 @@
   var ua = navigator.userAgent;
   var plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
   var mobile = /Android|iPhone|iPad|iPod/i.test(ua) || (/Mac/i.test(plat) && navigator.maxTouchPoints > 1);
-  var os = mobile ? null : /Mac/i.test(plat) ? 'mac' : /Win/i.test(plat) ? 'win' : /Linux|X11/i.test(plat + ua) ? 'linux' : null;
+  // Haiku's browser calls itself a Macintosh and FreeBSD says X11, so those two are asked first.
+  var os = mobile ? null : /Haiku/i.test(ua + plat) ? 'haiku' : /FreeBSD/i.test(ua + plat) ? 'freebsd' : /Mac/i.test(plat) ? 'mac' : /Win/i.test(plat) ? 'win' : /Linux|X11/i.test(plat + ua) ? 'linux' : null;
   if (os && os !== 'mac') {
     $$('kbd').forEach(function (k) { k.textContent = k.textContent.replace('⌘', 'Ctrl+').replace('⌥', 'Alt+').replace('⇧', 'Shift+'); });
   }
   var card = os && document.querySelector('.dl [data-os="' + os + '"]');
   var get = document.getElementById('get');
   if (card && get) {
-    var names = { mac: 'macOS', win: 'Windows', linux: 'Linux' };
+    var names = { mac: 'macOS', win: 'Windows', linux: 'Linux', haiku: 'Haiku', freebsd: 'FreeBSD' };
     card.classList.add('mine');
-    var main = card.querySelector('.tag');
+    var main = card.querySelector('.tag, [data-main]');
     var label = main.dataset.label;
     var others = $$('a[data-short]', card).filter(function (a) { return !a.closest('[data-arch]'); });
     var arm = card.querySelector('[data-arch="arm64"]');
