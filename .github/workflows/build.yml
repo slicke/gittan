@@ -857,8 +857,9 @@ jobs:
   # workspace in and copies it back after `run`, as trndi-cli's leg does.
   # 15.1, since the committed x86_64-freebsd QuickJS libraries were built
   # there and an older FreeBSD may refuse them. FreeBSD's fpc package
-  # (on 15.1 a 3.3.1 snapshot of FPC main) is used as it is; its Lazarus is older than 5.0RC1, which is
-  # built from its source tarball as on Haiku and kept in the cache
+  # (3.2.3 on 15.1, FPC's 3.2 branch) is used as it is; its Lazarus is
+  # older than 5.0RC1, which is built from its tarball as on Haiku and
+  # kept in the cache
   # (lazarus-freebsd/, a folder of the workspace so it is synced into the
   # VM). gtk3, as on Linux. No arm64: FreeBSD's fpc package is amd64 only.
   build-freebsd:
@@ -881,7 +882,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: lazarus-freebsd
-          key: toolchain-freebsd-gtk3-lazarus-5.0RC1
+          key: toolchain-freebsd-gtk3-lazarus-5.0RC1-fpc3.2
 
       - name: Stamp the build number
         if: env.GITTAN_BUILD != ''
@@ -891,8 +892,12 @@ jobs:
           grep -q "<RevisionNr Value=\"$GITTAN_BUILD\"/>" Gittan.lpi
 
       # One step, as vmactions runs its commands in the VM only within it.
-      # FPC's units come in fpc-* subpackages whose set varies by release,
-      # so every one that exists is installed. FreeBSD's fpc.cfg does not
+      # The fpc package alone, which has the compiler and its units: the
+      # other fpc-* packages bring fpc-devel, a 3.3.1 snapshot of FPC main
+      # that takes fpc's place, and its TProcess.CloseInput leaves the
+      # input open once the Input stream is made (FPC issue #41845, fixed
+      # on 2026-11-05), so a git alias reading its input waited for ever
+      # in TestInputClosed. FreeBSD's fpc.cfg does not
       # search /usr/local/lib, where the packages put GTK and the other
       # libraries, so ~/.fpc.cfg, read before it, includes it and adds that.
       - name: Build, test and package in the FreeBSD VM
@@ -903,7 +908,6 @@ jobs:
           envs: 'GITTAN_BUILD GITTAN_VERSION VENDOR_PACKAGES'
           prepare: |
             pkg install -y bash gmake curl git perl5 gtk3 fpc
-            pkg install -y $(pkg search -x -q '^fpc-' | sed 's/-[0-9][^ ]*$//' | sort -u)
           run: |
             set -eu
             fpc -iV
