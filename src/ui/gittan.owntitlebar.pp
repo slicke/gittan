@@ -94,6 +94,8 @@ type
       menu is open, and the one to open once the open one has closed
       (Left, Right, or the mouse on another name). }
     FHot, FOpen, FStepTo: integer;
+    { The menu to open next is on its way (OpenAsync): the strip stays. }
+    FPending: boolean;
     { Shown from the keyboard: the names underline their accelerators. }
     FKeys: boolean;
     FPopup: TPopupMenu;
@@ -135,7 +137,7 @@ type
       that one once the open one has closed. True when the caller is to
       close the open one. }
     function HoverAt(const AScreen: TPoint): boolean;
-    {** Whether a menu of the strip is open. }
+    {** Whether a menu of the strip is open, or the next on its way. }
     function MenuOpen: boolean;
   end;
 
@@ -219,11 +221,13 @@ type
     {** A click released on a caption button the bar itself saw the mouse
       on (on Windows the form sees it instead, and this is not called). }
     procedure CaptionButtonClick(APart: TGittanTitlePart); virtual;
-    {** Drops APopup at X, Y, a menu of AStrip; a descendant lets Left,
-      Right and the mouse on the strip's names move to another menu
-      while it is open (StepMenu, HoverAt). }
+    {** Drops APopup, a menu of AStrip, under AName, the name's place in
+      the strip; a descendant lets Left, Right and the mouse on the
+      strip's names move to another menu while it is open (StepMenu,
+      HoverAt). It may return before the menu has closed (GTK) or after
+      (Windows). }
     procedure TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
-      X, Y: integer); virtual;
+      const AName: TRect); virtual;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -903,9 +907,12 @@ begin
 end;
 
 procedure TGittanOwnTitleBar.TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
-  X, Y: integer);
+  const AName: TRect);
+var
+  P: TPoint;
 begin
-  APopup.PopUp(X, Y);
+  P := AStrip.ClientToScreen(Types.Point(AName.Left, AStrip.Height));
+  APopup.PopUp(P.X, P.Y);
 end;
 
 function TGittanOwnTitleBar.MenuActive: boolean;
@@ -1429,6 +1436,7 @@ begin
   FHot := -1;
   FOpen := -1;
   FStepTo := -1;
+  FPending := False;
   if not Visible then
     Exit;
   { The focus goes back before the strip hides, which would hand it on
@@ -1445,7 +1453,6 @@ end;
 procedure TGittanMenuStrip.OpenItem(AIndex: integer);
 var
   Src: TMenuItem;
-  P: TPoint;
 begin
   if (FOpen >= 0) or (AIndex < 0) or (AIndex > High(FItems)) then
     Exit;
@@ -1463,12 +1470,12 @@ begin
   FStepTo := -1;
   Invalidate;
   Update;
-  P := ClientToScreen(Types.Point(FRects[AIndex].Left, Height));
-  FBar.TrackMenu(Self, FPopup, P.X, P.Y);
+  FBar.TrackMenu(Self, FPopup, FRects[AIndex]);
 end;
 
 procedure TGittanMenuStrip.OpenAsync(Data: PtrInt);
 begin
+  FPending := False;
   if Visible then
     OpenItem(Data);
 end;
@@ -1496,6 +1503,7 @@ begin
     FStepTo := -1;
     FHot := Index;
     Invalidate;
+    FPending := True;
     Application.QueueAsyncCall(@OpenAsync, Index);
   end
   else
@@ -1504,7 +1512,7 @@ end;
 
 function TGittanMenuStrip.MenuOpen: boolean;
 begin
-  Result := FOpen >= 0;
+  Result := (FOpen >= 0) or FPending;
 end;
 
 function TGittanMenuStrip.StepMenu(ADelta: integer): boolean;
@@ -1603,7 +1611,7 @@ end;
 
 procedure TGittanMenuStrip.ExitAsync(Data: PtrInt);
 begin
-  if Visible and (FOpen < 0) and (FStepTo < 0) and not Focused then
+  if Visible and not MenuOpen and (FStepTo < 0) and not Focused then
     Dismiss(False);
 end;
 

@@ -56,7 +56,7 @@ type
       AColor: TColor); override;
     procedure CreateWnd; override;
     procedure TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
-      X, Y: integer); override;
+      const AName: TRect); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -430,7 +430,7 @@ begin
 end;
 
 procedure TGittanWinTitleBar.TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
-  X, Y: integer);
+  const AName: TRect);
 begin
   HookStrip := AStrip;
   MenuHook := SetWindowsHookExW(WH_MSGFILTER, HOOKPROC(@MenuFilter), 0,
@@ -438,7 +438,7 @@ begin
   try
     { The LCL's popup is TrackPopupMenuEx, which returns once the menu
       has closed. }
-    inherited TrackMenu(AStrip, APopup, X, Y);
+    inherited TrackMenu(AStrip, APopup, AName);
   finally
     if MenuHook <> 0 then
       UnhookWindowsHookEx(MenuHook);

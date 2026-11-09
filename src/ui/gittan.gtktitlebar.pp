@@ -70,7 +70,7 @@ type
       override;
     procedure MouseLeave; override;
     procedure TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
-      X, Y: integer); override;
+      const AName: TRect); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -102,6 +102,19 @@ var
   { The strip whose menu is open, and its top GtkMenu. }
   TrackStrip: TGittanMenuStrip;
   TrackTop: PGtkMenuShell;
+  { The key or the motion that closed a menu for the one beside it, the
+    trigger of that one's popup, which opens from the message loop with
+    no event of its own; GTK shows no popup without one on Wayland. }
+  StepEvent: PGdkEvent;
+
+{ The event being handled, kept as StepEvent, and the open menu closed. }
+procedure EndForStep;
+begin
+  if StepEvent <> nil then
+    gdk_event_free(StepEvent);
+  StepEvent := gtk_get_current_event;
+  gtk_menu_shell_deactivate(TrackTop);
+end;
 
 { Left in the strip's menu itself, or Right on an item without a
   submenu: the menu beside it opens once this one has closed. }
@@ -128,7 +141,7 @@ begin
   if Step then
   begin
     g_signal_stop_emission_by_name(PGObject(AShell), 'move-current');
-    gtk_menu_shell_deactivate(TrackTop);
+    EndForStep;
   end;
 end;
 
@@ -140,7 +153,7 @@ begin
     Exit;
   if TrackStrip.HoverAt(Types.Point(Round(AEvent^.x_root), Round(AEvent^.y_root))) then
   begin
-    gtk_menu_shell_deactivate(TrackTop);
+    EndForStep;
     Result := True;
   end;
 end;
@@ -244,6 +257,9 @@ begin
     LiveBar := nil;
   TrackStrip := nil;
   TrackTop := nil;
+  if StepEvent <> nil then
+    gdk_event_free(StepEvent);
+  StepEvent := nil;
   inherited Destroy;
 end;
 
@@ -404,17 +420,42 @@ begin
   end;
 end;
 
+{ The LCL's popup runs a loop of its own until the menu closes, and pops
+  it up with the current event, of which a menu opened for the one beside
+  it from the message loop has none. The menu is popped up here instead,
+  under the name as a menu bar drops it (anchored at the strip's bottom
+  left corner, shifted right to the name), with the event that stepped
+  to it when there is no current one; the LCL's deactivate handler still
+  closes it (OnClose). Its signals are connected before it shows. }
 procedure TGittanGtkTitleBar.TrackMenu(AStrip: TGittanMenuStrip; APopup: TPopupMenu;
-  X, Y: integer);
+  const AName: TRect);
+var
+  Menu: PGtkWidget;
+  Event: PGdkEvent;
 begin
-  inherited TrackMenu(AStrip, APopup, X, Y);
   TrackStrip := nil;
   TrackTop := nil;
-  if not APopup.HandleAllocated then
+  APopup.HandleNeeded;
+  if not APopup.HandleAllocated or not AStrip.HandleAllocated then
+  begin
+    inherited TrackMenu(AStrip, APopup, AName);
     Exit;
+  end;
+  Menu := TGtk3Menu(APopup.Handle).Widget;
   TrackStrip := AStrip;
-  TrackTop := PGtkMenuShell(TGtk3Menu(APopup.Handle).Widget);
-  WatchMenu(PGtkWidget(TrackTop));
+  TrackTop := PGtkMenuShell(Menu);
+  WatchMenu(Menu);
+  Event := gtk_get_current_event;
+  if Event = nil then
+    Event := StepEvent
+  else if StepEvent <> nil then
+    gdk_event_free(StepEvent);
+  StepEvent := nil;
+  g_object_set(PGObject(Menu), 'rect-anchor-dx', [AName.Left, nil]);
+  gtk_menu_popup_at_widget(PGtkMenu(Menu), TGtk3Widget(AStrip.Handle).Widget,
+    GDK_GRAVITY_SOUTH_WEST, GDK_GRAVITY_NORTH_WEST, Event);
+  if Event <> nil then
+    gdk_event_free(Event);
 end;
 
 procedure TGittanGtkTitleBar.HideNativeMenu;
