@@ -3372,6 +3372,7 @@ resourcestring
   rsToBranchMovedMany = 'Moved %d files to %s';
   rsToBranchMoveSwitch = 'Switch to %s';
   rsToBranchMoveStayed = 'Committed on %s, and still there';
+  rsToBranchMoveUnwritten = 'Moved to %s, but changes left out could not be written back';
   rsBmMergeItem = '&Merge into %s...';
   rsBmRebaseItem = '&Rebase %s onto...';
   rsBmCompareItem = 'Show What a Branch &Changed Since It Left %s...';

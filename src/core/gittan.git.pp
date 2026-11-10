@@ -805,8 +805,9 @@ type
       left SQUASH_MSG in the git directory, which the next commit
       takes away, git is in the middle of nothing else, and the index
       holds something to commit. The file alone does not say so: it
-      stays when the staged changes are discarded one by one. Runs git
-      when the file is there. }
+      stays when the staged changes are stashed or discarded one by
+      one, and is removed here then, so that changes staged later are
+      not taken for the squash. Runs git when the file is there. }
     function SquashPending: boolean;
     {** The e-mail the repository commits under (`git config
       user.email`), empty when none is set. }
@@ -977,6 +978,7 @@ type
     {** The git directory of the work tree (a linked work tree has one of
       its own), empty when nothing is open. }
     function GitDir: string;
+    function StoppedAt(const ACommand: string): string;
     {** The folder a linked worktree's git directory shares with the
       main one (its commondir file), else the git directory itself;
       empty when nothing is open. }
@@ -4869,7 +4871,8 @@ end;
 { The files of ARest differ from the commit made, so git would refuse
   the switch back: they are saved, checked out as committed, and after
   the switch written as ARest has them. A failure on the way writes
-  them back as they were. }
+  them back as they were; one that cannot be written after the switch
+  has its text kept in the git directory (gittan-left-out). }
 function TGittanRepo.MoveToBranch(const AName, AMessage: string; APaths: TStrings;
   out AId: string; out ABack: boolean; const AParts: TGittanCommitParts;
   const ARest: TGittanCommitParts; AOptions: TGittanCommitOptions): boolean;
@@ -4884,6 +4887,28 @@ var
   function FileOf(AIndex: integer): string;
   begin
     Result := IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(ARest[AIndex].Path);
+  end;
+
+  { The text of a file that could not be written, kept in the git
+    directory so the changes left out are not lost with it; what to
+    say of it. }
+  function KeepUnwritten(AIndex: integer; const AWhy: string): string;
+  var
+    Folder, Kept: string;
+  begin
+    Folder := IncludeTrailingPathDelimiter(GitDir) + 'gittan-left-out';
+    Kept := IncludeTrailingPathDelimiter(Folder) + IntToStr(AIndex + 1) + '-' +
+      ExtractFileName(FileOf(AIndex));
+    try
+      ForceDirectories(Folder);
+      WriteBytes(Kept, ARest[AIndex].Text);
+      Result := Format('%s could not be written with its changes left out (%s); ' +
+        'its text is kept in %s.', [ARest[AIndex].Path, AWhy, Kept]);
+    except
+      on E: Exception do
+        Result := Format('%s could not be written with its changes left out (%s), ' +
+          'and they could not be kept (%s).', [ARest[AIndex].Path, AWhy, E.Message]);
+    end;
   end;
 
   procedure PutBack;
@@ -4968,9 +4993,22 @@ begin
     FError := Err;
     Exit;
   end;
-  for i := 0 to High(ARest) do
-    WriteBytes(FileOf(i), ARest[i].Text);
+  { Back where it was, whatever the writes do: a file that cannot be
+    written (locked, read only, a full disk) leaves FError saying so
+    and does not stop the others. }
   ABack := True;
+  FError := '';
+  for i := 0 to High(ARest) do
+    try
+      WriteBytes(FileOf(i), ARest[i].Text);
+    except
+      on E: Exception do
+      begin
+        if FError <> '' then
+          FError := FError + LineEnding;
+        FError := FError + KeepUnwritten(i, E.Message);
+      end;
+    end;
 end;
 
 function TGittanRepo.RenameBranch(const AOld, ANew: string): boolean;
@@ -6413,9 +6451,48 @@ begin
   end;
 end;
 
+{ What the operation ACommand is stopped at: the commit of a rebase,
+  cherry-pick or revert (git's pseudo ref), the number of the patch of
+  an am; '' when it cannot be told. }
+function TGittanRepo.StoppedAt(const ACommand: string): string;
+var
+  Ref, Output, Err, FileName: string;
+  Lines: TStringList;
+begin
+  Result := '';
+  if ACommand = 'rebase' then
+    Ref := 'REBASE_HEAD'
+  else if ACommand = 'cherry-pick' then
+    Ref := 'CHERRY_PICK_HEAD'
+  else if ACommand = 'revert' then
+    Ref := 'REVERT_HEAD'
+  else
+    Ref := '';
+  if Ref <> '' then
+  begin
+    if RunGitIn(FRoot, ['rev-parse', '-q', '--verify', Ref], Output, Err) then
+      Result := Trim(Output);
+    Exit;
+  end;
+  FileName := IncludeTrailingPathDelimiter(GitDir) + 'rebase-apply' + PathDelim + 'next';
+  if (ACommand <> 'am') or not FileExists(FileName) then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    try
+      Lines.LoadFromFile(FileName);
+      Result := Trim(Lines.Text);
+    except
+      Result := '';
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
 function TGittanRepo.SkipOperation: boolean;
 var
-  Command, Output, Err: string;
+  Command, Output, Err, Was, Stopped: string;
 begin
   Command := OperationCommand(Operation);
   if (FRoot = '') or (Command = '') or (Command = 'merge') then
@@ -6423,6 +6500,7 @@ begin
     FError := 'There is no commit to skip.';
     Exit(False);
   end;
+  Was := StoppedAt(Command);
   Result := RunGitEnv(FRoot, WithConflictStyle(FRoot, [Command, '--skip']), ['GIT_EDITOR=:'],
     Output, Err);
   if Result then
@@ -6431,10 +6509,16 @@ begin
       CleanRebaseFiles;
     Exit;
   end;
+  { Stopped at a later commit with conflicts of its own: skipping
+    worked. A skip git refused (a lock, a hook) is still at the commit
+    it was at, with that one's conflicts. }
+  if Operation <> '' then
+  begin
+    Stopped := StoppedAt(Command);
+    Result := (Stopped <> '') and (Stopped <> Was) and RunGit(FRoot, ['ls-files', '-u'], Output) and
+      (Trim(Output) <> '');
+  end;
   FError := Err;
-  { Stopped at a later commit with conflicts of its own: skipping worked. }
-  Result := (Operation <> '') and RunGit(FRoot, ['ls-files', '-u'], Output) and
-    (Trim(Output) <> '');
 end;
 
 function TGittanRepo.AbortOperation: boolean;
@@ -6513,9 +6597,16 @@ var
   Dir, Output, Err: string;
 begin
   Dir := GitDir;
+  if (Dir = '') or not FileExists(IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG') or
+    (Operation <> '') then
+    Exit(False);
   { diff --quiet fails with a staged change, an unmerged file too. }
-  Result := (Dir <> '') and FileExists(IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG') and
-    (Operation = '') and not RunGitIn(FRoot, ['diff', '--cached', '--quiet'], Output, Err);
+  Result := not RunGitIn(FRoot, ['diff', '--cached', '--quiet'], Output, Err);
+  { Nothing staged: the squash's changes were stashed or discarded and
+    git left its file. It is removed, or work staged later would pass
+    for the squash, with its message and an Abort that resets it. }
+  if not Result then
+    DeleteFile(IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG');
 end;
 
 function TGittanRepo.HeadMessage(out AMessage: string): boolean;

@@ -345,12 +345,12 @@ begin
 end;
 
 { The blocks of ALines, each with its target by the blame of HEAD's
-  version of the file; a file HEAD lacks, or one that is deleted, gives
-  blocks that cannot be placed. }
+  version of the file; a file HEAD lacks, or one that is gone from
+  disk, gives blocks that cannot be placed. }
 procedure TGittanAbsorbPlan.AddHunks(ARepo: TGittanRepo; const APath: string; ALines: TStrings);
 var
   Blame: TGittanBlame;
-  Output: string;
+  Output, Err: string;
   i, Old, AFrom, ATo, ABefore, AAfter: integer;
   NewFile, Deleted, Blamed: boolean;
 
@@ -381,15 +381,12 @@ var
   end;
 
 begin
-  NewFile := ALines.Count > 0;
-  Deleted := ALines.Count > 0;
-  for i := 0 to ALines.Count - 1 do
-  begin
-    if ALines[i][1] <> '+' then
-      NewFile := False;
-    if ALines[i][1] <> '-' then
-      Deleted := False;
-  end;
+  { Asked of HEAD and the disk, not read from the lines: a file emptied
+    has only - lines and one that was empty only + lines. }
+  NewFile := (ALines.Count > 0) and
+    not RunGitIn(ARepo.Root, ['cat-file', '-e', 'HEAD:' + APath], Output, Err);
+  Deleted := (ALines.Count > 0) and not NewFile and
+    not FileExists(IncludeTrailingPathDelimiter(ARepo.Root) + SetDirSeparators(APath), False);
   Blame := nil;
   Blamed := False;
   try

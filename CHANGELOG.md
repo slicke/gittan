@@ -9,6 +9,10 @@
 
 ### Fixed
 - Summarizing or reviewing the changes against an older commit no longer fails with "pathspec did not match any files" when a commit since removed a file.
+- A squash merge whose changes were stashed or discarded is over for good: changes staged later are no longer taken for it, with its old message in the commit field and an Abort that would have thrown them away.
+- Saving the Name and Email dialog with the signing left as it was no longer writes the signing settings: a key git picked by your e-mail is not replaced by the first one listed, and tags are not set to be signed.
+- Skip in a rebase, cherry-pick or revert that git refuses (a lock on the index, a hook) shows git's reason rather than saying the commit was skipped.
+- Put into Its Commit places the changes of a file that was emptied, or that was empty before, rather than calling it deleted or new.
 
 ## 0.18 (build-143, 2026-11-09)
 

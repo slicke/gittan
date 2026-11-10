@@ -37,6 +37,7 @@ type
     procedure TestBaseUpstream;
     procedure TestBaseNoMergeBase;
     procedure TestBuild;
+    procedure TestBuildEmptiedFile;
     procedure TestRunAll;
     procedure TestRunIntoFixup;
     procedure TestRunSome;
@@ -508,6 +509,28 @@ end;
 
 { A merge commit among the branch's commits: no plan, as the
   interactive rebase refuses such a range. }
+{ A file emptied has only removed lines and is still there: blamed, not
+  refused as deleted; one gone from disk is. }
+procedure TAbsorbTest.TestBuildEmptiedFile;
+var
+  Plan: TGittanAbsorbPlan;
+begin
+  MakeBranch;
+  WriteLines('b.txt', []);
+  Plan := TGittanAbsorbPlan.Create;
+  try
+    AssertEquals('', Build(Plan, ['b.txt']));
+    AssertEquals('hunks', 1, Length(Plan.Hunks));
+    AssertTrue(Plan.Hunks[0].Reason, Plan.Hunks[0].Reason <> rsAbsorbDeletedFile);
+    DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'b.txt');
+    AssertEquals('', Build(Plan, ['b.txt']));
+    AssertEquals('hunks', 1, Length(Plan.Hunks));
+    AssertEquals(rsAbsorbDeletedFile, Plan.Hunks[0].Reason);
+  finally
+    Plan.Free;
+  end;
+end;
+
 procedure TAbsorbTest.TestBuildMerges;
 var
   Plan: TGittanAbsorbPlan;

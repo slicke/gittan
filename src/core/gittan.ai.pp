@@ -1157,15 +1157,14 @@ var
   i, Count: integer;
   Gone: boolean;
 
-  { A file, a folder or a link, whatever the link leads to. }
+  { A file, a folder or a link, whatever the link leads to. Not
+    FindFirst, which reads * and ? in a name as wildcards. }
   function OnDisk(const APath: string): boolean;
   var
-    Info: TSearchRec;
+    Full: string;
   begin
-    Result := FindFirst(IncludeTrailingPathDelimiter(ARoot) + APath,
-      faAnyFile or faSymLink, Info) = 0;
-    if Result then
-      FindClose(Info);
+    Full := IncludeTrailingPathDelimiter(ARoot) + SetDirSeparators(APath);
+    Result := FileExists(Full, False) or DirectoryExists(Full, False);
   end;
 
 begin

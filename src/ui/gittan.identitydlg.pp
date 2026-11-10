@@ -22,9 +22,12 @@ uses
   ARoot is the repository, where keys are looked up and the test
   commit made. True when Save was pressed, with the trimmed choices in
   them (ASigning.Key the key id for GPG, the public key's path or the
-  key itself for SSH). }
+  key itself for SSH). ASigningChanged says whether the signing was
+  changed in the dialog; a key the dialog chose itself for an empty
+  field does not count. }
 function ChooseIdentity(var AName, AEmail: string; var ALocal: boolean;
-  var ASigning: TGittanSigningSetup; const ARoot: string): boolean;
+  var ASigning: TGittanSigningSetup; const ARoot: string;
+  out ASigningChanged: boolean): boolean;
 
 implementation
 
@@ -545,10 +548,14 @@ begin
 end;
 
 function ChooseIdentity(var AName, AEmail: string; var ALocal: boolean;
-  var ASigning: TGittanSigningSetup; const ARoot: string): boolean;
+  var ASigning: TGittanSigningSetup; const ARoot: string;
+  out ASigningChanged: boolean): boolean;
 var
   F: TIdentityForm;
+  WasSign: integer;
+  WasKey: string;
 begin
+  ASigningChanged := False;
   F := TIdentityForm.Create(Screen.ActiveForm);
   try
     F.FRoot := ARoot;
@@ -568,9 +575,14 @@ begin
     F.FillKeys;
     F.SetKeyValue(ASigning.Key);
     F.Check(nil);
+    { As shown, the key FillKeys chose for an empty field included:
+      only a choice made in the dialog counts as a change. }
+    WasSign := F.FSign.ItemIndex;
+    WasKey := F.KeyValue;
     Result := F.ShowModal = mrOK;
     if Result then
     begin
+      ASigningChanged := (F.FSign.ItemIndex <> WasSign) or (F.KeyValue <> WasKey);
       AName := Trim(F.FName.Text);
       AEmail := Trim(F.FEmail.Text);
       ALocal := F.FLocal.Checked;

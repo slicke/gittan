@@ -748,7 +748,9 @@ begin
   {$IFDEF WINDOWS}
   { Git for Windows: cmd\git.exe or mingw64\bin\git.exe, usr\bin\gpg.exe. }
   Dir := ExtractFileDir(ExpandFileName(GitExe));
-  for Guess in [Dir + '\..\usr\bin\gpg.exe', Dir + '\..\..\usr\bin\gpg.exe'] do
+  { TStringArray.Create, as in WriteSigningSetup. }
+  for Guess in TStringArray.Create(Dir + '\..\usr\bin\gpg.exe',
+    Dir + '\..\..\usr\bin\gpg.exe') do
     if FileExists(Guess) and GpgRuns(Guess) then
       Exit(ExpandFileName(Guess));
   {$ENDIF}

@@ -3041,6 +3041,12 @@ begin
   Git(['merge', '--abort']);
   Git(['checkout', '-q', 'topic']);
   GitStops(FDir, ['rebase', Branch]);
+  { A skip git refuses is not taken for one that stopped further on. }
+  WriteFile('.git/index.lock', '');
+  AssertFalse('refused', FRepo.SkipOperation);
+  AssertTrue(FRepo.Error, Pos('index.lock', FRepo.Error) > 0);
+  AssertEquals('rebasing', FRepo.Operation);
+  DeleteFile(IncludeTrailingPathDelimiter(FDir) + SetDirSeparators('.git/index.lock'));
   AssertTrue(FRepo.Error, FRepo.SkipOperation);
   AssertEquals('', FRepo.Operation);
   AssertEquals(Trim(Git(['rev-parse', Branch])), Trim(Git(['rev-parse', 'HEAD'])));
@@ -3650,6 +3656,14 @@ begin
   AssertTrue(FRepo.Error, FRepo.MergeRef('side', Conflicts, mwSquash));
   Git(['rm', '-q', '-f', 'b.txt', 'c.txt']);
   AssertFalse('nothing staged', FRepo.SquashPending);
+  AssertFalse('git''s file is removed with it', FileExists(IncludeTrailingPathDelimiter(FDir) +
+    SetDirSeparators('.git/SQUASH_MSG')));
+  { So work staged later is not taken for the squash. }
+  WriteFile('later.txt', 'later'#10);
+  Git(['add', 'later.txt']);
+  AssertFalse('staged since', FRepo.SquashPending);
+  AssertEquals('', FRepo.MergeMessage);
+  Git(['rm', '-q', '-f', 'later.txt']);
   AssertFalse(FRepo.AbortOperation);
   AssertTrue(FRepo.Error, FRepo.MergeRef('side', Conflicts, mwSquash));
   AssertTrue(FRepo.Error, FRepo.AbortOperation);

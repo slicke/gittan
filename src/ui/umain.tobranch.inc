@@ -107,6 +107,12 @@ begin
     FBanner.Add(Format(rsToBranchMoveStayed, [AJob.Branch]), AJob.Error, bkInfo);
     Exit;
   end;
+  { Moved and back, but a file's left-out changes are not in it. }
+  if AJob.Error <> '' then
+  begin
+    BannerError(Format(rsToBranchMoveUnwritten, [AJob.Branch]), AJob.Error);
+    Exit;
+  end;
   if AJob.Paths.Count = 1 then
     Title := Format(rsToBranchMovedOne, [AJob.Paths[0], AJob.Branch])
   else

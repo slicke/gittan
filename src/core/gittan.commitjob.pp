@@ -104,7 +104,8 @@ begin
       FOk := Repo.MoveToBranch(FBranch, FMessage, FPaths, FId, FBack, FParts, FRest, FOptions)
     else
       FOk := Repo.Commit(FMessage, FPaths, FAmend, FId, FParts, FOptions);
-    if not FOk or ((FBranch <> '') and not FBack) then
+    { A move that is back may still have a file it could not write. }
+    if not FOk or (FBranch <> '') then
       FError := Repo.Error;
   finally
     Repo.Free;

@@ -988,14 +988,15 @@ end;
 function TRepoFrame.EditIdentity: boolean;
 var
   Who, Mail, Error: string;
-  Local: boolean;
+  Local, WasLocal, SigningChanged: boolean;
   Signing: TGittanSigningSetup;
 begin
   Who := FRepo.UserName;
   Mail := FRepo.UserEmail;
   Local := FRepo.HasLocalIdentity;
   Signing := ReadSigningSetup(FRepo.Root);
-  Result := ChooseIdentity(Who, Mail, Local, Signing, FRepo.Root);
+  WasLocal := Local;
+  Result := ChooseIdentity(Who, Mail, Local, Signing, FRepo.Root, SigningChanged);
   if not Result then
     Exit;
   Result := FRepo.SetIdentity(Who, Mail, not Local);
@@ -1004,9 +1005,15 @@ begin
     StatusNote(FRepo.Error, True);
     Exit;
   end;
-  Result := WriteSigningSetup(FRepo.Root, Signing, Mail, Local, Error);
-  if not Result then
-    StatusNote(Error, True);
+  { Signing left as it was is not written: git may sign with a key it
+    picks by the e-mail, or sign commits and not tags, which the
+    dialog's setup would replace. A change of scope moves it along. }
+  if SigningChanged or (Local <> WasLocal) then
+  begin
+    Result := WriteSigningSetup(FRepo.Root, Signing, Mail, Local, Error);
+    if not Result then
+      StatusNote(Error, True);
+  end;
   FSignCache.Clear;
   CommitHeaderEnter(nil);
 end;
