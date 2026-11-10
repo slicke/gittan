@@ -1321,6 +1321,7 @@ begin
   Item.Caption := '-';
   FFilePopup.Items.Add(Item);
   FRevertItem := AddItem(FFilePopup, rsRevertChangesItem, @MenuRevertChangesClick);
+  FMoveChangesItem := AddItem(FFilePopup, rsToBranchMoveChangesItem, @MenuMoveChangesClick);
   FMoveItem := AddItem(FFilePopup, rsMoveItem, @MenuMoveFileClick);
   FRemoveItem := AddItem(FFilePopup, rsRemoveItem, @MenuRemoveFileClick);
   FResolveMineItem := AddItem(FFilePopup, rsResolveMineItem, @MenuResolveMineClick);
@@ -1432,6 +1433,7 @@ begin
   try
     RevertTargets(Targets);
     FRevertItem.Enabled := CanRevert and (Targets.Count > 0);
+    FMoveChangesItem.Enabled := CanMoveToBranch and (Targets.Count > 0);
   finally
     Targets.Free;
   end;

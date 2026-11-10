@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- Branch > Move Included Files to New Branch..., and Move Changes to New Branch... on a file or a folder of the tree: the changes are committed on a new branch, after a name and a message, and taken out of the branch you are on, where your other changes stay. The banner that says so offers the switch to the new branch. Changes left out of the commit stay behind too.
+
+## 0.18 (build-143, 2026-11-09)
+
+### Added
 - An AI menu, shown while the AI features are on, holds all of them in one place: Write Commit Message and Split into Commits from Commit, Review Changes and Clear Review from View, Explain Line History from Go, and Summarize Changes. The shortcuts are the same.
 - AI > Summarize Changes, or ✦ Summarize at the top right of the summary (with the AI features on): the agent says what the changes shown amount to, the commits since what you compare with and the diff, or what is not yet committed when you compare with HEAD. The answer comes in a panel over the window, drawn as Markdown, with Copy to take it along as text and each commit it names a link that shows that commit; the panel stays until you close it, and Stop there or in the menu ends the agent while it works.
 - Pushing without the pre-push hook: Repository > Push Without Hooks, and Push Without Hooks in the notice when the hook refused a push, push with --no-verify for that push alone. When the hook is Git LFS's, Gittan warns first that the LFS files would not be uploaded.

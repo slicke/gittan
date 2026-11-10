@@ -107,6 +107,7 @@ type
     procedure TestMergeWays;
     procedure TestCoAuthors;
     procedure TestBranchManagement;
+    procedure TestMoveToBranch;
     procedure TestSwitchBlocked;
     procedure TestRevertFiles;
     procedure TestMoveAndRemove;
@@ -152,7 +153,7 @@ procedure SetTestVariable(const AName, AValue: string);
 implementation
 
 uses
-  {$ifdef unix}BaseUnix,{$endif} Types, Process;
+  {$ifdef unix}BaseUnix,{$endif} Types, Process, gittan.textfile;
 
 const
   { A name git quotes C-style in its line output, to check that the -z
@@ -3738,6 +3739,95 @@ begin
     'with ada'#10#10'Co-authored-by: Ada <ada@example.invalid>'#10 +
     'Signed-off-by: Gittan Test <test@example.invalid>',
     Trim(Git(['log', '-1', '--format=%B'])));
+end;
+
+{ Files taken out of the current branch into a new one: the commit is
+  there, HEAD is back, and the other changes are as they were. }
+procedure TGitRepoTest.TestMoveToBranch;
+var
+  Paths: TStringList;
+  Parts, Rest: TGittanCommitParts;
+  Head, Id, Text, Hook: string;
+  Back: boolean;
+  Code: integer;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Git(['switch', '-c', 'work']);
+  Head := Trim(Git(['rev-parse', 'HEAD']));
+  WriteFile('a.txt', 'ONE'#10'two'#10'THREE'#10);
+  WriteFile('staged.txt', 'staged'#10);
+  Git(['add', 'staged.txt']);
+  WriteFile('new.txt', 'new'#10);
+  WriteFile('other.txt', 'other'#10);
+  Paths := TStringList.Create;
+  try
+    Paths.Add('new.txt');
+    AssertFalse('a bad name', FRepo.MoveToBranch('bad..name', 'm', Paths, Id, Back));
+    AssertFalse('a taken name', FRepo.MoveToBranch('work', 'm', Paths, Id, Back));
+    AssertEquals('work', Trim(Git(['branch', '--show-current'])));
+
+    { A whole file: committed on the new branch and gone from here. }
+    AssertTrue(FRepo.Error, FRepo.MoveToBranch('side', 'new file', Paths, Id, Back));
+    AssertTrue(FRepo.Error, Back);
+    AssertEquals('work', Trim(Git(['branch', '--show-current'])));
+    AssertEquals(Head, Trim(Git(['rev-parse', 'HEAD'])));
+    AssertEquals(Id, Trim(Git(['rev-parse', 'side'])));
+    AssertEquals(Head, Trim(Git(['rev-parse', 'side~1'])));
+    AssertEquals('new'#10, Git(['show', 'side:new.txt']));
+    AssertFalse(FileExists(IncludeTrailingPathDelimiter(FDir) + 'new.txt'));
+    AssertEquals(' M a.txt'#0'M  staged.txt'#0'?? other.txt'#0,
+      Git(['status', '--porcelain', '-z']));
+
+    { A part of a file: the rest of its changes stays behind. }
+    Parts := nil;
+    SetLength(Parts, 1);
+    Parts[0].Path := 'a.txt';
+    Parts[0].Text := 'ONE'#10'two'#10'three'#10;
+    Rest := nil;
+    SetLength(Rest, 1);
+    Rest[0].Path := 'a.txt';
+    Rest[0].Text := 'one'#10'two'#10'THREE'#10;
+    Paths.Clear;
+    Paths.Add('a.txt');
+    AssertTrue(FRepo.Error, FRepo.MoveToBranch('part', 'part', Paths, Id, Back, Parts, Rest));
+    AssertTrue(FRepo.Error, Back);
+    AssertEquals('work', Trim(Git(['branch', '--show-current'])));
+    AssertEquals('ONE'#10'two'#10'three'#10, Git(['show', 'part:a.txt']));
+    AssertEquals('one'#10'two'#10'THREE'#10, ReadFileBytes(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+    AssertEquals(' M a.txt'#0'M  staged.txt'#0'?? other.txt'#0,
+      Git(['status', '--porcelain', '-z']));
+
+    { A commit the hook refuses leaves no branch and HEAD where it was. }
+    WriteFile('.git/hooks/pre-commit',
+      '#!/bin/sh'#10'echo "hook says no" >&2'#10'exit 1'#10);
+    Hook := IncludeTrailingPathDelimiter(FDir) + SetDirSeparators('.git/hooks/pre-commit');
+    {$ifdef UNIX}
+    RunCommandIndir(FDir, 'chmod', ['+x', Hook], Text, Code, []);
+    {$endif}
+    AssertFalse(FRepo.MoveToBranch('blocked', 'blocked', Paths, Id, Back));
+    AssertTrue(FRepo.Error, Pos('hook says no', FRepo.Error) > 0);
+    AssertEquals('work', Trim(Git(['branch', '--show-current'])));
+    AssertFalse(FRepo.HasCommit('refs/heads/blocked'));
+    AssertEquals(' M a.txt'#0'M  staged.txt'#0'?? other.txt'#0,
+      Git(['status', '--porcelain', '-z']));
+    DeleteFile(Hook);
+
+    { From a detached HEAD it goes back to the commit. }
+    Git(['stash', '-u']);
+    Git(['switch', '--detach', 'HEAD']);
+    WriteFile('a.txt', 'changed'#10);
+    AssertTrue(FRepo.Error, FRepo.MoveToBranch('loose', 'loose', Paths, Id, Back));
+    AssertTrue(FRepo.Error, Back);
+    AssertEquals('', Trim(Git(['branch', '--show-current'])));
+    AssertEquals(Head, Trim(Git(['rev-parse', 'HEAD'])));
+    AssertEquals('changed'#10, Git(['show', 'loose:a.txt']));
+    AssertEquals('', Git(['status', '--porcelain', '-z']));
+  finally
+    Paths.Free;
+  end;
 end;
 
 procedure TGitRepoTest.TestBranchManagement;

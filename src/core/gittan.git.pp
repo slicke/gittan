@@ -560,6 +560,25 @@ type
       is taken or wrong, or the switch would overwrite local changes;
       the branch is then not made either. }
     function CreateBranch(const AName, AAt: string; ASwitch: boolean): boolean;
+    {** Takes the changes of APaths out of the current branch into a new
+      one: makes the branch AName at HEAD, commits APaths there with
+      AMessage as Commit does (AParts, AOptions, the hooks) and switches
+      back to the branch it came from, or the commit of a detached HEAD;
+      the other changes of the work tree and the index stay as they
+      were, since no file of theirs differs between the two commits.
+      AId is the new commit. False, with the reason in Error, when the
+      branch could not be made or nothing was committed; the branch is
+      then gone again and HEAD where it was. ARest holds, for each file
+      of AParts, the work tree's text without what went into the commit
+      (LeaveOutText with AOthers), written to the file once HEAD is
+      back. ABack tells whether HEAD is back; when it is not (the switch
+      was refused, or a file of ARest is not in the commit to go back
+      to, a rename), the commit is made, HEAD is on AName with the work
+      tree as it was and Error says why. Not while git is in the middle
+      of something, nor before the first commit. }
+    function MoveToBranch(const AName, AMessage: string; APaths: TStrings;
+      out AId: string; out ABack: boolean; const AParts: TGittanCommitParts = nil;
+      const ARest: TGittanCommitParts = nil; AOptions: TGittanCommitOptions = []): boolean;
     {** Renames the local branch AOld to ANew (`git branch -m`), its
       upstream and reflog going with it. }
     function RenameBranch(const AOld, ANew: string): boolean;
@@ -4845,6 +4864,113 @@ begin
     Result := RunGit(FRoot, ['switch', '-c', AName, AAt], Output)
   else
     Result := RunGit(FRoot, ['branch', AName, AAt], Output);
+end;
+
+{ The files of ARest differ from the commit made, so git would refuse
+  the switch back: they are saved, checked out as committed, and after
+  the switch written as ARest has them. A failure on the way writes
+  them back as they were. }
+function TGittanRepo.MoveToBranch(const AName, AMessage: string; APaths: TStrings;
+  out AId: string; out ABack: boolean; const AParts: TGittanCommitParts;
+  const ARest: TGittanCommitParts; AOptions: TGittanCommitOptions): boolean;
+var
+  Output, From, Err: string;
+  Detached, NotMerged: boolean;
+  Saved: array of RawByteString;
+  Was: array of boolean;
+  Args: TStringArray;
+  i: integer;
+
+  function FileOf(AIndex: integer): string;
+  begin
+    Result := IncludeTrailingPathDelimiter(FRoot) + SetDirSeparators(ARest[AIndex].Path);
+  end;
+
+  procedure PutBack;
+  var
+    j: integer;
+  begin
+    for j := 0 to High(Saved) do
+      if Was[j] then
+        WriteBytes(FileOf(j), Saved[j])
+      else
+        DeleteFile(FileOf(j));
+  end;
+
+begin
+  AId := '';
+  ABack := False;
+  if FRoot = '' then
+    Exit(False);
+  if Operation <> '' then
+  begin
+    FError := 'Not while git is in the middle of something.';
+    Exit(False);
+  end;
+  if not HasCommit('HEAD') then
+  begin
+    FError := 'There is no commit to go back to yet.';
+    Exit(False);
+  end;
+  Detached := not RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], From) or
+    (Trim(From) = '');
+  if Detached and not RunGit(FRoot, ['rev-parse', 'HEAD'], From) then
+    Exit(False);
+  From := Trim(From);
+  if not CreateBranch(AName, 'HEAD', True) then
+    Exit(False);
+  if not Commit(AMessage, APaths, False, AId, AParts, AOptions) then
+  begin
+    Err := FError;
+    if Switch(From, False, Detached) then
+      DeleteBranch(AName, True, NotMerged);
+    FError := Err;
+    Exit(False);
+  end;
+  Result := True;
+  for i := 0 to High(ARest) do
+    if not RunGit(FRoot, ['cat-file', '-e', From + ':' + ARest[i].Path], Output) then
+    begin
+      FError := Format('%s has changes left out and is not in %s.', [ARest[i].Path, From]);
+      Exit;
+    end;
+  Saved := nil;
+  Was := nil;
+  SetLength(Saved, Length(ARest));
+  SetLength(Was, Length(ARest));
+  for i := 0 to High(ARest) do
+  begin
+    Was[i] := FileExists(FileOf(i));
+    if Was[i] then
+      Saved[i] := ReadFileBytes(FileOf(i));
+  end;
+  if Length(ARest) > 0 then
+  begin
+    Args := nil;
+    AddArg(Args, '--literal-pathspecs');
+    AddArg(Args, 'checkout');
+    AddArg(Args, 'HEAD');
+    AddArg(Args, '--');
+    for i := 0 to High(ARest) do
+      AddArg(Args, ARest[i].Path);
+    if not RunGit(FRoot, Args, Output) then
+    begin
+      Err := FError;
+      PutBack;
+      FError := Err;
+      Exit;
+    end;
+  end;
+  if not Switch(From, False, Detached) then
+  begin
+    Err := FError;
+    PutBack;
+    FError := Err;
+    Exit;
+  end;
+  for i := 0 to High(ARest) do
+    WriteBytes(FileOf(i), ARest[i].Text);
+  ABack := True;
 end;
 
 function TGittanRepo.RenameBranch(const AOld, ANew: string): boolean;

@@ -1171,8 +1171,9 @@ procedure TRepoFrame.CommitJobDone(Sender: TObject);
 var
   Job: TGittanCommitJob;
   Subject: string;
-  Amended, Fixup, Merges, HistoryChanged: boolean;
+  Amended, Fixup, Moved, Merges, HistoryChanged: boolean;
   Steps: TGittanRebaseSteps;
+  i, k: integer;
 begin
   Job := TGittanCommitJob(Sender);
   if Job <> FCommitJob then
@@ -1183,13 +1184,17 @@ begin
   MarkNews;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
-  Amended := FCommitAmend.Checked;
+  { Changes moved to a new branch (umain.tobranch.inc) leave the
+    message alone unless it was theirs, and the ticks of the other
+    files. }
+  Moved := Job.Branch <> '';
+  Amended := FCommitAmend.Checked and not Moved;
   if Job.Ok then
   begin
     Subject := FCommitMemo.Lines.Text;
     if FCommitMemo.Lines.Count > 0 then
       Subject := FCommitMemo.Lines[0];
-    if not Fixup then
+    if not Fixup and (not Moved or FMoveUsedMemo) then
     begin
       { commit.template may have changed since the repository opened. }
       FCommitTemplate := FRepo.CommitTemplate(FRepoConfig.Template);
@@ -1201,9 +1206,23 @@ begin
       FCoAuthors := nil;
       UpdateCommitOptions;
     end;
-    FCommitOn.Clear;
-    FCommitOff.Clear;
-    FLeftOut.ClearAll;
+    if Moved then
+      for i := 0 to Job.Paths.Count - 1 do
+      begin
+        k := FCommitOn.IndexOf(Job.Paths[i]);
+        if k >= 0 then
+          FCommitOn.Delete(k);
+        k := FCommitOff.IndexOf(Job.Paths[i]);
+        if k >= 0 then
+          FCommitOff.Delete(k);
+        FLeftOut.Clear(Job.Paths[i]);
+      end
+    else
+    begin
+      FCommitOn.Clear;
+      FCommitOff.Clear;
+      FLeftOut.ClearAll;
+    end;
   end
   else
     FStatus.ShowMessage('', stNormal, 0);
@@ -1225,8 +1244,13 @@ begin
     ShowSummary;
   UpdateCommitState;
   UpdateRemoteItems;
-  if not Job.Ok then
+  { Commit Again in the notice would commit here, not move. }
+  if not Job.Ok and Moved then
+    BannerError(rsToBranchMoveFailed, Job.Error)
+  else if not Job.Ok then
     ShowCommitFailure(Job.Error)
+  else if Moved then
+    MoveToBranchDone(Job)
   else if Fixup then
   begin
     FStatus.ShowMessage('', stNormal, 0);

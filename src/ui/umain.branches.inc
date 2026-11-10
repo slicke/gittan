@@ -305,6 +305,7 @@ begin
     Current := rsBmCurrent;
   FSwitchItem.Enabled := Has;
   FNewBranchItem.Enabled := Has and (FOperation = '');
+  FMoveIncludedItem.Enabled := Has and CanMoveToBranch and (FChosenCount > 0);
   FMergeItem.Caption := Format(rsBmMergeItem, [Current]);
   FMergeItem.Enabled := Has and not Busy and (FBranch <> '');
   FRebaseItem.Caption := Format(rsBmRebaseItem, [Current]);
