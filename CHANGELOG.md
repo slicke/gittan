@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.19 (build-144, 2026-11-10)
+
 ### Added
 - With the AI features on, a right click on a branch in the branch list has ✦ Summarize What (your branch) Changed Since (that branch): Gittan shows what your branch did since it left that one, as a pull request to it would, and the agent summarizes it. Any branch will do, not only the default one. A right click on a commit in the graph has ✦ Summarize Changes Since This Commit, or between it and the commit you marked for comparison.
 - A right click on the globe at the top right of the window lists the accounts gh is logged in to, the one in use marked, and a pick switches to it, as the Hosting page of the settings does; the GitHub view has the same list in its new Account menu, and behind your login at the top of the page when gh is logged in to more than one account. The switch is gh's own, so the terminal's gh changes with it.
