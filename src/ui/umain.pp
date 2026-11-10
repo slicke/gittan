@@ -2687,6 +2687,11 @@ procedure FillPullMergeMenu(AMenu: TPopupMenu; const APull: TGittanPullRequest;
 {** The action a card menu item's tag ATag stands for; false for the
   other items. }
 function PullCardAction(ATag: integer; out AAction: TGittanPullAction): boolean;
+{** Makes the accounts marked active in APicked the active ones of
+  AForge's tool, where they are not already; a switch that fails says
+  why in a dialog. The window's CheckAccounts then lets the tabs
+  follow. }
+procedure SwitchForgeAccounts(AForge: TGittanForgeClass; const APicked: TGittanForgeAccounts);
 
 implementation
 

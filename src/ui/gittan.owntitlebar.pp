@@ -211,7 +211,7 @@ type
     FBandTrack, FBandFill: TColor;
     FTitle, FTip: string;
     FOnTabSelect, FOnTabClose: TGittanTitleTabEvent;
-    FOnNewTab, FOnForge, FOnBack, FOnForward: TNotifyEvent;
+    FOnNewTab, FOnForge, FOnForgeMenu, FOnBack, FOnForward: TNotifyEvent;
     procedure SetActive(AValue: boolean);
     function BandFillWidth(APos, ATotal: integer): integer;
     function MenuOf(AForm: TCustomForm): TMainMenu;
@@ -344,6 +344,9 @@ type
     property OnNewTab: TNotifyEvent read FOnNewTab write FOnNewTab;
     {** The banner: the forge view, or back from it. }
     property OnForge: TNotifyEvent read FOnForge write FOnForge;
+    {** A right click on the globe: the menu of the forge's accounts, at
+      the mouse. }
+    property OnForgeMenu: TNotifyEvent read FOnForgeMenu write FOnForgeMenu;
     {** The chevrons: back, forward. }
     property OnBack: TNotifyEvent read FOnBack write FOnBack;
     property OnForward: TNotifyEvent read FOnForward write FOnForward;
@@ -798,6 +801,8 @@ begin
       FOnTabClose(Self, Index);
     Exit;
   end;
+  if (Button = mbRight) and (Part = tpForge) and Assigned(FOnForgeMenu) then
+    FOnForgeMenu(Self);
   if Button <> mbLeft then
     Exit;
   Invalidate;

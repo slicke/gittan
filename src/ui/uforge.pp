@@ -138,6 +138,11 @@ type
       made on a reload may get again. }
     FExtTabGen: QWord;
     FExtMenu: TMenuItem;
+    { The Account menu, and the account and the forge of each of the
+      items FillAccountMenu made last, by the item's Tag. }
+    FAccountMenu: TMenuItem;
+    FMenuAccounts: TGittanForgeAccounts;
+    FMenuForges: array of TGittanForgeClass;
     FExtQueued, FIsShown: boolean;
     FExtRunKey, FExtRunExt: string;
     FExtRunGen: QWord;
@@ -208,6 +213,9 @@ type
     procedure PageRefresh(Sender: TObject);
     procedure PageLogIn(Sender: TObject);
     procedure PageHostingSettings(Sender: TObject);
+    procedure AccountItemClick(Sender: TObject);
+    procedure AccountMenuClick(Sender: TObject);
+    procedure PageAccounts(Sender: TObject; const AScreenPos: TPoint);
     procedure LoadFilters;
     procedure PageFilterChange(Sender: TObject);
     procedure PageSavePreset(Sender: TObject);
@@ -295,6 +303,10 @@ type
     {** The active account of the forge's tool changed: what the account
       of before had found goes, and the view asks again. }
     procedure AccountChanged;
+    {** Fills AParent with the accounts of the forges' tools, a pick
+      switching to it, and Hosting Settings...: the view's Account menu
+      and the menu of the chrome's globe. }
+    procedure FillAccountMenu(AParent: TMenuItem);
     {** The view's tabs, which the window's tab strip shows while the
       view is shown: their names in ACaptions, their tooltips in AHints
       (the extension behind an extension's tab), in AMarks the ones with
@@ -381,6 +393,10 @@ resourcestring
   rsNoForgeNote = 'Connect a hosting service such as GitHub to see your pull requests ' +
     'and the ones waiting for your review here as well.';
   rsNoForgeLink = 'Hosting Settings…';
+  rsAccountMenu = '&Account';
+  rsAccountHost = '%s account on %s';
+  rsAccountNone = '%s is logged in to no account';
+  rsAccountSettings = 'Hosting Settings...';
   { The minutes between two looks at the forge. }
 
 
@@ -502,6 +518,7 @@ begin
   FPage.OnRefresh := @PageRefresh;
   FPage.OnLogIn := @PageLogIn;
   FPage.OnHostingSettings := @PageHostingSettings;
+  FPage.OnAccounts := @PageAccounts;
   LoadFilters;
   FPage.OnFilterChange := @PageFilterChange;
   FPage.OnSavePreset := @PageSavePreset;
@@ -622,6 +639,8 @@ end;
   place when a section was, and nothing is asked. }
 procedure TForgeView.ApplyForgeState;
 begin
+  if FAccountMenu <> nil then
+    FAccountMenu.Visible := HasForge;
   if HasForge then
     FBatch.SetNotice('', '')
   else
@@ -753,6 +772,15 @@ begin
   FMainMenu.Items.Add(GoMenu);
   AddItem(GoMenu, rsNextTab, ShortCut(VK_OEM_6, [ssModifier, ssShift]), @MenuNextTabClick);
   AddItem(GoMenu, rsPrevTab, ShortCut(VK_OEM_4, [ssModifier, ssShift]), @MenuPrevTabClick);
+
+  { Filled as it opens (FillAccountMenu), and once here, since a menu
+    with no item may not open at all. }
+  FAccountMenu := TMenuItem.Create(FMainMenu);
+  FAccountMenu.Caption := rsAccountMenu;
+  FAccountMenu.OnClick := @AccountMenuClick;
+  FMainMenu.Items.Add(FAccountMenu);
+  FillAccountMenu(FAccountMenu);
+  FAccountMenu.Visible := HasForge;
 
   { Built by RebuildExt. }
   FExtMenu := TMenuItem.Create(FMainMenu);
@@ -1002,6 +1030,9 @@ procedure TForgeView.UpdatePage;
 begin
   FPage.CanAct := ActsNow;
   FPage.SetLogin(FLogin);
+  { The login is a menu only with another account to switch to. }
+  FPage.Switchable := Assigned(FForge) and (FForge.AccountsNote = '') and
+    (Length(FForge.Accounts) > 1);
   FPage.SetAvatar(FAvatar);
   FPage.SetLeft(FMineLeft, FReviewLeft);
   if Assigned(FForge) and (FError <> '') and FForge.NeedsLogin(FError) and
@@ -1712,6 +1743,111 @@ end;
 procedure TForgeView.PageHostingSettings(Sender: TObject);
 begin
   FWindow.ShowHostingSettings;
+end;
+
+{ The accounts of the tool of every forge turned on under AParent, cleared
+  first: per host a heading that names the tool, since a switch is the
+  tool's own and the terminal's changes with it, then its logins, the
+  active one checked; a pick of another switches to it. What picks the
+  account in the tool's place (AccountsNote, a token in the
+  environment) or that it is logged in to nothing is said instead.
+  Hosting Settings... ends the menu. FMenuAccounts holds the account
+  of each item by its Tag. }
+procedure TForgeView.FillAccountMenu(AParent: TMenuItem);
+var
+  Forge: TGittanForgeClass;
+  Accounts: TGittanForgeAccounts;
+  Host: string;
+  i, j: integer;
+
+  function Add(const ACaption: string; AEnabled: boolean; AClick: TNotifyEvent): TMenuItem;
+  begin
+    Result := TMenuItem.Create(AParent);
+    { A login or a note may hold an ampersand. }
+    Result.Caption := StringReplace(ACaption, '&', '&&', [rfReplaceAll]);
+    Result.Enabled := AEnabled;
+    Result.OnClick := AClick;
+    AParent.Add(Result);
+  end;
+
+begin
+  AParent.Clear;
+  FMenuAccounts := nil;
+  FMenuForges := nil;
+  for Forge in RegisteredForges do
+  begin
+    { A forge turned off in the settings is not asked, nor named. }
+    if App.ForgeCli(Forge) = '' then
+      Continue;
+    Accounts := Forge.Accounts;
+    if Forge.AccountsNote <> '' then
+      Add(Forge.AccountsNote, False, nil)
+    else if Length(Accounts) = 0 then
+      Add(Format(rsAccountNone, [Forge.CliName]), False, nil)
+    else
+      for i := 0 to High(Accounts) do
+      begin
+        { A host's logins follow its first one. }
+        Host := Accounts[i].Host;
+        for j := 0 to i - 1 do
+          if Accounts[j].Host = Host then
+            Host := '';
+        if Host = '' then
+          Continue;
+        if AParent.Count > 0 then
+          AParent.Add(NewLine);
+        Add(Format(rsAccountHost, [Forge.CliName, Host]), False, nil);
+        for j := i to High(Accounts) do
+          if Accounts[j].Host = Host then
+            with Add(Accounts[j].Login, True, @AccountItemClick) do
+            begin
+              RadioItem := True;
+              Checked := Accounts[j].Active;
+              Tag := Length(FMenuAccounts);
+              SetLength(FMenuAccounts, Tag + 1);
+              FMenuAccounts[Tag] := Accounts[j];
+              SetLength(FMenuForges, Tag + 1);
+              FMenuForges[Tag] := Forge;
+            end;
+      end;
+    AParent.Add(NewLine);
+  end;
+  Add(rsAccountSettings, True, @PageHostingSettings);
+end;
+
+{ A pick of the active login does nothing. The window looks at the
+  accounts at once (CheckAccounts), so the tabs and this view follow. }
+procedure TForgeView.AccountItemClick(Sender: TObject);
+var
+  Picked: TGittanForgeAccounts;
+  Index: integer;
+begin
+  Index := TMenuItem(Sender).Tag;
+  if (Index < 0) or (Index > High(FMenuAccounts)) then
+    Exit;
+  Picked := nil;
+  SetLength(Picked, 1);
+  Picked[0] := FMenuAccounts[Index];
+  Picked[0].Active := True;
+  Screen.Cursor := crHourGlass;
+  try
+    SwitchForgeAccounts(FMenuForges[Index], Picked);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+  FWindow.CheckAccounts;
+end;
+
+procedure TForgeView.AccountMenuClick(Sender: TObject);
+begin
+  FillAccountMenu(FAccountMenu);
+end;
+
+{ A click on the login in the page's head: the same menu, under it. }
+procedure TForgeView.PageAccounts(Sender: TObject; const AScreenPos: TPoint);
+begin
+  FillAccountMenu(FCardPopup.Items);
+  FCardPopup.PopUp(AScreenPos.X, AScreenPos.Y);
 end;
 
 { The forge's filters and presets with the user's own presets after
