@@ -1126,11 +1126,24 @@ jobs:
       # PATH. FPC's own nightly aarch64-win64 snapshot cannot be used: each
       # of its executables, the compiler too, crashed at start (0xC0000005)
       # on this runner.
+      # The action's own cache is actions/cache@v4, which runs on the
+      # deprecated Node 20, so it is off and the folder the action installs
+      # into is cached here: the runner's tool cache, fpc-toolchain/<tag>/
+      # <host>-<first 12 of the sha256 of the targets, none>. When the
+      # folder holds a finished install the action takes it as it is; should
+      # the action move it, the cache only misses and the action downloads.
+      - name: Restore FPC 3.3.1
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.tool_cache }}/fpc-toolchain/3.3.1-b2/aarch64-win64-e3b0c44298fc
+          key: fpc-toolchain-frostney/fpc-toolchain-3.3.1-b2-aarch64-win64-e3b0c44298fc
+
       - name: Install FPC 3.3.1
         id: fpc
         uses: frostney/fpc-toolchain@v1
         with:
           version: 3.3.1-b2
+          cache: 'false'
 
       - name: Check FPC
         shell: pwsh
