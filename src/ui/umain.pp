@@ -609,6 +609,12 @@ type
       from (FixupFoldClick), and the fixup commit once it is made. }
     FFixupJob: TGittanCommitJob;
     FFixupHash, FFixupShort, FFixupParent, FFixupId: string;
+    { Changes moved to a new branch (umain.tobranch.inc): the branch of
+      the latest move, which its banner switches to, and whether the
+      running one commits with the Commit section's message. }
+    FMoveBranch: string;
+    FMoveUsedMemo: boolean;
+    FMoveIncludedItem, FMoveChangesItem: TMenuItem;
     { The commits still running in a repository no longer open, for
       their draft (DroppedCommitDone). }
     FDroppedCommits: TList;
@@ -1647,7 +1653,7 @@ type
     procedure LeftOutChanged;
     procedure DropLeftOut(const APath: string);
     function CommitParts(APaths: TStrings; out AParts: TGittanCommitParts;
-      out AError: string): boolean;
+      out AError: string; AOthers: boolean = False): boolean;
     procedure MenuLeaveOutClick(Sender: TObject);
     procedure UpdateLeaveOutItem;
     { umain.absorb.inc }
@@ -2167,11 +2173,19 @@ type
     procedure RebaseInteractiveAsk(const AOnto, AName: string; AFromGraph: boolean);
     procedure CompareSince(const ARef: string);
     procedure CompareCurrentSince(const ARef: string);
+    procedure SummarizeCurrentSince(const ARef: string);
     procedure ShowBranchList(AMode: TGittanBranchListMode; const AScreenRect: TRect);
     procedure UpdateBranchItems;
     procedure BranchMenuOpen(Sender: TObject);
     procedure MenuBranchListClick(Sender: TObject);
     procedure MenuNewBranchClick(Sender: TObject);
+    function CanMoveToBranch: boolean;
+    function CheckMoveBranch(const AValues: array of string): string;
+    procedure MoveToBranchAsk(APaths: TStrings);
+    procedure MoveToBranchDone(AJob: TGittanCommitJob);
+    procedure MoveSwitchClick(Sender: TObject);
+    procedure MenuMoveIncludedClick(Sender: TObject);
+    procedure MenuMoveChangesClick(Sender: TObject);
     procedure ShowUpstreamList(const ABranch: string; const AScreenRect: TRect);
     procedure UpstreamPopupPick(Sender: TObject; AIndex: integer);
     procedure MenuUpstreamClick(Sender: TObject);
@@ -2674,6 +2688,11 @@ procedure FillPullMergeMenu(AMenu: TPopupMenu; const APull: TGittanPullRequest;
 {** The action a card menu item's tag ATag stands for; false for the
   other items. }
 function PullCardAction(ATag: integer; out AAction: TGittanPullAction): boolean;
+{** Makes the accounts marked active in APicked the active ones of
+  AForge's tool, where they are not already; a switch that fails says
+  why in a dialog. The window's CheckAccounts then lets the tabs
+  follow. }
+procedure SwitchForgeAccounts(AForge: TGittanForgeClass; const APicked: TGittanForgeAccounts);
 
 implementation
 
@@ -3209,6 +3228,8 @@ resourcestring
   rsCaMark = 'Mark for Comparison';
   rsCaUnmark = 'Unmark';
   rsCaCompareMarked = 'Compare with Marked %s';
+  rsCaSummarize = '✦ Summarize Changes Since This Commit';
+  rsCaSummarizeMarked = '✦ Summarize Changes Between This and Marked %s';
   rsCaSwitch = 'Switch to %s';
   rsCaBranch = 'Create Branch Here...';
   rsCaTag = 'Create Tag Here...';
@@ -3327,6 +3348,7 @@ resourcestring
   rsBmMerge = 'Merge %s into %s';
   rsBmCompareSince = 'Show What %s Changed Since %s';
   rsBmCompareTree = 'Compare with Working Tree';
+  rsBmSummarizeSince = '✦ Summarize What %s Changed Since %s';
   rsBmRebase = 'Rebase %s onto %s';
   rsBranchMenu = '&Branch';
   rsBmSwitchItem = '&Switch to Branch...';
@@ -3335,6 +3357,22 @@ resourcestring
   rsGraphLoadFailed = 'Could not read the history';
   rsBmCommitPick = 'Pick a Commit in the Graph...';
   rsBmNewItem = '&New Branch...';
+  rsToBranchMoveIncludedItem = 'Move &Included Files to New Branch...';
+  rsToBranchMoveChangesItem = 'Move Changes to New Branch...';
+  rsToBranchMoveTitle = 'Move to New Branch';
+  rsToBranchMoveNoteOne = 'The changes of %s are committed on a new branch and taken out of the work tree here. The other changes stay.';
+  rsToBranchMoveNoteMany = 'The changes of %d files are committed on a new branch and taken out of the work tree here. The other changes stay.';
+  rsToBranchMoveNamePrompt = 'Name of the new branch, made at HEAD';
+  rsToBranchMoveMessagePrompt = 'Message of the commit there';
+  rsToBranchMoveNoMessage = 'The commit needs a message.';
+  rsToBranchMoveAction = 'Move';
+  rsToBranchMoving = 'Moving to %s...';
+  rsToBranchMoveFailed = 'Could not move the changes';
+  rsToBranchMovedOne = 'Moved %s to %s';
+  rsToBranchMovedMany = 'Moved %d files to %s';
+  rsToBranchMoveSwitch = 'Switch to %s';
+  rsToBranchMoveStayed = 'Committed on %s, and still there';
+  rsToBranchMoveUnwritten = 'Moved to %s, but changes left out could not be written back';
   rsBmMergeItem = '&Merge into %s...';
   rsBmRebaseItem = '&Rebase %s onto...';
   rsBmCompareItem = 'Show What a Branch &Changed Since It Left %s...';
@@ -6075,6 +6113,7 @@ begin
     @MenuBranchListClick);
   FSwitchItem.Tag := Ord(blSwitch);
   FNewBranchItem := AddItem(BranchMenu, rsBmNewItem, 0, @MenuNewBranchClick);
+  FMoveIncludedItem := AddItem(BranchMenu, rsToBranchMoveIncludedItem, 0, @MenuMoveIncludedClick);
   FNewPullItem := AddItem(BranchMenu, rsNewPullItem, 0, @MenuNewPullClick);
   FNewPullItem.Visible := Assigned(FForge);
   BranchMenu.Add(NewLine);
@@ -9170,6 +9209,7 @@ const
 {$I umain.commitactions.inc}
 {$I umain.issues.inc}
 {$I umain.branches.inc}
+{$I umain.tobranch.inc}
 {$I umain.rebase.inc}
 {$I umain.stash.inc}
 {$I umain.worktrees.inc}

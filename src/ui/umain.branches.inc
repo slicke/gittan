@@ -35,6 +35,7 @@ const
   bmCurrentSince = 9;
   bmUpstream = 10;
   bmFlowFinish = 11;
+  bmSummarizeSince = 12;
 
 procedure TRepoFrame.BranchContext(Sender: TObject; AIndex: integer; const AScreenPos: TPoint);
 var
@@ -75,6 +76,8 @@ begin
     Add(Format(rsBmCompareSince, [Amp(Ref), Amp(FBranch)]), bmCompareSince, True);
     Add(Format(rsBmCompareSince, [Amp(FBranch), Amp(Ref)]), bmCurrentSince, True);
     Add(rsBmCompareTree, bmCompareTree, True);
+    if AIAvailable then
+      Add(Format(rsBmSummarizeSince, [Amp(FBranch), Amp(Ref)]), bmSummarizeSince, True);
   end;
   if not IsRemote then
   begin
@@ -114,6 +117,7 @@ begin
     bmCompareTree: SetBase(Ref);
     bmCompareSince: CompareSince(Ref);
     bmCurrentSince: CompareCurrentSince(Ref);
+    bmSummarizeSince: SummarizeCurrentSince(Ref);
     bmMerge: MergeIntoCurrent(Ref);
     bmRebase: RebaseOntoAsk(Ref);
     bmRename: RenameBranchAsk(BranchName);
@@ -286,6 +290,21 @@ begin
     SetBase(ARef + '...HEAD');
 end;
 
+{ Compares as CompareCurrentSince does and has the agent summarize it,
+  in place of a summary that runs; not when the comparison could not
+  be shown. }
+procedure TRepoFrame.SummarizeCurrentSince(const ARef: string);
+begin
+  if not AIAvailable then
+    Exit;
+  CompareCurrentSince(ARef);
+  if FRepo.IsRange and (Pos(ARef + '...', FRepo.Base) = 1) then
+  begin
+    AbandonSummaryJob;
+    StartSummaryJob;
+  end;
+end;
+
 { The Branch menu's items: enabled with a repository, the ones that move
   HEAD not while git is in the middle of something or a job runs, and
   captioned with the current branch. Called as the menu opens and
@@ -305,6 +324,7 @@ begin
     Current := rsBmCurrent;
   FSwitchItem.Enabled := Has;
   FNewBranchItem.Enabled := Has and (FOperation = '');
+  FMoveIncludedItem.Enabled := Has and CanMoveToBranch and (FChosenCount > 0);
   FMergeItem.Caption := Format(rsBmMergeItem, [Current]);
   FMergeItem.Enabled := Has and not Busy and (FBranch <> '');
   FRebaseItem.Caption := Format(rsBmRebaseItem, [Current]);

@@ -89,7 +89,7 @@ type
     FPicture: NSImage;
     FTip: string;
     FOnSelect, FOnClose: TGittanTabEvent;
-    FOnNew, FOnForge, FOnBack, FOnForward: TNotifyEvent;
+    FOnNew, FOnForge, FOnForgeMenu, FOnBack, FOnForward: TNotifyEvent;
     function GlobeRoom: double;
     function NavRect(ANav: integer; const ABounds: NSRect): NSRect;
     function NavEnabled(ANav: integer): boolean;
@@ -104,6 +104,7 @@ type
     procedure DrawBanner(const ABounds: NSRect);
     procedure BannerDown;
     procedure BannerUp(AEvent: NSEvent);
+    procedure BannerMenu;
     procedure BannerHover(AHot: boolean);
     procedure Draw(const ABounds: NSRect);
     procedure MouseDown(AEvent: NSEvent);
@@ -150,6 +151,9 @@ type
     property OnNew: TNotifyEvent read FOnNew write FOnNew;
     {** The banner: the forge view, or back from it. }
     property OnForge: TNotifyEvent read FOnForge write FOnForge;
+    {** A right click on the banner (or a click with Control held): the
+      menu of the forge's accounts, at the mouse. }
+    property OnForgeMenu: TNotifyEvent read FOnForgeMenu write FOnForgeMenu;
     {** The chevrons: back, forward. }
     property OnBack: TNotifyEvent read FOnBack write FOnBack;
     property OnForward: TNotifyEvent read FOnForward write FOnForward;
@@ -190,6 +194,7 @@ type
     procedure drawRect(dirtyRect: NSRect); override;
     procedure mouseDown(event: NSEvent); override;
     procedure mouseUp(event: NSEvent); override;
+    procedure rightMouseDown(event: NSEvent); override;
     procedure mouseEntered(event: NSEvent); override;
     procedure mouseExited(event: NSEvent); override;
   end;
@@ -377,10 +382,21 @@ begin
     Owner.DrawBanner(bounds);
 end;
 
+{ A click with Control held is a right click, as everywhere on a Mac. }
 procedure TGittanForgeBanner.mouseDown(event: NSEvent);
 begin
-  if Owner <> nil then
+  if Owner = nil then
+    Exit;
+  if (event.modifierFlags and NSControlKeyMask) <> 0 then
+    Owner.BannerMenu
+  else
     Owner.BannerDown;
+end;
+
+procedure TGittanForgeBanner.rightMouseDown(event: NSEvent);
+begin
+  if Owner <> nil then
+    Owner.BannerMenu;
 end;
 
 procedure TGittanForgeBanner.mouseUp(event: NSEvent);
@@ -770,6 +786,12 @@ begin
   P := FBanner.convertPoint_fromView(AEvent.locationInWindow, nil);
   if Pressed and PointIn(P, FBanner.bounds) and Assigned(FOnForge) then
     FOnForge(Self);
+end;
+
+procedure TGittanToolbar.BannerMenu;
+begin
+  if Assigned(FOnForgeMenu) then
+    FOnForgeMenu(Self);
 end;
 
 procedure TGittanToolbar.BannerHover(AHot: boolean);

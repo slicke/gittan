@@ -225,9 +225,12 @@ end;
 { The chosen files with changes left out, as their text to commit: the
   work tree's with those changes as HEAD has them. A file whose changes
   left out are all gone goes in whole. False with the reason in AError
-  when a file's diff cannot be taken or does not fit it. }
+  when a file's diff cannot be taken or does not fit it. With AOthers
+  the text is the other way round, the work tree's with the changes
+  that go into the commit as HEAD has them: what a move to a new branch
+  leaves behind (umain.tobranch.inc). }
 function TRepoFrame.CommitParts(APaths: TStrings; out AParts: TGittanCommitParts;
-  out AError: string): boolean;
+  out AError: string; AOthers: boolean): boolean;
 var
   Lines: TStringList;
   Stream: TFileStream;
@@ -262,7 +265,8 @@ begin
           Stream.Free;
         end;
       end;
-      if not LeaveOutText(Content, Lines, FLeftOut.Items(APaths[i]), Res, Found, AError) then
+      if not LeaveOutText(Content, Lines, FLeftOut.Items(APaths[i]), Res, Found, AError,
+        AOthers) then
       begin
         AError := APaths[i] + ': ' + AError;
         Exit(False);

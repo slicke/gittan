@@ -101,6 +101,9 @@ type
     menu, in screen coordinates. }
   TGittanForgeContextEvent = procedure(Sender: TObject; const APull: TGittanForgePull;
     const AScreenPos: TPoint) of object;
+  {** A click on the login, for the menu of the accounts, under it in
+    screen coordinates. }
+  TGittanForgeAccountsEvent = procedure(Sender: TObject; const AScreenPos: TPoint) of object;
 
   {** Where a click on a card goes: the owner compares with the pull
     request in a repository that is open (ptCompare), opens its local
@@ -179,6 +182,10 @@ type
       it, while the forge's error says it is logged out; else ''. }
     FLoginCommand: string;
     FOnLogIn, FOnHostingSettings: TNotifyEvent;
+    { Whether the login is a menu of the accounts to switch to (more
+      than one), and what a click on it raises. }
+    FSwitchable: boolean;
+    FOnAccounts: TGittanForgeAccountsEvent;
     FOnOpenUrl: TGittanOpenUrlEvent;
     FOnContext, FOnMerge: TGittanForgeContextEvent;
     { The search field, its words, where the heading leaves it room and
@@ -195,6 +202,7 @@ type
     procedure SearchChange(Sender: TObject);
     function ShownPulls: TGittanForgePulls;
     procedure SetCanAct(AValue: boolean);
+    procedure SetSwitchable(AValue: boolean);
     { Where a click on APull's card goes (OnWhere; its clone, else the
       forge, when the owner does not say), and the tooltip of the link
       at AIndex. }
@@ -369,6 +377,11 @@ type
     {** Whether the forge acts on a pull request (merges it): the Merge
       button shows only then. }
     property CanAct: boolean read FCanAct write SetCanAct;
+    {** Whether the tool is logged in to more than one account: the login
+      in the head is then a menu (" ▾" after it), a click raising
+      OnAccounts. }
+    property Switchable: boolean read FSwitchable write SetSwitchable;
+    property OnAccounts: TGittanForgeAccountsEvent read FOnAccounts write FOnAccounts;
     property OnRefresh: TNotifyEvent read FOnRefresh write FOnRefresh;
     {** While set, the forge's error is that its tool is logged out: the
       page says so with this command ("gh auth login") and offers Log In,
@@ -465,6 +478,7 @@ const
   NextLink = 'gittan:next:';
   MoreLink = 'gittan:more:';
   OrderLink = 'gittan:order';
+  AccountLink = 'gittan:account';
   OrderGlyph = ' ▾';
   { Between the filters on that a group's chip names. }
   ChipJoin = ' · ';
@@ -577,6 +591,14 @@ begin
     Exit;
   FLogin := ALogin;
   Layout;
+  Invalidate;
+end;
+
+procedure TGittanForgePage.SetSwitchable(AValue: boolean);
+begin
+  if FSwitchable = AValue then
+    Exit;
+  FSwitchable := AValue;
   Invalidate;
 end;
 
@@ -2232,7 +2254,25 @@ begin
   Inc(X, FC.TextWidth(rsPageTitle) + Px(Gap) div 2);
   ButtonD := TextH + Px(8);
   PaintRefresh(X, Y + TitleH - TextH - 3 + (TextH - ButtonD) div 2, ButtonD);
-  Who := FLogin;
+  { A login to switch from is a menu: the login with the caret, the
+    text's color under the mouse, and the counts after it. }
+  X := L + AvatarD + Px(Gap);
+  Who := '';
+  if (FLogin <> '') and FSwitchable and Assigned(FOnAccounts) then
+  begin
+    FC.Font := Font;
+    FC.Brush.Style := bsClear;
+    AddLink(Rect(X, Y + TitleH + 2, X + FC.TextWidth(FLogin + OrderGlyph),
+      Y + TitleH + 2 + TextH), AccountLink);
+    if FHot = High(FLinkRects) then
+      FC.Font.Color := FText
+    else
+      FC.Font.Color := FDim;
+    FC.TextOut(X, Y + TitleH + 2, FLogin + OrderGlyph);
+    X := FLinkRects[High(FLinkRects)].Right;
+  end
+  else
+    Who := FLogin;
   if FLoading then
     AddWho(Format(rsLoading, [FForge]))
   else if FAnswered and (FError = '') then
@@ -2246,7 +2286,8 @@ begin
   FC.Font := Font;
   FC.Brush.Style := bsClear;
   FC.Font.Color := FDim;
-  X := L + AvatarD + Px(Gap);
+  if (Who <> '') and (X > L + AvatarD + Px(Gap)) then
+    Who := ' · ' + Who;
   FC.TextOut(X, Y + TitleH + 2, FitTextLeft(FC, Who, R - X));
   Inc(Y, AvatarD);
   { Logged out: that in words, with what to do and the buttons for it,
@@ -2381,6 +2422,12 @@ begin
   if Url = GroupLink then
   begin
     ShowFilterMenu(ClientToScreen(Point(FLinkRects[i].Left, FLinkRects[i].Bottom)));
+    Exit;
+  end;
+  if Url = AccountLink then
+  begin
+    if Assigned(FOnAccounts) then
+      FOnAccounts(Self, ClientToScreen(Point(FLinkRects[i].Left, FLinkRects[i].Bottom)));
     Exit;
   end;
   { A card's buttons: the three dots open its menu under them; the

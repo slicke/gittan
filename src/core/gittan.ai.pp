@@ -1147,14 +1147,26 @@ var
 
 { The summary and the diff of the work tree's APaths against ABase,
   made in a temporary index (HEAD's tree, or none without AHasHead,
-  with the paths added as they are on disk), so untracked files are in
-  it and the real index is left alone. }
+  with the paths as they are on disk, added or taken out), so untracked
+  files are in it and the real index is left alone. }
 function IndexDiff(const ARoot, ABase: string; AHasHead: boolean; APaths: TStrings;
   out AStat, ADiff, AError: string): boolean;
 var
   Index, List, Output, Entry: string;
   Stream: TFileStream;
-  i: integer;
+  i, Count: integer;
+  Gone: boolean;
+
+  { A file, a folder or a link, whatever the link leads to. Not
+    FindFirst, which reads * and ? in a name as wildcards. }
+  function OnDisk(const APath: string): boolean;
+  var
+    Full: string;
+  begin
+    Full := IncludeTrailingPathDelimiter(ARoot) + SetDirSeparators(APath);
+    Result := FileExists(Full, False) or DirectoryExists(Full, False);
+  end;
+
 begin
   AStat := '';
   ADiff := '';
@@ -1175,22 +1187,35 @@ begin
       Result := RunGitIn(ARoot, ['read-tree', '--empty'], Output, AError, Index);
     if not Result then
       Exit;
-    if APaths.Count > 0 then
+    { The paths in a file, NUL separated, as TGittanRepo.Commit gives
+      them, so no command line grows with them. A path that is not on
+      disk is taken out of the index rather than added: add -A fails
+      on one HEAD lacks too, a file of the base removed in a commit
+      since. }
+    for Gone := False to True do
     begin
-      { The paths in a file, NUL separated, as TGittanRepo.Commit gives
-        them, so no command line grows with them. }
+      Count := 0;
       Stream := TFileStream.Create(List, fmCreate);
       try
         for i := 0 to APaths.Count - 1 do
-        begin
-          Entry := APaths[i] + #0;
-          Stream.WriteBuffer(Entry[1], Length(Entry));
-        end;
+          if OnDisk(APaths[i]) <> Gone then
+          begin
+            Entry := APaths[i] + #0;
+            Stream.WriteBuffer(Entry[1], Length(Entry));
+            Inc(Count);
+          end;
       finally
         Stream.Free;
       end;
-      Result := RunGitIn(ARoot, ['--literal-pathspecs', 'add', '-A',
-        '--pathspec-from-file=' + List, '--pathspec-file-nul'], Output, AError, Index);
+      if Count = 0 then
+        Continue;
+      if Gone then
+        Result := RunGitIn(ARoot, ['--literal-pathspecs', 'rm', '--cached', '-r', '-q',
+          '--ignore-unmatch', '--pathspec-from-file=' + List, '--pathspec-file-nul'],
+          Output, AError, Index)
+      else
+        Result := RunGitIn(ARoot, ['--literal-pathspecs', 'add', '-A',
+          '--pathspec-from-file=' + List, '--pathspec-file-nul'], Output, AError, Index);
       if not Result then
         Exit;
     end;

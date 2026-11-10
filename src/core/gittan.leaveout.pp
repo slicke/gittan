@@ -27,10 +27,13 @@ uses
   file as context, ' ', '-' and '+' markers in column 1) as HEAD has
   them: a left out pair's deleted line is put back and its added line
   taken out. AFound is how many of ALeftOut the diff holds. False with
-  rsDiscardStale in AError when the file's lines are not the diff's. }
+  rsDiscardStale in AError when the file's lines are not the diff's.
+  With AOthers it is the other pairs that go back to HEAD's, and those
+  of ALeftOut that stay: the file as it is left once the rest of its
+  changes are taken out of it (TGittanRepo.MoveToBranch). }
 function LeaveOutText(const AText: RawByteString; ALines: TStrings;
   const ALeftOut: array of TGittanKeep; out AResult: RawByteString;
-  out AFound: integer; out AError: string): boolean;
+  out AFound: integer; out AError: string; AOthers: boolean = False): boolean;
 
 {** Whether ALeftOut leaves out every pair of ALines, so nothing of the
   file would be committed. False for a diff without changes. }
@@ -43,7 +46,7 @@ uses
 
 function LeaveOutText(const AText: RawByteString; ALines: TStrings;
   const ALeftOut: array of TGittanKeep; out AResult: RawByteString;
-  out AFound: integer; out AError: string): boolean;
+  out AFound: integer; out AError: string; AOthers: boolean = False): boolean;
 var
   FileLines: TStringList;
   Out: TStringBuilder;
@@ -125,7 +128,7 @@ begin
           Left := Match[i + k]
         else
           Left := Match[i + Old + k];
-        if Left >= 0 then
+        if (Left >= 0) <> AOthers then
         begin
           if Pairs[k].HasOld then
             Emit(Pairs[k].Old + Cr);

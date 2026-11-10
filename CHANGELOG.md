@@ -3,6 +3,20 @@
 ## Unreleased
 
 ### Added
+- With the AI features on, a right click on a branch in the branch list has ✦ Summarize What (your branch) Changed Since (that branch): Gittan shows what your branch did since it left that one, as a pull request to it would, and the agent summarizes it. Any branch will do, not only the default one. A right click on a commit in the graph has ✦ Summarize Changes Since This Commit, or between it and the commit you marked for comparison.
+- A right click on the globe at the top right of the window lists the accounts gh is logged in to, the one in use marked, and a pick switches to it, as the Hosting page of the settings does; the GitHub view has the same list in its new Account menu, and behind your login at the top of the page when gh is logged in to more than one account. The switch is gh's own, so the terminal's gh changes with it.
+- Branch > Move Included Files to New Branch..., and Move Changes to New Branch... on a file or a folder of the tree: the changes are committed on a new branch, after a name and a message, and taken out of the branch you are on, where your other changes stay. The banner that says so offers the switch to the new branch. Changes left out of the commit stay behind too.
+
+### Fixed
+- Summarizing or reviewing the changes against an older commit no longer fails with "pathspec did not match any files" when a commit since removed a file.
+- A squash merge whose changes were stashed or discarded is over for good: changes staged later are no longer taken for it, with its old message in the commit field and an Abort that would have thrown them away.
+- Saving the Name and Email dialog with the signing left as it was no longer writes the signing settings: a key git picked by your e-mail is not replaced by the first one listed, and tags are not set to be signed.
+- Skip in a rebase, cherry-pick or revert that git refuses (a lock on the index, a hook) shows git's reason rather than saying the commit was skipped.
+- Put into Its Commit no longer takes a file that was emptied for a deleted one, or one that was empty before for a new one: an emptied file's lines go to the commit that wrote them, when there is one on the branch.
+
+## 0.18 (build-143, 2026-11-09)
+
+### Added
 - An AI menu, shown while the AI features are on, holds all of them in one place: Write Commit Message and Split into Commits from Commit, Review Changes and Clear Review from View, Explain Line History from Go, and Summarize Changes. The shortcuts are the same.
 - AI > Summarize Changes, or ✦ Summarize at the top right of the summary (with the AI features on): the agent says what the changes shown amount to, the commits since what you compare with and the diff, or what is not yet committed when you compare with HEAD. The answer comes in a panel over the window, drawn as Markdown, with Copy to take it along as text and each commit it names a link that shows that commit; the panel stays until you close it, and Stop there or in the menu ends the agent while it works.
 - Pushing without the pre-push hook: Repository > Push Without Hooks, and Push Without Hooks in the notice when the hook refused a push, push with --no-verify for that push alone. When the hook is Git LFS's, Gittan warns first that the LFS files would not be uploaded.

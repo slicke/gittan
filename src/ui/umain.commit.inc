@@ -987,15 +987,17 @@ end;
   file set up now may verify what could not be checked before. }
 function TRepoFrame.EditIdentity: boolean;
 var
-  Who, Mail, Error: string;
-  Local: boolean;
+  Who, Mail, WasMail, Error: string;
+  Local, WasLocal, SigningChanged: boolean;
   Signing: TGittanSigningSetup;
 begin
   Who := FRepo.UserName;
   Mail := FRepo.UserEmail;
   Local := FRepo.HasLocalIdentity;
   Signing := ReadSigningSetup(FRepo.Root);
-  Result := ChooseIdentity(Who, Mail, Local, Signing, FRepo.Root);
+  WasLocal := Local;
+  WasMail := Mail;
+  Result := ChooseIdentity(Who, Mail, Local, Signing, FRepo.Root, SigningChanged);
   if not Result then
     Exit;
   Result := FRepo.SetIdentity(Who, Mail, not Local);
@@ -1004,9 +1006,25 @@ begin
     StatusNote(FRepo.Error, True);
     Exit;
   end;
-  Result := WriteSigningSetup(FRepo.Root, Signing, Mail, Local, Error);
-  if not Result then
-    StatusNote(Error, True);
+  { Signing left as it was is not written: git may sign with a key it
+    picks by the e-mail, or sign commits and not tags, which the
+    dialog's setup would replace. A change of scope moves it along. }
+  if SigningChanged or (Local <> WasLocal) then
+  begin
+    Result := WriteSigningSetup(FRepo.Root, Signing, Mail, Local, Error);
+    if not Result then
+      StatusNote(Error, True);
+  end
+  { A new e-mail alone: the SSH key goes under it in the allowed
+    signers file, or commits made under it would not verify. }
+  else if Signing.Sign and (Signing.Format = sfSsh) and (Mail <> WasMail) and
+    (Signing.AllowedSigners <> '') and (Signing.Key <> '') then
+  begin
+    Result := AddAllowedSigner(AllowedSignersPath(FRepo.Root, Signing.AllowedSigners), Mail,
+      Signing.Key, Error);
+    if not Result then
+      StatusNote(Error, True);
+  end;
   FSignCache.Clear;
   CommitHeaderEnter(nil);
 end;
@@ -1171,8 +1189,9 @@ procedure TRepoFrame.CommitJobDone(Sender: TObject);
 var
   Job: TGittanCommitJob;
   Subject: string;
-  Amended, Fixup, Merges, HistoryChanged: boolean;
+  Amended, Fixup, Moved, Merges, HistoryChanged: boolean;
   Steps: TGittanRebaseSteps;
+  i, k: integer;
 begin
   Job := TGittanCommitJob(Sender);
   if Job <> FCommitJob then
@@ -1183,13 +1202,17 @@ begin
   MarkNews;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
-  Amended := FCommitAmend.Checked;
+  { Changes moved to a new branch (umain.tobranch.inc) leave the
+    message alone unless it was theirs, and the ticks of the other
+    files. }
+  Moved := Job.Branch <> '';
+  Amended := FCommitAmend.Checked and not Moved;
   if Job.Ok then
   begin
     Subject := FCommitMemo.Lines.Text;
     if FCommitMemo.Lines.Count > 0 then
       Subject := FCommitMemo.Lines[0];
-    if not Fixup then
+    if not Fixup and (not Moved or FMoveUsedMemo) then
     begin
       { commit.template may have changed since the repository opened. }
       FCommitTemplate := FRepo.CommitTemplate(FRepoConfig.Template);
@@ -1201,9 +1224,23 @@ begin
       FCoAuthors := nil;
       UpdateCommitOptions;
     end;
-    FCommitOn.Clear;
-    FCommitOff.Clear;
-    FLeftOut.ClearAll;
+    if Moved then
+      for i := 0 to Job.Paths.Count - 1 do
+      begin
+        k := FCommitOn.IndexOf(Job.Paths[i]);
+        if k >= 0 then
+          FCommitOn.Delete(k);
+        k := FCommitOff.IndexOf(Job.Paths[i]);
+        if k >= 0 then
+          FCommitOff.Delete(k);
+        FLeftOut.Clear(Job.Paths[i]);
+      end
+    else
+    begin
+      FCommitOn.Clear;
+      FCommitOff.Clear;
+      FLeftOut.ClearAll;
+    end;
   end
   else
     FStatus.ShowMessage('', stNormal, 0);
@@ -1225,8 +1262,13 @@ begin
     ShowSummary;
   UpdateCommitState;
   UpdateRemoteItems;
-  if not Job.Ok then
+  { Commit Again in the notice would commit here, not move. }
+  if not Job.Ok and Moved then
+    BannerError(rsToBranchMoveFailed, Job.Error)
+  else if not Job.Ok then
     ShowCommitFailure(Job.Error)
+  else if Moved then
+    MoveToBranchDone(Job)
   else if Fixup then
   begin
     FStatus.ShowMessage('', stNormal, 0);

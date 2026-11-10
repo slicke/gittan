@@ -62,6 +62,8 @@ type
     procedure TestParseFindingsAround;
     procedure TestReviewChangesWorkTree;
     procedure TestReviewChangesRange;
+    procedure TestReviewChangesGoneFile;
+    procedure TestReviewChangesWildcardName;
     procedure TestParseFoundFiles;
     procedure TestTaskPrompt;
     procedure TestRepoFileList;
@@ -433,6 +435,71 @@ begin
   AssertTrue('the range', Pos('O1 -one', Text) > 0);
   AssertTrue(Pos('N1 +two', Text) > 0);
   AssertEquals('the work tree is no part of a range', 0, Pos('not committed', Text));
+end;
+
+{ Against an older commit the changed files include one a commit since
+  removed, which neither HEAD nor the disk has, and one removed and not
+  yet committed. }
+procedure TAiTest.TestReviewChangesGoneFile;
+var
+  Paths: TStringList;
+  Text, Error: string;
+begin
+  WriteFile('a.txt', 'one');
+  WriteFile('old.txt', 'was here');
+  WriteFile('b.txt', 'bee');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'First']);
+  Git(['tag', 'start']);
+  Git(['rm', '-q', 'old.txt']);
+  Git(['commit', '-q', '-m', 'Remove it']);
+  DeleteFile(FDir + DirectorySeparator + 'b.txt');
+  WriteFile('a.txt', 'two');
+  Paths := TStringList.Create;
+  try
+    Paths.Add('a.txt');
+    Paths.Add('b.txt');
+    Paths.Add('old.txt');
+    Error := '';
+    AssertTrue(Error, ReviewChanges(FDir, 'start', False, Paths, Text, Error));
+  finally
+    Paths.Free;
+  end;
+  AssertTrue('the changed file', Pos('N1 +two', Text) > 0);
+  AssertTrue('removed in a commit since', Pos('O1 -was here', Text) > 0);
+  AssertTrue('removed on disk', Pos('O1 -bee', Text) > 0);
+end;
+
+{ A removed file whose name has a ? is not taken for the file on disk
+  the ? would match. Windows allows no such name. }
+procedure TAiTest.TestReviewChangesWildcardName;
+{$IFNDEF WINDOWS}
+var
+  Paths: TStringList;
+  Text, Error: string;
+{$ENDIF}
+begin
+  {$IFNDEF WINDOWS}
+  WriteFile('a?.txt', 'was here');
+  WriteFile('ab.txt', 'bee');
+  Git(['add', '.']);
+  Git(['commit', '-q', '-m', 'First']);
+  Git(['tag', 'start']);
+  Git(['--literal-pathspecs', 'rm', '-q', 'a?.txt']);
+  Git(['commit', '-q', '-m', 'Remove it']);
+  WriteFile('ab.txt', 'two');
+  Paths := TStringList.Create;
+  try
+    Paths.Add('ab.txt');
+    Paths.Add('a?.txt');
+    Error := '';
+    AssertTrue(Error, ReviewChanges(FDir, 'start', False, Paths, Text, Error));
+  finally
+    Paths.Free;
+  end;
+  AssertTrue('the changed file', Pos('N1 +two', Text) > 0);
+  AssertTrue('removed in a commit since', Pos('O1 -was here', Text) > 0);
+  {$ENDIF}
 end;
 
 procedure TAiTest.TestParseFoundFiles;

@@ -96,6 +96,12 @@ begin
   AssertTrue(LeaveOutText('a'#10'B'#10'c'#10, FLines, [Pair('b', 'B', 2)], Res, Found, Err));
   AssertEquals('a'#10'b'#10'c'#10, Res);
   AssertEquals(1, Found);
+  { The other way round: the pairs not left out go back. }
+  Lines([' a', '-b', '+B', ' c', '-d', '+D']);
+  AssertTrue(LeaveOutText('a'#10'B'#10'c'#10'D'#10, FLines, [Pair('b', 'B', 2)], Res, Found,
+    Err, True));
+  AssertEquals('a'#10'B'#10'c'#10'd'#10, Res);
+  AssertEquals(1, Found);
 end;
 
 { The block left out goes back, the other goes in. }

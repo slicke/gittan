@@ -54,8 +54,8 @@ unit uwindow;
 interface
 
 uses
-  Classes, SysUtils, Types, Math, LCLType, Forms, Controls, Graphics, ExtCtrls, gittan.app,
-  gittan.git, gittan.forge, gittan.forgepage, gittan.tabnames, umain, uforge,
+  Classes, SysUtils, Types, Math, LCLType, Forms, Controls, Graphics, ExtCtrls, Menus,
+  gittan.app, gittan.git, gittan.forge, gittan.forgepage, gittan.tabnames, umain, uforge,
   gittan.ext.host, gittan.exthost
   {$IFDEF LCLCocoa}, gittan.toolbar, gittan.titlebar, CocoaConfig{$ENDIF}
   {$IFDEF OWNBAR}, gittan.owntitlebar{$ENDIF}
@@ -99,6 +99,8 @@ type
       the timer that looks now and then besides the window's activation,
       for a switch in a terminal while Gittan is in front. }
     FAccountsKey: string;
+    { The menu of the globe's right click (ForgeMenuClick). }
+    FForgeMenu: TPopupMenu;
     FAccountTimer: TTimer;
     {$IFDEF LCLCocoa}
     { The toolbar on macOS 11 and later, nil before. }
@@ -140,6 +142,7 @@ type
     procedure TabForward(Sender: TObject);
     procedure UpdateNav;
     procedure ForgeClick(Sender: TObject);
+    procedure ForgeMenuClick(Sender: TObject);
     procedure ShowForgeView;
     procedure UpdateForgeChrome;
     procedure ForgeCloneOpened(Sender: TObject);
@@ -341,6 +344,7 @@ begin
     FToolbar.OnClose := @TabClose;
     FToolbar.OnNew := @TabNew;
     FToolbar.OnForge := @ForgeClick;
+    FToolbar.OnForgeMenu := @ForgeMenuClick;
     FToolbar.OnBack := @TabBack;
     FToolbar.OnForward := @TabForward;
     FToolbar.SetTip(rsPaletteTip);
@@ -365,6 +369,7 @@ begin
   FOwnBar.OnTabClose := @TabClose;
   FOwnBar.OnNewTab := @TabNew;
   FOwnBar.OnForge := @ForgeClick;
+  FOwnBar.OnForgeMenu := @ForgeMenuClick;
   FOwnBar.OnBack := @TabBack;
   FOwnBar.OnForward := @TabForward;
   FOwnBar.SetTip(rsPaletteTip);
@@ -455,6 +460,18 @@ begin
     HideForgeView
   else
     ShowForgeView;
+end;
+
+{ A right click on the globe: the accounts of the forges' tools, to
+  switch between, at the mouse (TForgeView.FillAccountMenu). }
+procedure TGittanWindow.ForgeMenuClick(Sender: TObject);
+begin
+  if FForgeView = nil then
+    Exit;
+  if FForgeMenu = nil then
+    FForgeMenu := TPopupMenu.Create(Self);
+  FForgeView.FillAccountMenu(FForgeMenu.Items);
+  FForgeMenu.PopUp;
 end;
 
 { The view over the frame shown, with its menu (and the application
