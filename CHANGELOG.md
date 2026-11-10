@@ -6,6 +6,9 @@
 - A right click on the globe at the top right of the window lists the accounts gh is logged in to, the one in use marked, and a pick switches to it, as the Hosting page of the settings does; the GitHub view has the same list in its new Account menu, and behind your login at the top of the page when gh is logged in to more than one account. The switch is gh's own, so the terminal's gh changes with it.
 - Branch > Move Included Files to New Branch..., and Move Changes to New Branch... on a file or a folder of the tree: the changes are committed on a new branch, after a name and a message, and taken out of the branch you are on, where your other changes stay. The banner that says so offers the switch to the new branch. Changes left out of the commit stay behind too.
 
+### Fixed
+- Summarizing or reviewing the changes against an older commit no longer fails with "pathspec did not match any files" when a commit since removed a file.
+
 ## 0.18 (build-143, 2026-11-09)
 
 ### Added
