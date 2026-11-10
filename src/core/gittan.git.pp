@@ -567,13 +567,14 @@ type
       the other changes of the work tree and the index stay as they
       were, since no file of theirs differs between the two commits.
       AId is the new commit. False, with the reason in Error, when the
-      branch could not be made or nothing was committed; the branch is
-      then gone again and HEAD where it was. ARest holds, for each file
+      branch could not be made, nothing was committed, or a file of
+      ARest is not in the commit to go back to (a new file, a rename),
+      which is refused before anything is done; the branch is then gone
+      again and HEAD where it was. ARest holds, for each file
       of AParts, the work tree's text without what went into the commit
       (LeaveOutText with AOthers), written to the file once HEAD is
       back. ABack tells whether HEAD is back; when it is not (the switch
-      was refused, or a file of ARest is not in the commit to go back
-      to, a rename), the commit is made, HEAD is on AName with the work
+      was refused, or a file of ARest could not be read), the commit is made, HEAD is on AName with the work
       tree as it was and Error says why. Not while git is in the middle
       of something, nor before the first commit. }
     function MoveToBranch(const AName, AMessage: string; APaths: TStrings;
@@ -4911,15 +4912,23 @@ var
     end;
   end;
 
+  { A file that cannot be written does not stop the others; what went
+    wrong is added to Err, which the caller makes the error. }
   procedure PutBack;
   var
     j: integer;
   begin
     for j := 0 to High(Saved) do
-      if Was[j] then
-        WriteBytes(FileOf(j), Saved[j])
-      else
-        DeleteFile(FileOf(j));
+      try
+        if Was[j] then
+          WriteBytes(FileOf(j), Saved[j])
+        else
+          DeleteFile(FileOf(j));
+      except
+        on E: Exception do
+          Err := Err + LineEnding + Format('%s could not be written back (%s).',
+            [ARest[j].Path, E.Message]);
+      end;
   end;
 
 begin
@@ -4942,6 +4951,15 @@ begin
   if Detached and not RunGit(FRoot, ['rev-parse', 'HEAD'], From) then
     Exit(False);
   From := Trim(From);
+  { Asked before anything is done: the file would be gone after the
+    switch back, and git refuses a switch back by hand over it. }
+  for i := 0 to High(ARest) do
+    if not RunGit(FRoot, ['cat-file', '-e', From + ':' + ARest[i].Path], Output) then
+    begin
+      FError := Format('%s has changes left out and is not in %s; ' +
+        'include all of it or leave the file out.', [ARest[i].Path, From]);
+      Exit(False);
+    end;
   if not CreateBranch(AName, 'HEAD', True) then
     Exit(False);
   if not Commit(AMessage, APaths, False, AId, AParts, AOptions) then
@@ -4953,22 +4971,25 @@ begin
     Exit(False);
   end;
   Result := True;
-  for i := 0 to High(ARest) do
-    if not RunGit(FRoot, ['cat-file', '-e', From + ':' + ARest[i].Path], Output) then
-    begin
-      FError := Format('%s has changes left out and is not in %s.', [ARest[i].Path, From]);
-      Exit;
-    end;
   Saved := nil;
   Was := nil;
   SetLength(Saved, Length(ARest));
   SetLength(Was, Length(ARest));
+  { Nothing is changed yet: a file that cannot be read leaves HEAD on
+    the new branch with the work tree as it was. }
   for i := 0 to High(ARest) do
-  begin
-    Was[i] := FileExists(FileOf(i));
-    if Was[i] then
-      Saved[i] := ReadFileBytes(FileOf(i));
-  end;
+    try
+      Was[i] := FileExists(FileOf(i));
+      if Was[i] then
+        Saved[i] := ReadFileBytes(FileOf(i));
+    except
+      on E: Exception do
+      begin
+        FError := Format('%s has changes left out and could not be read (%s).',
+          [ARest[i].Path, E.Message]);
+        Exit;
+      end;
+    end;
   if Length(ARest) > 0 then
   begin
     Args := nil;

@@ -291,13 +291,22 @@ var
   Way: TGittanMergeWay;
 
   { From the older of the commit and the marked one to the newer, by
-    their times. }
+    their times. By name while the name still leads to the commit: a
+    branch that moved since goes by its id. }
   function MarkedRange: string;
+  var
+    Mark, Action: string;
   begin
+    Mark := FMarkName;
+    if FRepo.CommitId(Mark) <> FMarkHash then
+      Mark := FMarkHash;
+    Action := FActionName;
+    if FRepo.CommitId(Action) <> FActionCommit.Hash then
+      Action := FActionCommit.Hash;
     if FMarkDate > FActionCommit.Date then
-      Result := FActionName + '..' + FMarkName
+      Result := Action + '..' + Mark
     else
-      Result := FMarkName + '..' + FActionName;
+      Result := Mark + '..' + Action;
   end;
 
 begin

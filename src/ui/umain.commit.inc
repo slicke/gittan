@@ -987,7 +987,7 @@ end;
   file set up now may verify what could not be checked before. }
 function TRepoFrame.EditIdentity: boolean;
 var
-  Who, Mail, Error: string;
+  Who, Mail, WasMail, Error: string;
   Local, WasLocal, SigningChanged: boolean;
   Signing: TGittanSigningSetup;
 begin
@@ -996,6 +996,7 @@ begin
   Local := FRepo.HasLocalIdentity;
   Signing := ReadSigningSetup(FRepo.Root);
   WasLocal := Local;
+  WasMail := Mail;
   Result := ChooseIdentity(Who, Mail, Local, Signing, FRepo.Root, SigningChanged);
   if not Result then
     Exit;
@@ -1011,6 +1012,16 @@ begin
   if SigningChanged or (Local <> WasLocal) then
   begin
     Result := WriteSigningSetup(FRepo.Root, Signing, Mail, Local, Error);
+    if not Result then
+      StatusNote(Error, True);
+  end
+  { A new e-mail alone: the SSH key goes under it in the allowed
+    signers file, or commits made under it would not verify. }
+  else if Signing.Sign and (Signing.Format = sfSsh) and (Mail <> WasMail) and
+    (Signing.AllowedSigners <> '') and (Signing.Key <> '') then
+  begin
+    Result := AddAllowedSigner(AllowedSignersPath(FRepo.Root, Signing.AllowedSigners), Mail,
+      Signing.Key, Error);
     if not Result then
       StatusNote(Error, True);
   end;

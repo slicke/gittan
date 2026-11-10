@@ -3814,6 +3814,22 @@ begin
     AssertEquals(' M a.txt'#0'M  staged.txt'#0'?? other.txt'#0,
       Git(['status', '--porcelain', '-z']));
 
+    { A file with changes left out that HEAD lacks is refused before
+      anything is done. }
+    Parts[0].Path := 'other.txt';
+    Rest[0].Path := 'other.txt';
+    Paths.Clear;
+    Paths.Add('other.txt');
+    AssertFalse(FRepo.MoveToBranch('newpart', 'newpart', Paths, Id, Back, Parts, Rest));
+    AssertTrue(FRepo.Error, Pos('other.txt has changes left out', FRepo.Error) = 1);
+    AssertFalse(Back);
+    AssertEquals('work', Trim(Git(['branch', '--show-current'])));
+    AssertFalse(FRepo.HasCommit('refs/heads/newpart'));
+    AssertEquals(' M a.txt'#0'M  staged.txt'#0'?? other.txt'#0,
+      Git(['status', '--porcelain', '-z']));
+    Paths.Clear;
+    Paths.Add('a.txt');
+
     { A commit the hook refuses leaves no branch and HEAD where it was. }
     WriteFile('.git/hooks/pre-commit',
       '#!/bin/sh'#10'echo "hook says no" >&2'#10'exit 1'#10);

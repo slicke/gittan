@@ -12,7 +12,7 @@
 - A squash merge whose changes were stashed or discarded is over for good: changes staged later are no longer taken for it, with its old message in the commit field and an Abort that would have thrown them away.
 - Saving the Name and Email dialog with the signing left as it was no longer writes the signing settings: a key git picked by your e-mail is not replaced by the first one listed, and tags are not set to be signed.
 - Skip in a rebase, cherry-pick or revert that git refuses (a lock on the index, a hook) shows git's reason rather than saying the commit was skipped.
-- Put into Its Commit places the changes of a file that was emptied, or that was empty before, rather than calling it deleted or new.
+- Put into Its Commit no longer takes a file that was emptied for a deleted one, or one that was empty before for a new one: an emptied file's lines go to the commit that wrote them, when there is one on the branch.
 
 ## 0.18 (build-143, 2026-11-09)
 
