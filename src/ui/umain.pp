@@ -2173,6 +2173,7 @@ type
     procedure RebaseInteractiveAsk(const AOnto, AName: string; AFromGraph: boolean);
     procedure CompareSince(const ARef: string);
     procedure CompareCurrentSince(const ARef: string);
+    procedure SummarizeCurrentSince(const ARef: string);
     procedure ShowBranchList(AMode: TGittanBranchListMode; const AScreenRect: TRect);
     procedure UpdateBranchItems;
     procedure BranchMenuOpen(Sender: TObject);
@@ -3227,6 +3228,8 @@ resourcestring
   rsCaMark = 'Mark for Comparison';
   rsCaUnmark = 'Unmark';
   rsCaCompareMarked = 'Compare with Marked %s';
+  rsCaSummarize = '✦ Summarize Changes Since This Commit';
+  rsCaSummarizeMarked = '✦ Summarize Changes Between This and Marked %s';
   rsCaSwitch = 'Switch to %s';
   rsCaBranch = 'Create Branch Here...';
   rsCaTag = 'Create Tag Here...';
@@ -3345,6 +3348,7 @@ resourcestring
   rsBmMerge = 'Merge %s into %s';
   rsBmCompareSince = 'Show What %s Changed Since %s';
   rsBmCompareTree = 'Compare with Working Tree';
+  rsBmSummarizeSince = '✦ Summarize What %s Changed Since %s';
   rsBmRebase = 'Rebase %s onto %s';
   rsBranchMenu = '&Branch';
   rsBmSwitchItem = '&Switch to Branch...';

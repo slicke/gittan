@@ -60,6 +60,7 @@ const
   caArchive = 27;
   caNote = 28;
   caTrust = 29;
+  caSummarize = 30;
 
 { The commit by the name a person knows it by: a local branch on it,
   else a remote one, else a tag, else its short id. }
@@ -169,6 +170,11 @@ begin
     Add(nil, rsCaMark, caMark);
   if (FMarkHash <> '') and (FMarkHash <> ACommit.Hash) then
     Add(nil, Format(rsCaCompareMarked, [Amp(FMarkName)]), caCompareMarked);
+  if AIAvailable then
+    if (FMarkHash <> '') and (FMarkHash <> ACommit.Hash) then
+      Add(nil, Format(rsCaSummarizeMarked, [Amp(FMarkName)]), caSummarize)
+    else
+      Add(nil, rsCaSummarize, caSummarize);
   Add(nil, rsCaPatch, caPatch, not IsMerge);
   { A series runs along one line of history, so one of the two must be
     in the other's. }
@@ -280,9 +286,20 @@ end;
   asks first, saying what it keeps. }
 procedure TRepoFrame.CommitMenuClick(Sender: TObject);
 var
-  Hash, Short, Note, Ref: string;
+  Hash, Short, Note, Ref, Range: string;
   Ok, Conflicts, Reopen: boolean;
   Way: TGittanMergeWay;
+
+  { From the older of the commit and the marked one to the newer, by
+    their times. }
+  function MarkedRange: string;
+  begin
+    if FMarkDate > FActionCommit.Date then
+      Result := FActionName + '..' + FMarkName
+    else
+      Result := FMarkName + '..' + FActionName;
+  end;
+
 begin
   Hash := FActionCommit.Hash;
   Short := FActionCommit.Short;
@@ -346,10 +363,22 @@ begin
     caCompare:
       SetBase(Hash);
     caCompareMarked:
-      if FMarkDate > FActionCommit.Date then
-        SetBase(FActionName + '..' + FMarkName)
-      else
-        SetBase(FMarkName + '..' + FActionName);
+      SetBase(MarkedRange);
+    caSummarize:
+      if AIAvailable then
+      begin
+        if (FMarkHash <> '') and (FMarkHash <> Hash) then
+          Range := MarkedRange
+        else
+          Range := Hash;
+        SetBase(Range);
+        { Not when the comparison could not be shown. }
+        if FRepo.Base = Range then
+        begin
+          AbandonSummaryJob;
+          StartSummaryJob;
+        end;
+      end;
     caSwitch:
       SwitchBranch((Sender as TMenuItem).Hint);
     caCopy:

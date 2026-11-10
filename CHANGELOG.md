@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- With the AI features on, a right click on a branch in the branch list has ✦ Summarize What (your branch) Changed Since (that branch): Gittan shows what your branch did since it left that one, as a pull request to it would, and the agent summarizes it. Any branch will do, not only the default one. A right click on a commit in the graph has ✦ Summarize Changes Since This Commit, or between it and the commit you marked for comparison.
 - A right click on the globe at the top right of the window lists the accounts gh is logged in to, the one in use marked, and a pick switches to it, as the Hosting page of the settings does; the GitHub view has the same list in its new Account menu, and behind your login at the top of the page when gh is logged in to more than one account. The switch is gh's own, so the terminal's gh changes with it.
 - Branch > Move Included Files to New Branch..., and Move Changes to New Branch... on a file or a folder of the tree: the changes are committed on a new branch, after a name and a message, and taken out of the branch you are on, where your other changes stay. The banner that says so offers the switch to the new branch. Changes left out of the commit stay behind too.
 
