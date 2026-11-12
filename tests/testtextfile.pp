@@ -20,6 +20,7 @@ type
     procedure TestNextLine;
     procedure TestUnescapeC;
     procedure TestJsonTooDeep;
+    procedure TestUtf8Clean;
     procedure TestTomlTooDeep;
     procedure TestWriteThroughLink;
   end;
@@ -130,6 +131,21 @@ begin
   AssertTrue(NextLine('x'#10, Start, Line));
   AssertEquals('x', Line);
   AssertFalse(NextLine('x'#10, Start, Line));
+end;
+
+{ Valid UTF-8 comes through as it is; a CP1252 byte, a cut character,
+  an overlong form and a surrogate each become U+FFFD. }
+procedure TTextFileTest.TestUtf8Clean;
+const
+  Bad = #$EF#$BF#$BD;
+begin
+  AssertEquals('', Utf8Clean(''));
+  AssertEquals('ändrad ✓ '#$F0#$9F#$98#$80, Utf8Clean('ändrad ✓ '#$F0#$9F#$98#$80));
+  AssertEquals('caf' + Bad + ' x', Utf8Clean('caf'#$E9' x'));
+  AssertEquals('cut ' + Bad + Bad, Utf8Clean('cut '#$E2#$9C));
+  AssertEquals(Bad + Bad + '/', Utf8Clean(#$C0#$AF'/'));
+  AssertEquals(Bad + Bad + Bad, Utf8Clean(#$ED#$A0#$80));
+  AssertEquals(Bad + 'a', Utf8Clean(#$FF'a'));
 end;
 
 procedure TTextFileTest.TestJsonTooDeep;

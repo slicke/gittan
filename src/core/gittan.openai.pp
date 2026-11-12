@@ -68,7 +68,7 @@ resourcestring
 implementation
 
 uses
-  fpjson, jsonparser, gittan.http;
+  fpjson, jsonparser, gittan.http, gittan.textfile;
 
 function ChatEndpoint(const AUrl: string): string;
 begin
@@ -87,8 +87,8 @@ begin
   try
     Messages := TJSONArray.Create;
     Request.Add('messages', Messages);
-    Messages.Add(TJSONObject.Create(['role', 'system', 'content', ASystem]));
-    Messages.Add(TJSONObject.Create(['role', 'user', 'content', AUser]));
+    Messages.Add(TJSONObject.Create(['role', 'system', 'content', Utf8Clean(ASystem)]));
+    Messages.Add(TJSONObject.Create(['role', 'user', 'content', Utf8Clean(AUser)]));
     Result := Request.AsJSON;
   finally
     Request.Free;

@@ -11,7 +11,8 @@ unit testopenai;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, fpjson, jsonparser, gittan.ai, gittan.openai;
+  Classes, SysUtils, fpcunit, testregistry, fpjson, jsonparser, gittan.ai, gittan.openai,
+  gittan.textfile;
 
 type
   TOpenAITest = class(TTestCase)
@@ -65,6 +66,7 @@ end;
 procedure TOpenAITest.TestChatRequestBody;
 var
   Data: TJSONData;
+  Body: string;
 begin
   Data := GetJSON(ChatRequestBody('openai/gpt-4o-mini', 'Write the message.',
     'diff --git "a/x" "b/x"'#10'+ändrad'));
@@ -79,6 +81,10 @@ begin
   finally
     Data.Free;
   end;
+  { A diff of a CP1252 file: OpenAI refused a body that is not UTF-8. }
+  Body := ChatRequestBody('m', 'Write.', '+caf'#$E9);
+  AssertTrue(Body, Pos('caf'#$EF#$BF#$BD, Body) > 0);
+  AssertEquals('no other bytes', Utf8Clean(Body), Body);
 end;
 
 procedure TOpenAITest.TestParseChatAnswer;

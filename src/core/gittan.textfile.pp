@@ -51,6 +51,11 @@ function JsonTooDeep(const AJson: string): boolean;
   comments left out, inline tables and arrays counted. }
 function TomlTooDeep(const AToml: string): boolean;
 
+{** S with every byte that does not start a valid UTF-8 character (a
+  CP1252 é, a character cut in half, an overlong form or a surrogate)
+  replaced by U+FFFD, so a JSON body built from it is valid UTF-8. }
+function Utf8Clean(const S: RawByteString): RawByteString;
+
 {** Writes AText as the whole of AFileName, creating its folder: into a
   temporary file beside it first (AFileName, the process id, a count of
   the writes and .tmp, so two writers never share one), then renamed over
@@ -190,6 +195,81 @@ begin
     Inc(i);
   end;
   Result := False;
+end;
+
+function Utf8Clean(const S: RawByteString): RawByteString;
+const
+  Bad = #$EF#$BF#$BD;
+var
+  i, n, Len, k: integer;
+  b: byte;
+  Code, Least: longword;
+  Ok: boolean;
+  Out: integer;
+begin
+  Len := Length(S);
+  { A bad byte grows to three. }
+  SetLength(Result, Len * 3);
+  Out := 0;
+  i := 1;
+  while i <= Len do
+  begin
+    b := Ord(S[i]);
+    if b < $80 then
+    begin
+      n := 0;
+      Least := 0;
+      Code := b;
+    end
+    else if b and $E0 = $C0 then
+    begin
+      n := 1;
+      Least := $80;
+      Code := b and $1F;
+    end
+    else if b and $F0 = $E0 then
+    begin
+      n := 2;
+      Least := $800;
+      Code := b and $0F;
+    end
+    else if b and $F8 = $F0 then
+    begin
+      n := 3;
+      Least := $10000;
+      Code := b and $07;
+    end
+    else
+      n := -1;
+    Ok := (n >= 0) and (i + n <= Len);
+    if Ok then
+      for k := 1 to n do
+        if Ord(S[i + k]) and $C0 <> $80 then
+        begin
+          Ok := False;
+          Break;
+        end
+        else
+          Code := (Code shl 6) or (Ord(S[i + k]) and $3F);
+    { Overlong forms, surrogates and code points past U+10FFFF are not
+      UTF-8 either. }
+    if Ok and ((Code < Least) or (Code > $10FFFF) or
+      ((Code >= $D800) and (Code <= $DFFF))) then
+      Ok := False;
+    if Ok then
+    begin
+      Move(S[i], Result[Out + 1], n + 1);
+      Inc(Out, n + 1);
+      Inc(i, n + 1);
+    end
+    else
+    begin
+      Move(Bad[1], Result[Out + 1], 3);
+      Inc(Out, 3);
+      Inc(i);
+    end;
+  end;
+  SetLength(Result, Out);
 end;
 
 function TomlTooDeep(const AToml: string): boolean;
