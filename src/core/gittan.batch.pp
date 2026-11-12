@@ -997,7 +997,23 @@ begin
 end;
 
 { The branch the remote's HEAD names in `git ls-remote --symref` output
-  ("ref: refs/heads/main<TAB>HEAD"), '' when none. }
+  ("ref: refs/heads/main<TAB>HEAD"), '' when none, or when the name is
+  not one git takes for a branch: the remote chooses it, and a name such
+  as "x:refs/heads/main" would be a refspec of its own in the fetch. }
+function PlainBranchName(const AName: string): boolean;
+var
+  c: char;
+begin
+  Result := (AName <> '') and not (AName[1] in ['-', '+', '.', '/']) and
+    (Pos('..', AName) = 0) and (Pos('//', AName) = 0) and (Pos('@{', AName) = 0) and
+    (AName[Length(AName)] <> '/') and (AName[Length(AName)] <> '.') and
+    (Copy(AName, Length(AName) - 4, 5) <> '.lock');
+  if Result then
+    for c in AName do
+      if (c <= ' ') or (c in [':', '?', '*', '[', '\', '^', '~', #127]) then
+        Exit(False);
+end;
+
 function SymrefHead(const AOutput: string): string;
 var
   Lines: TStringList;
@@ -1014,7 +1030,10 @@ begin
         p := Pos(#9, Line);
         if p = 0 then
           p := Length(Line) + 1;
-        Exit(Copy(Line, 17, p - 17));
+        Result := Copy(Line, 17, p - 17);
+        if not PlainBranchName(Result) then
+          Result := '';
+        Exit;
       end;
   finally
     Lines.Free;
@@ -1134,7 +1153,8 @@ begin
       { set-head needs refs/remotes/<remote>/<want>, which a branch
         made on the remote since the last fetch does not have yet. }
       AItem.Done := ((AItem.Want = '') or RunGitEnv(APath, ['fetch', '--', AItem.Remote,
-        AItem.Want], BatchRemoteEnv(APath), Output, Err)) and
+        'refs/heads/' + AItem.Want + ':refs/remotes/' + AItem.Remote + '/' + AItem.Want],
+        BatchRemoteEnv(APath), Output, Err)) and
         RunGitEnv(APath, ['remote', 'set-head', AItem.Remote, '--auto'],
         BatchRemoteEnv(APath), Output, Err);
     mtPruneWorktrees:
