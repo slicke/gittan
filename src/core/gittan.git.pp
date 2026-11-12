@@ -369,11 +369,14 @@ type
       on disk is written into the repository as a blob (`git
       hash-object -w`), so RestoreReverted can put it back: ASaved gets
       one line per file, the path, a NUL and the blob's id, which is
-      empty for a file that was not there. A submodule is left alone. }
+      empty for a file that was not there. A symbolic link is saved as
+      itself, not as the file it leads to: the path, two NULs and the
+      link's target. A submodule is left alone. }
     function RevertFiles(APaths, ASaved: TStrings): boolean;
     {** Writes back what RevertFiles saved in ASaved: each file as it
-      was on disk, and a file that was not there is deleted again. What
-      the index held is not brought back. }
+      was on disk, a link as a link, and a file that was not there is
+      deleted again. Nothing is written through a link the revert put
+      there. What the index held is not brought back. }
     function RestoreReverted(ASaved: TStrings): boolean;
     {** Whether the index holds APath (relative to Root) as a file
       (`git ls-files`), so git mv and git rm take it. }
@@ -3622,9 +3625,40 @@ begin
   Result := RunGit(FRoot, Concat(Args, [ABranch]), Output);
 end;
 
+{ Whether AFull is a symbolic link, with ATarget what it leads to. A
+  link to a folder or to nothing counts, so a revert saves and restores
+  it as the link it is rather than through it. Windows keeps links as
+  files in git by default and is left as it was. }
+function ReadLinkAt(const AFull: string; out ATarget: string): boolean;
+{$ifdef unix}
+var
+  Info: Stat;
+begin
+  ATarget := '';
+  Result := (fpLstat(AFull, Info) = 0) and fpS_ISLNK(Info.st_mode);
+  if Result then
+  begin
+    ATarget := fpReadLink(AFull);
+    Result := ATarget <> '';
+  end;
+end;
+{$else}
+begin
+  ATarget := '';
+  Result := False;
+end;
+{$endif}
+
+function IsLinkAt(const AFull: string): boolean;
+var
+  Target: string;
+begin
+  Result := ReadLinkAt(AFull, Target);
+end;
+
 function TGittanRepo.RevertFiles(APaths, ASaved: TStrings): boolean;
 var
-  Output, Entry, Path, Id, ListFile: string;
+  Output, Entry, Path, Id, ListFile, Target: string;
   Fields, Chosen, Paths, InHead, Restore, Remove: TStringList;
   i: integer;
 
@@ -3650,7 +3684,7 @@ begin
     Paths.Sorted := True;
     Paths.Duplicates := dupIgnore;
     for Path in APaths do
-      if not DirectoryExists(FullPath(Path)) then
+      if IsLinkAt(FullPath(Path)) or not DirectoryExists(FullPath(Path)) then
         Paths.Add(Path);
     { A rename's old path comes with its new one. }
     SplitNul(Output, Fields);
@@ -3681,6 +3715,16 @@ begin
     for Path in Paths do
     begin
       Id := '';
+      { hash-object would save the file a link leads to. }
+      if ReadLinkAt(FullPath(Path), Target) then
+      begin
+        ASaved.Add(Path + #0 + #0 + Target);
+        if InHead.IndexOf(Path) >= 0 then
+          Restore.Add(Path)
+        else
+          Remove.Add(Path);
+        Continue;
+      end;
       if FileExists(FullPath(Path)) then
       begin
         if not RunGit(FRoot, ['hash-object', '-w', '--no-filters', '--', Path], Id) then
@@ -3706,7 +3750,7 @@ begin
       Result := RunGit(FRoot, ['--literal-pathspecs', 'rm', '--cached', '-q',
         '--ignore-unmatch', '--pathspec-from-file=' + ListFile, '--pathspec-file-nul'], Output);
       for Path in Remove do
-        if FileExists(FullPath(Path)) then
+        if FileExists(FullPath(Path)) or IsLinkAt(FullPath(Path)) then
           DeleteFile(FullPath(Path));
     end;
   finally
@@ -3723,7 +3767,7 @@ end;
 function TGittanRepo.RestoreReverted(ASaved: TStrings): boolean;
 var
   i: integer;
-  Path, Id, Data: string;
+  Path, Id, Data, Target: string;
 begin
   Result := FRoot <> '';
   for i := 0 to ASaved.Count - 1 do
@@ -3732,9 +3776,29 @@ begin
       Continue;
     Path := Copy(ASaved[i], 1, Pos(#0, ASaved[i]) - 1);
     Id := Copy(ASaved[i], Pos(#0, ASaved[i]) + 1, MaxInt);
+    Target := '';
+    if Pos(#0, Id) > 0 then
+    begin
+      Target := Copy(Id, Pos(#0, Id) + 1, MaxInt);
+      Id := Copy(Id, 1, Pos(#0, Id) - 1);
+    end;
+    if Target <> '' then
+    begin
+      {$ifdef unix}
+      if FileExists(FullPath(Path)) or IsLinkAt(FullPath(Path)) then
+        DeleteFile(FullPath(Path));
+      ForceDirectories(ExtractFileDir(FullPath(Path)));
+      if fpSymlink(PChar(Target), PChar(FullPath(Path))) <> 0 then
+      begin
+        FError := Format('Could not make the link %s.', [Path]);
+        Result := False;
+      end;
+      {$endif}
+      Continue;
+    end;
     if Id = '' then
     begin
-      if FileExists(FullPath(Path)) then
+      if FileExists(FullPath(Path)) or IsLinkAt(FullPath(Path)) then
         DeleteFile(FullPath(Path));
       Continue;
     end;
@@ -3744,6 +3808,10 @@ begin
       Continue;
     end;
     try
+      { A link the revert put there goes, rather than the file it leads
+        to being written. }
+      if IsLinkAt(FullPath(Path)) then
+        DeleteFile(FullPath(Path));
       ForceDirectories(ExtractFileDir(FullPath(Path)));
       WriteBytes(FullPath(Path), Data);
     except
@@ -8024,9 +8092,9 @@ begin
         SplitRange(FileName, Tracked);
         if RunGit(FRoot, ['show', Tracked + ':' + APath], Output) then
         begin
-          Raw.Text := Output;
+          SplitLf(Output, Raw);
           for Line in Raw do
-            ALines.Add(' ' + Line);
+            ALines.Add(' ' + BareLine(Line));
         end;
         Exit;
       end;
@@ -8038,19 +8106,23 @@ begin
           Marker := ' '
         else
           Marker := '+';
-        Raw.LoadFromFile(FileName);
+        SplitLf(ReadFileBytes(FileName), Raw);
         for Line in Raw do
-          ALines.Add(Marker + Line);
+          ALines.Add(Marker + BareLine(Line));
       end;
       Exit;
     end;
-    Raw.Text := Output;
+    { At LF alone: TStrings.Text also breaks at a lone CR, and a line
+      with one in it became two rows, so the lines after it were counted
+      one too far down and Discard put a deleted block back one line
+      low. The CR of a CRLF line goes, as it did. }
+    SplitLf(Output, Raw);
     InHunk := False;
     for Line in Raw do
       if not InHunk then
         InHunk := Copy(Line, 1, 2) = '@@'
       else if (Line <> '') and (Line[1] in [' ', '+', '-']) then
-        ALines.Add(Line);
+        ALines.Add(BareLine(Line));
   finally
     Raw.Free;
   end;

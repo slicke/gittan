@@ -9,6 +9,8 @@
 - On Windows a build mode or file name with a quote or a % in it no longer breaks out of its quotes in the command Gittan runs.
 - Push and Force Push on a branch that tracks a local branch (`git switch -c feat --track main`) push it to the remote under its own name, where they moved the local branch it tracks and said it was pushed.
 - An extension with only the data permission can no longer read or write files outside the repository through `Gittan.repo.commit`, `blame` or `diff`, or by replacing JavaScript's own functions.
+- Undo Revert puts a symbolic link back as the link it was. It wrote the content of the file the link led to into the file the reverted link leads to, and left the link as HEAD had it; a link to a folder or to nothing is reverted and put back too, where it was left out or deleted.
+- Discard on a file with a carriage return inside a line (not a Windows line end) puts a deleted line back where it was, not one line further down.
 
 ## 0.19 (build-144, 2026-11-10)
 

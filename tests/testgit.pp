@@ -110,6 +110,8 @@ type
     procedure TestMoveToBranch;
     procedure TestSwitchBlocked;
     procedure TestRevertFiles;
+    procedure TestRevertLinks;
+    procedure TestFileChangesLoneCR;
     procedure TestMoveAndRemove;
     procedure TestRebaseOnto;
     procedure TestBehindDefault;
@@ -3967,6 +3969,104 @@ end;
 
 { Modified, staged, deleted, added, untracked and renamed files go back
   to HEAD; what was on disk comes back with RestoreReverted. }
+{ A link is reverted and put back as the link it is: before, its target
+  was saved and written back through the link the revert restored, so
+  another file got the content and the link stayed as HEAD had it. A
+  file HEAD has as a link is written back as a file, not through the
+  link, and a dangling link or one to a folder is saved too. }
+procedure TGitRepoTest.TestRevertLinks;
+{$IFDEF UNIX}
+var
+  Paths, Saved: TStringList;
+  Root: string;
+  Info: Stat;
+begin
+  MakeHistory;
+  Root := IncludeTrailingPathDelimiter(FDir);
+  AssertEquals(0, fpSymlink('a.txt', PChar(Root + 'link')));
+  AssertEquals(0, fpSymlink('a.txt', PChar(Root + 'l2')));
+  Commit('links');
+  WriteFile('b.txt', 'B'#10);
+  Git(['add', 'b.txt']);
+  Commit('b');
+  AssertTrue(FRepo.Open(FDir));
+  DeleteFile(Root + 'link');
+  AssertEquals(0, fpSymlink('b.txt', PChar(Root + 'link')));
+  DeleteFile(Root + 'l2');
+  WriteFile('l2', 'mine'#10);
+  AssertEquals(0, fpSymlink('nowhere', PChar(Root + 'dangle')));
+  AssertEquals(0, fpSymlink('dir sp', PChar(Root + 'dirlink')));
+  Paths := TStringList.Create;
+  Saved := TStringList.Create;
+  try
+    Paths.Add('link');
+    Paths.Add('l2');
+    Paths.Add('dangle');
+    Paths.Add('dirlink');
+    AssertTrue(FRepo.Error, FRepo.RevertFiles(Paths, Saved));
+    AssertEquals('every one saved', 4, Saved.Count);
+    AssertEquals('as HEAD has it', 'a.txt', fpReadLink(Root + 'link'));
+    AssertEquals('a link again', 'a.txt', fpReadLink(Root + 'l2'));
+    AssertTrue('the dangling link gone', fpLstat(Root + 'dangle', Info) <> 0);
+    AssertTrue('the folder link gone', fpLstat(Root + 'dirlink', Info) <> 0);
+    AssertTrue('the folder kept', DirectoryExists(Root + 'dir sp'));
+
+    AssertTrue(FRepo.Error, FRepo.RestoreReverted(Saved));
+    AssertEquals('the link back', 'b.txt', fpReadLink(Root + 'link'));
+    AssertEquals('nothing written through it', 'one'#10'two'#10'three'#10,
+      FileText(Root + 'a.txt'));
+    AssertEquals('B'#10, FileText(Root + 'b.txt'));
+    AssertTrue('a file again', (fpLstat(Root + 'l2', Info) = 0) and
+      not fpS_ISLNK(Info.st_mode));
+    AssertEquals('mine'#10, FileText(Root + 'l2'));
+    AssertEquals('nowhere', fpReadLink(Root + 'dangle'));
+    AssertEquals('dir sp', fpReadLink(Root + 'dirlink'));
+  finally
+    Paths.Free;
+    Saved.Free;
+    { Before TearDown's RemoveTree, which would follow it. }
+    fpUnlink(PChar(Root + 'dirlink'));
+  end;
+end;
+{$ELSE}
+begin
+end;
+{$ENDIF}
+
+{ A lone CR is part of its line: TStrings.Text broke the line there, so
+  the rows below it were counted one line too far down and Discard put a
+  deleted line back one line low. }
+procedure TGitRepoTest.TestFileChangesLoneCR;
+var
+  Lines: TStringList;
+  Block: TGittanDiscard;
+  Err: string;
+begin
+  MakeHistory;
+  WriteFile('cr.txt', 'a'#13' b'#10'c'#10'd'#10'e'#10);
+  Commit('cr');
+  WriteFile('cr.txt', 'a'#13' b'#10'c'#10'e'#10);
+  AssertTrue(FRepo.Open(FDir));
+  Lines := TStringList.Create;
+  try
+    AssertTrue(FRepo.FileChanges('cr.txt', Lines));
+    AssertEquals(4, Lines.Count);
+    AssertEquals(' a'#13' b', Lines[0]);
+    AssertEquals('-d', Lines[2]);
+    Block := DiffBlock(Lines, 2, IncludeTrailingPathDelimiter(FDir) + 'cr.txt');
+    AssertEquals('the line it goes back before', 3, Block.Line);
+    AssertTrue(Err, DiscardBlock(Block, Err));
+    AssertEquals('a'#13' b'#10'c'#10'd'#10'e'#10,
+      FileText(IncludeTrailingPathDelimiter(FDir) + 'cr.txt'));
+    { And a file with CRLF ends keeps losing only its CRs. }
+    WriteFile('crlf.txt', 'x'#13#10'y'#13#10);
+    AssertTrue(FRepo.FileChanges('crlf.txt', Lines));
+    AssertEquals('+x|+y|', Joined(Lines));
+  finally
+    Lines.Free;
+  end;
+end;
+
 procedure TGitRepoTest.TestRevertFiles;
 var
   Paths, Saved: TStringList;
