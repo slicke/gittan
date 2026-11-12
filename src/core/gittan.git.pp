@@ -2623,7 +2623,8 @@ begin
       if Asked.IndexOf(Remote) < 0 then
       begin
         Asked.Add(Remote);
-        if RunGitIn(ADir, ['ls-remote', '--heads', Remote], Output, Err) then
+        if RunGitEnv(ADir, ['ls-remote', '--heads', Remote], RemoteEnvironmentIn(ADir),
+          Output, Err) then
         begin
           for Line in Output.Split([#10]) do
             if Pos(#9, Line) > 0 then

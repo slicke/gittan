@@ -718,7 +718,8 @@ begin
       Remote := ResolveSubmoduleUrl(Trim(SuperUrl), Remote);
     end;
   end;
-  if not RunGitIn(RunDir, ['ls-remote', '--', Remote, Result.RemoteRef], Output, Err) then
+  if not RunGitEnv(RunDir, ['ls-remote', '--', Remote, Result.RemoteRef],
+    RemoteEnvironmentIn(RunDir), Output, Err) then
   begin
     Result.State := smFailed;
     Result.Error := Err;

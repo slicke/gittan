@@ -18,6 +18,7 @@
 - Move to a New Branch refuses a file that `git rm --cached` took out of the index but left on disk, which git would not let it switch back over, and a copy of left-out changes it could not write back is no longer replaced by a later one with the same name.
 - A background task that fails unexpectedly (an AI request, a forge or update check, a signing key lookup) no longer leaves Gittan waiting for it for good: it ends with its error shown. The blame band of a repository that could not be opened is no longer left waiting either.
 - The AI features through an OpenAI-compatible API work on changes to a file that is not UTF-8 (a Windows-1252 file with an é in it), where the server refused the request.
+- The check for branches gone from their remote and the submodule check run ssh in batch mode, as fetch and push do, so a key with a passphrase can no longer leave them waiting on a prompt in the terminal Gittan was started from.
 - A promise of an extension that ends after Reload Extensions (a slow fetch or command) is no longer settled in the extension's freed context.
 - An extension can no longer exhaust Gittan's memory or stack by passing an argument that claims a huge length or contains itself, and an exception raised while Gittan reads an argument is thrown where the extension made the call, instead of breaking its next call.
 - An extension with the forge permission can no longer have gh read a local file through `--recover` or `release verify-asset`.
