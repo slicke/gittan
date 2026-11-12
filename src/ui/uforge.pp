@@ -1758,7 +1758,7 @@ var
   Forge: TGittanForgeClass;
   Accounts: TGittanForgeAccounts;
   Host: string;
-  i, j: integer;
+  i, j, Group: integer;
 
   function Add(const ACaption: string; AEnabled: boolean; AClick: TNotifyEvent): TMenuItem;
   begin
@@ -1774,6 +1774,7 @@ begin
   AParent.Clear;
   FMenuAccounts := nil;
   FMenuForges := nil;
+  Group := 0;
   for Forge in RegisteredForges do
   begin
     { A forge turned off in the settings is not asked, nor named. }
@@ -1797,11 +1798,16 @@ begin
         if AParent.Count > 0 then
           AParent.Add(NewLine);
         Add(Format(rsAccountHost, [Forge.CliName, Host]), False, nil);
+        { A group of its own per host: checking a radio item clears the
+          others of its group, and each host has an active login. }
+        if Group < High(byte) then
+          Inc(Group);
         for j := i to High(Accounts) do
           if Accounts[j].Host = Host then
             with Add(Accounts[j].Login, True, @AccountItemClick) do
             begin
               RadioItem := True;
+              GroupIndex := Group;
               Checked := Accounts[j].Active;
               Tag := Length(FMenuAccounts);
               SetLength(FMenuAccounts, Tag + 1);
