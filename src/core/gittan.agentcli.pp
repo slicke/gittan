@@ -241,13 +241,25 @@ begin
   Result := ReadAnswer(Exited, Output, Errors, AText, AError);
 end;
 
+{ Asked from the settings' versions job, which quitting waits for: a
+  command that does not answer is given ten seconds. }
 function TGittanAgentCli.About: string;
 var
   Output, Error, Version: string;
+  Deadline: TGittanDeadline;
+  Ran: boolean;
 begin
   Result := '';
-  if (Path = '') or not RunAgentCli(Path, GetUserDir, ['--version'], '', nil, Output,
-      Error) then
+  if Path = '' then
+    Exit;
+  Deadline := TGittanDeadline.Create(10);
+  try
+    Ran := RunAgentCli(Path, GetUserDir, ['--version'], '', @Deadline.Passed, Output,
+      Error);
+  finally
+    Deadline.Free;
+  end;
+  if not Ran then
     Exit;
   Version := VersionOf(Output, '');
   if Version <> '' then

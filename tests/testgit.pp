@@ -143,6 +143,8 @@ type
     procedure TestTreeEntries;
     procedure TestCloneFolderName;
     procedure TestLooksLikeCloneUrl;
+    procedure TestIsWebUrl;
+    procedure TestDeadlineEndsTool;
     procedure TestCloneAndInit;
     procedure TestEditRemotes;
     procedure TestParseBisectRefs;
@@ -5030,6 +5032,44 @@ begin
   AssertEquals('host.example', CloneFolderName('ssh://me@host.example'));
   AssertEquals('b', CloneFolderName('  ../b.bundle  '));
   AssertEquals('', CloneFolderName(''));
+end;
+
+{ Only the web and mail go to the system: a link in a comment or a README
+  may name a scheme that starts an application. }
+{ A deadline as the cancel ends a tool that does not answer (an agent's
+  --version, which quitting waits for). }
+procedure TGitRepoTest.TestDeadlineEndsTool;
+{$ifdef unix}
+var
+  Deadline: TGittanDeadline;
+  Output, Err: string;
+  Start: QWord;
+begin
+  Deadline := TGittanDeadline.Create(1);
+  try
+    Start := GetTickCount64;
+    AssertFalse(RunAgentCli('/bin/sh', FDir, ['-c', 'sleep 30'], '', @Deadline.Passed,
+      Output, Err));
+    AssertTrue('ended at the deadline', GetTickCount64 - Start < 10000);
+  finally
+    Deadline.Free;
+  end;
+end;
+{$else}
+begin
+end;
+{$endif}
+
+procedure TGitRepoTest.TestIsWebUrl;
+begin
+  AssertTrue(IsWebUrl('https://github.com/o/r'));
+  AssertTrue(IsWebUrl('HTTP://example.com'));
+  AssertTrue(IsWebUrl('mailto:a@example.com'));
+  AssertFalse(IsWebUrl('file:///Applications/Calculator.app'));
+  AssertFalse(IsWebUrl('vscode://file/etc/passwd'));
+  AssertFalse(IsWebUrl('javascript:alert(1)'));
+  AssertFalse(IsWebUrl('smb://host/share'));
+  AssertFalse(IsWebUrl(''));
 end;
 
 procedure TGitRepoTest.TestLooksLikeCloneUrl;

@@ -27,6 +27,16 @@ type
   {** Asked while a tool runs, in the thread it runs in: True ends the
     tool (a job that was told to stop). }
   TGittanCancelEvent = function: boolean of object;
+
+  {** A cancel for a tool that must not run long: Passed is True once
+    ASeconds have gone since Create. }
+  TGittanDeadline = class
+  private
+    FEnd: QWord;
+  public
+    constructor Create(ASeconds: integer);
+    function Passed: boolean;
+  end;
 type
   {** What happened to a changed file, condensed from the two status columns
     of `git status --porcelain`. }
@@ -1465,6 +1475,11 @@ function CloneFolderName(const AUrl: string): string;
   spaces. For prefilling a field from the clipboard. }
 function LooksLikeCloneUrl(const AText: string): boolean;
 
+{** Whether AUrl is one to hand the system's browser or mail program:
+  http, https or mailto. A link a repository or a comment holds may name
+  any scheme, and the system opens an application for one it knows. }
+function IsWebUrl(const AUrl: string): boolean;
+
 {** AText with the carriage returns of a terminal's progress lines
   ("Writing objects:  33%" written over and over) resolved: of what a
   line held before each return only the part after the last one stays,
@@ -1529,6 +1544,17 @@ implementation
 uses
   {$ifdef unix}BaseUnix,{$endif}
   Process, Pipes, md5, StrUtils, DateUtils, gittan.textfile;
+
+constructor TGittanDeadline.Create(ASeconds: integer);
+begin
+  inherited Create;
+  FEnd := GetTickCount64 + QWord(ASeconds) * 1000;
+end;
+
+function TGittanDeadline.Passed: boolean;
+begin
+  Result := GetTickCount64 >= FEnd;
+end;
 
 { ---------------------------------------------------------------------------
   The environment
@@ -4480,6 +4506,15 @@ begin
   i := Pos('@', Result);
   if i > 0 then
     Result := Copy(Result, i + 1, MaxInt);
+end;
+
+function IsWebUrl(const AUrl: string): boolean;
+var
+  Lower: string;
+begin
+  Lower := LowerCase(Trim(AUrl));
+  Result := (Copy(Lower, 1, 8) = 'https://') or (Copy(Lower, 1, 7) = 'http://') or
+    (Copy(Lower, 1, 7) = 'mailto:');
 end;
 
 function LooksLikeCloneUrl(const AText: string): boolean;
