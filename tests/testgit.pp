@@ -108,6 +108,7 @@ type
     procedure TestCoAuthors;
     procedure TestBranchManagement;
     procedure TestMoveToBranch;
+    procedure TestMoveToBranchEdges;
     procedure TestSwitchBlocked;
     procedure TestRevertFiles;
     procedure TestRevertLinks;
@@ -3859,6 +3860,45 @@ begin
     AssertEquals(Head, Trim(Git(['rev-parse', 'HEAD'])));
     AssertEquals('changed'#10, Git(['show', 'loose:a.txt']));
     AssertEquals('', Git(['status', '--porcelain', '-z']));
+  finally
+    Paths.Free;
+  end;
+end;
+
+{ A branch that shares its name with a tag: symbolic-ref --short gave
+  heads/<name>, which git switch refused, so every move stayed on the new
+  branch. A file git rm --cached took out and left on disk is refused
+  before anything is done, since git would refuse the switch back. }
+procedure TGitRepoTest.TestMoveToBranchEdges;
+var
+  Paths: TStringList;
+  Id, Main: string;
+  Back: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Main := Trim(Git(['branch', '--show-current']));
+  Git(['tag', Main]);
+  AssertEquals('the branch, not heads/', Main, FRepo.Branch);
+  WriteFile('a.txt', 'moved'#10);
+  Paths := TStringList.Create;
+  try
+    Paths.Add('a.txt');
+    AssertTrue(FRepo.Error, FRepo.MoveToBranch('side', 'side', Paths, Id, Back));
+    AssertTrue('back on it: ' + FRepo.Error, Back);
+    AssertEquals(Main, Trim(Git(['branch', '--show-current'])));
+    AssertEquals('moved'#10, Git(['show', 'side:a.txt']));
+
+    Git(['rm', '--cached', '-q', 'del.txt']);
+    Paths.Clear;
+    Paths.Add('del.txt');
+    AssertFalse(FRepo.MoveToBranch('gone', 'gone', Paths, Id, Back));
+    AssertTrue(FRepo.Error, Pos('no longer tracked', FRepo.Error) > 0);
+    AssertFalse('no branch made', FRepo.HasCommit('refs/heads/gone'));
+    AssertEquals(Main, Trim(Git(['branch', '--show-current'])));
+    AssertTrue('the file kept', FileExists(IncludeTrailingPathDelimiter(FDir) + 'del.txt'));
   finally
     Paths.Free;
   end;

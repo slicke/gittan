@@ -544,12 +544,8 @@ begin
 end;
 
 function CurrentBranch(const ARoot: string): string;
-var
-  Err: string;
 begin
-  if RunGitIn(ARoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Result, Err) then
-    Result := Trim(Result)
-  else
+  if not HeadBranchIn(ARoot, Result) then
     Result := '';
 end;
 

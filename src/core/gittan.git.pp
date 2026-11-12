@@ -1420,6 +1420,12 @@ function ParseLfsPointer(const AData: RawByteString; out AOid: string;
 function RunGitIn(const ADir: string; const AArgs: array of string;
   out AOutput, AError: string; const AIndexFile: string = ''): boolean;
 
+{** The branch HEAD is on in ADir, by its full ref with refs/heads/ taken
+  off: symbolic-ref --short gives heads/main when a tag main exists too,
+  which git switch and branch.<name> config do not take. False when HEAD
+  is detached. }
+function HeadBranchIn(const ADir: string; out AName: string): boolean;
+
 {** RunGitIn with the variables AEnv ("NAME=value") set besides those
   Gittan always sets, and AOnOutput told of each piece git writes as it
   runs, on either stream. ACancel, when given, is asked as git runs, and
@@ -4729,7 +4735,7 @@ begin
   Result := False;
   if FRoot = '' then
     Exit;
-  if not RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Name) or (Trim(Name) = '') then
+  if not HeadBranchIn(FRoot, Name) then
   begin
     FError := 'HEAD is not on a branch.';
     Exit;
@@ -4778,7 +4784,7 @@ begin
   Result := False;
   if FRoot = '' then
     Exit;
-  if not RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Name) or (Trim(Name) = '') then
+  if not HeadBranchIn(FRoot, Name) then
   begin
     FError := 'HEAD is not on a branch.';
     Exit;
@@ -4894,7 +4900,7 @@ begin
   Result := '';
   if FRoot = '' then
     Exit;
-  if RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Name) and (Trim(Name) <> '') and
+  if HeadBranchIn(FRoot, Name) and
     RunGit(FRoot, ['config', 'branch.' + Trim(Name) + '.remote'], Result) then
     Result := Trim(Result);
   { "." is the repository itself, for a branch tracking a local one. }
@@ -4980,6 +4986,19 @@ var
   Was: array of boolean;
   Args: TStringArray;
   i: integer;
+  Untracked: TStringList;
+  Path: string;
+
+  { Whether the commit takes APath: it or a folder above it is chosen. }
+  function Chosen(const APath: string): boolean;
+  var
+    P: string;
+  begin
+    for P in APaths do
+      if (APath = P) or (Copy(APath, 1, Length(P) + 1) = P + '/') then
+        Exit(True);
+    Result := False;
+  end;
 
   function FileOf(AIndex: integer): string;
   begin
@@ -4991,11 +5010,21 @@ var
     say of it. }
   function KeepUnwritten(AIndex: integer; const AWhy: string): string;
   var
-    Folder, Kept: string;
+    Folder, Kept, Stem: string;
+    n: integer;
   begin
     Folder := IncludeTrailingPathDelimiter(GitDir) + 'gittan-left-out';
-    Kept := IncludeTrailingPathDelimiter(Folder) + IntToStr(AIndex + 1) + '-' +
-      ExtractFileName(FileOf(AIndex));
+    { Named by the commit and the time, and never over a file kept by an
+      earlier move, whose changes would be lost with it. }
+    Stem := IncludeTrailingPathDelimiter(Folder) + Copy(AId, 1, 7) + '-' +
+      FormatDateTime('yyyymmdd-hhnnss', Now) + '-' + ExtractFileName(FileOf(AIndex));
+    Kept := Stem;
+    n := 1;
+    while FileExists(Kept) do
+    begin
+      Inc(n);
+      Kept := Stem + '.' + IntToStr(n);
+    end;
     try
       ForceDirectories(Folder);
       WriteBytes(Kept, ARest[AIndex].Text);
@@ -5042,8 +5071,7 @@ begin
     FError := 'There is no commit to go back to yet.';
     Exit(False);
   end;
-  Detached := not RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], From) or
-    (Trim(From) = '');
+  Detached := not HeadBranchIn(FRoot, From);
   if Detached and not RunGit(FRoot, ['rev-parse', 'HEAD'], From) then
     Exit(False);
   From := Trim(From);
@@ -5056,13 +5084,38 @@ begin
         'include all of it or leave the file out.', [ARest[i].Path, From]);
       Exit(False);
     end;
+  { A file taken out of the index (git rm --cached) and kept on disk is
+    left untracked by the commit, and git then refuses the switch back,
+    since the branch there tracks it: asked before anything is done. }
+  if RunGit(FRoot, ['diff', '--cached', '--name-only', '-z', '--no-renames',
+    '--diff-filter=D', 'HEAD'], Output) then
+  begin
+    Untracked := TStringList.Create;
+    try
+      SplitNul(Output, Untracked);
+      for Path in Untracked do
+        if FileExists(FullPath(Path)) and Chosen(Path) then
+        begin
+          FError := Format('%s is no longer tracked but still on disk, and the ' +
+            'switch back would refuse it; commit it here, or move the file away ' +
+            'first.', [Path]);
+          Exit(False);
+        end;
+    finally
+      Untracked.Free;
+    end;
+  end;
   if not CreateBranch(AName, 'HEAD', True) then
     Exit(False);
   if not Commit(AMessage, APaths, False, AId, AParts, AOptions) then
   begin
     Err := FError;
     if Switch(From, False, Detached) then
-      DeleteBranch(AName, True, NotMerged);
+      DeleteBranch(AName, True, NotMerged)
+    else
+      { Said, since HEAD is then on the new branch with nothing on it. }
+      Err := Err + LineEnding + Format('Gittan could not go back to %s (%s), so ' +
+        'you are on %s, which has nothing new on it.', [From, Trim(FError), AName]);
     FError := Err;
     Exit(False);
   end;
@@ -7705,6 +7758,18 @@ begin
     AHashes.Text := Output;
 end;
 
+function HeadBranchIn(const ADir: string; out AName: string): boolean;
+var
+  Output, Err: string;
+begin
+  AName := '';
+  Result := RunGitIn(ADir, ['symbolic-ref', '-q', 'HEAD'], Output, Err) and
+    (Copy(Trim(Output), 1, Length('refs/heads/')) = 'refs/heads/');
+  if Result then
+    AName := Copy(Trim(Output), Length('refs/heads/') + 1, MaxInt);
+  Result := AName <> '';
+end;
+
 function TGittanRepo.Branch: string;
 var
   Detached: boolean;
@@ -7718,9 +7783,7 @@ begin
   ADetached := False;
   if FRoot = '' then
     Exit;
-  if RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Result) then
-    Result := Trim(Result)
-  else
+  if not HeadBranchIn(FRoot, Result) then
   begin
     ADetached := True;
     if RunGit(FRoot, ['rev-parse', '--short', 'HEAD'], Result) then
