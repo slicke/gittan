@@ -48,6 +48,14 @@ begin
   AssertEquals('edition', E[3].Key);
   AssertEquals('short', E[4].Key);
   AssertEquals('last', E[5].Key);
+  { An escaped quote and two more do not end it; an even run of
+    backslashes before the quotes does. }
+  E := ReadToml('description = """say \"""' + LE + 'dependencies = ["fake"]' + LE +
+    'end \\\\"""' + LE + 'name = "x"' + LE);
+  AssertEquals(2, Length(E));
+  AssertEquals('name', E[1].Key);
+  AssertEquals('the value runs to its end', 'description', E[0].Key);
+  AssertTrue(E[0].Value, Pos('dependencies', E[0].Value) > 0);
 end;
 
 procedure TManifestTest.TestTomlTables;

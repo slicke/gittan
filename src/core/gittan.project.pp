@@ -608,13 +608,38 @@ begin
   end;
 end;
 
+{ What follows the numbers of AVersion, in lower case, without the
+  separator before it: "post1" of "1.4.post1". }
+function VersionSuffix(const AVersion: string): string;
+var
+  i: integer;
+begin
+  i := 1;
+  if (i <= Length(AVersion)) and (AVersion[i] in ['v', 'V']) then
+    Inc(i);
+  while (i <= Length(AVersion)) and (AVersion[i] in ['0'..'9', '.', '*', 'x', 'X']) do
+    Inc(i);
+  Result := LowerCase(Copy(AVersion, i, MaxInt));
+  while (Result <> '') and (Result[1] in ['.', '-', '_']) do
+    Delete(Result, 1, 1);
+end;
+
+{ Whether AVersion is a Python post-release, "1.4.post1": after the
+  release with the same numbers. }
+function IsPostRelease(const AVersion: string): boolean;
+begin
+  Result := Copy(VersionSuffix(AVersion), 1, 4) = 'post';
+end;
+
 { Whether AVersion is a pre-release: something after its numbers, as
-"1.2.3-beta" or Python's "1.2rc1"; it comes before the release itself.
-  Build metadata after "+" is not one, nor a wildcard. }
+  "1.2.3-beta" or Python's "1.2rc1"; it comes before the release itself.
+  Build metadata after "+" is not one, nor a wildcard or a post-release. }
 function IsPreRelease(const AVersion: string): boolean;
 var
   i: integer;
 begin
+  if IsPostRelease(AVersion) then
+    Exit(False);
   i := 1;
   if (i <= Length(AVersion)) and (AVersion[i] in ['v', 'V']) then
     Inc(i);
@@ -651,12 +676,24 @@ begin
 end;
 
 { CompareVersionParts of two versions as written, a pre-release below
-  the release with the same numbers. }
+  the release with the same numbers and a post-release above it. }
 function CompareVersions(const A, B: string): integer;
+
+  { A pre-release, the release, a post-release. }
+  function Rank(const AVersion: string): integer;
+  begin
+    if IsPreRelease(AVersion) then
+      Result := -1
+    else if IsPostRelease(AVersion) then
+      Result := 1
+    else
+      Result := 0;
+  end;
+
 begin
   Result := CompareVersionParts(VersionParts(A), VersionParts(B));
   if Result = 0 then
-    Result := Ord(IsPreRelease(B)) - Ord(IsPreRelease(A));
+    Result := Rank(A) - Rank(B);
 end;
 
 { Whether AVersion starts with the numbers of APrefix. }
@@ -741,9 +778,9 @@ end;
 function MeetsRequirement(const AVersion, ARequirement: string): boolean;
 var
   Version, Alternatives, Constraints, Upper: TStringArray;
-  Req: string;
+  Req, UpperText: string;
   i, k, p: integer;
-  All, Pre: boolean;
+  All, Pre, InRange: boolean;
 begin
   Version := VersionParts(AVersion);
   Pre := IsPreRelease(AVersion);
@@ -761,10 +798,17 @@ begin
     p := Pos(' - ', Alternatives[i]);
     if p > 0 then
     begin
-      Upper := VersionParts(Trim(Copy(Alternatives[i], p + 3, MaxInt)).TrimLeft(['v']));
-      if MeetsConstraint(Version, Pre, '>=' + Trim(Copy(Alternatives[i], 1, p - 1))) and
-        ((CompareVersionParts(Version, Upper) <= 0) or
-        HasVersionPrefix(Version, Upper)) then
+      UpperText := Trim(Copy(Alternatives[i], p + 3, MaxInt)).TrimLeft(['v']);
+      Upper := VersionParts(UpperText);
+      { A pre-release as the end is a whole version: 2.0.0 is past
+        2.0.0-beta.1. }
+      if IsPreRelease(UpperText) then
+        InRange := CompareVersions(AVersion, UpperText) <= 0
+      else
+        InRange := (CompareVersionParts(Version, Upper) <= 0) or
+          HasVersionPrefix(Version, Upper);
+      if InRange and
+        MeetsConstraint(Version, Pre, '>=' + Trim(Copy(Alternatives[i], 1, p - 1))) then
         Exit(True);
       Continue;
     end;

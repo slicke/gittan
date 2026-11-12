@@ -129,6 +129,13 @@ begin
   AssertEquals('a', E[0].Id);
   AssertEquals(1, Length(E[0].Strs));
   AssertEquals('A', E[0].Strs[0]);
+  AssertEquals('B', E[1].Strs[0]);  { With no blank line after a form left out, the next msgid is still
+    an entry of its own. }
+  E := ParsePo('msgid "a"' + LineEnding + 'msgstr[32] "ignored"' + LineEnding +
+    'msgid "b"' + LineEnding + 'msgstr "B"' + LineEnding);
+  AssertEquals(2, Length(E));
+  AssertEquals('a', E[0].Id);
+  AssertEquals('b', E[1].Id);
   AssertEquals('B', E[1].Strs[0]);
 end;
 

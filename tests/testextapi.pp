@@ -295,6 +295,18 @@ begin
     { Before TearDown's RemoveTree, which would follow it. }
     fpUnlink(PChar(IncludeTrailingPathDelimiter(FRepoDir) + 'out'));
   end;
+  { A link to a folder outside, and .. after it: the path expands to one
+    in the repository without the link, the system resolves it past
+    the link. }
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'sub');
+  AssertEquals('link made', 0, fpSymlink(PChar(IncludeTrailingPathDelimiter(FDir) + 'sub'),
+    PChar(IncludeTrailingPathDelimiter(FRepoDir) + 'in')));
+  try
+    AssertEquals('through a link and ..', 'undefined',
+      EvalIn(Info^.Ctx, 'String(Gittan.repo.fileText("in/../outside.txt"))'));
+  finally
+    fpUnlink(PChar(IncludeTrailingPathDelimiter(FRepoDir) + 'in'));
+  end;
   {$ENDIF}
 end;
 

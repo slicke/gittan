@@ -323,7 +323,12 @@ begin
     Result := Copy(Full, 1, Length(Root)) = Root
   else
     Result := SameText(Copy(Full, 1, Length(Root)), Root);
+  { No "..": ExpandFileName takes link/../secret for <root>/secret, the
+    path the link check sees, while the file read is link/../secret,
+    which the system resolves past the link. Both separators, since the
+    path comes from an extension and Windows takes either. }
   Result := Result and (APath <> '') and
+    (Pos('/../', '/' + StringReplace(APath, '\', '/', [rfReplaceAll]) + '/') = 0) and
     ((ARef <> '') or not PathHasLinkBelowRoot(Root, Full));
 end;
 

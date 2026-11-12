@@ -414,7 +414,12 @@ type
   protected
     FRoot: string;
     FAI: TGittanAI;
+    {** Whether the agent's answer was had and read. }
+    FOk: boolean;
     function Cancelled: boolean;
+    {** An Execute that raised (reading the answer, say) did not go
+      well, whatever FOk said before. }
+    procedure DoTerminate; override;
     {** Puts ATask to the agent with AInput (the changes, the question);
       the answer as the agent gave it in AText, else why none in AError.
       False too when the job was stopped meanwhile. }
@@ -435,7 +440,6 @@ type
   private
     FPaths: TStringList;
     FAmend: boolean;
-    FOk: boolean;
     FMessage: string;
   protected
     procedure Execute; override;
@@ -460,7 +464,6 @@ type
     FBase, FViewKey: string;
     FRange: boolean;
     FPaths: TStringList;
-    FOk: boolean;
     FThreads: TGittanReviewThreads;
   protected
     procedure Execute; override;
@@ -482,7 +485,6 @@ type
   TGittanFindJob = class(TGittanAgentJob)
   private
     FQuestion: string;
-    FOk: boolean;
     FFiles: TGittanFoundFiles;
     procedure LocateLines(const AList: string);
   protected
@@ -505,7 +507,6 @@ type
     FPath, FOperation: string;
     FRebase: boolean;
     FBlock: TGittanDiscard;
-    FOk: boolean;
     FWhy: string;
   protected
     procedure Execute; override;
@@ -529,7 +530,6 @@ type
   TGittanSplitJob = class(TGittanAgentJob)
   private
     FPaths: TStringList;
-    FOk: boolean;
     FPlan: TGittanCommitPlan;
   protected
     procedure Execute; override;
@@ -551,7 +551,7 @@ type
   private
     FBase: string;
     FFinding: TGittanReviewThread;
-    FOk, FChanged: boolean;
+    FChanged: boolean;
     FBlock: TGittanDiscard;
     FWhy: string;
   protected
@@ -578,7 +578,6 @@ type
   private
     FPath, FRef: string;
     FFrom, FTo: integer;
-    FOk: boolean;
     FText: string;
   protected
     procedure Execute; override;
@@ -602,7 +601,6 @@ type
     FBase: string;
     FRange: boolean;
     FPaths: TStringList;
-    FOk: boolean;
     FText, FMarkdown: string;
   protected
     procedure Execute; override;
@@ -2316,6 +2314,13 @@ end;
 function TGittanAgentJob.GetAgentName: string;
 begin
   Result := FAI.Title;
+end;
+
+procedure TGittanAgentJob.DoTerminate;
+begin
+  if Assigned(FatalException) then
+    FOk := False;
+  inherited DoTerminate;
 end;
 
 function TGittanAgentJob.Cancelled: boolean;

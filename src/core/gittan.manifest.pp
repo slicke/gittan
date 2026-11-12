@@ -164,9 +164,31 @@ begin
     Result := Copy(Result, 2, Length(Result) - 2);
 end;
 
+{ Whether AText holds the closing AQuote of a multi-line string (three
+  double or single quotes). In a basic one (double) a quote after an odd
+  run of backslashes is escaped: \""" is a quote and two more, not the
+  end. }
+function ClosesString(const AText, AQuote: string): boolean;
+var
+  i, Slashes: integer;
+begin
+  Slashes := 0;
+  for i := 1 to Length(AText) - 2 do
+  begin
+    if (AText[i] = AQuote[1]) and (Copy(AText, i, 3) = AQuote) and
+      ((AQuote[1] = '''') or not Odd(Slashes)) then
+      Exit(True);
+    if AText[i] = '\' then
+      Inc(Slashes)
+    else
+      Slashes := 0;
+  end;
+  Result := False;
+end;
+
 function ReadToml(const AText: string): TGittanTomlEntries;
 var
-  Start, P, Depth: integer;
+  Start, P, Depth, From: integer;
   Line, Table, Next, Quote: string;
   Index: integer;
   Arrays: TStringList;
@@ -227,13 +249,14 @@ begin
       Quote := Copy(Line, 1, 3);
       if (Quote = '"""') or (Quote = '''''''') then
       begin
-        if Pos(Quote, Copy(Line, 4, MaxInt)) = 0 then
-          while NextLine(AText, Start, Next) do
-          begin
-            Line := Line + LineEnding + Next;
-            if Pos(Quote, Next) > 0 then
-              Break;
-          end;
+        { The rest is taken from the text in one piece once the end is
+          found, not joined a line at a time. }
+        if not ClosesString(Copy(Line, 4, MaxInt), Quote) then
+        begin
+          From := Start;
+          while NextLine(AText, Start, Next) and not ClosesString(Next, Quote) do;
+          Line := Line + LineEnding + TrimRight(Copy(AText, From, Start - From));
+        end;
         Result[High(Result)].Value := Line;
         Continue;
       end;

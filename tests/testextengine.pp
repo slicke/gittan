@@ -619,7 +619,22 @@ begin
   FEngine.OnJSTimer(nil);
   FEngine.OnJSTimer(nil);
   AssertEquals('and was cleared', '3', EvalIn(Info^.Ctx, 'String(globalThis.n)'));
-  AssertEquals('a cleared timeout never runs', '0', EvalIn(Info^.Ctx, 'String(globalThis.never)'));
+  AssertEquals('a cleared timeout never runs', '0', EvalIn(Info^.Ctx, 'String(globalThis.never)'));  { Set and cleared at once: freed when it is safe, at the top level at
+    the next set; inside a timer's callback they wait, and count. }
+  Info := Load('churn', 'for (var i = 0; i < 5000; i++) clearTimeout(setTimeout(function () {}, 600000));' +
+    'globalThis.inner = "";' +
+    'setTimeout(function () { try { for (var j = 0; j < 2000; j++)' +
+    ' clearTimeout(setTimeout(function () {}, 600000)); globalThis.inner = "none"; }' +
+    ' catch (e) { globalThis.inner = String(e); } }, 0); "loaded";', PermBaseline);
+  AssertLoaded('churn', string(FEngine.ExtExecuteFile(Info)));
+  GiveUpAt := GetTickCount64 + 5000;
+  while (EvalIn(Info^.Ctx, 'globalThis.inner') = '') and (GetTickCount64 < GiveUpAt) do
+  begin
+    Sleep(5);
+    FEngine.OnJSTimer(nil);
+  end;
+  AssertTrue(EvalIn(Info^.Ctx, 'globalThis.inner'),
+    Pos('More than 1000 timers', EvalIn(Info^.Ctx, 'globalThis.inner')) > 0);
 end;
 
 { An exception raised while a native read its argument (a toString that

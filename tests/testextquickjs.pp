@@ -246,6 +246,13 @@ begin
   finally
     FreeJSParameters(P);
   end;
+  { Twice in itself: two at each level, 2^32 in all without a budget. }
+  P := Parsed('var a = []; a.push(a, a); a');
+  try
+    AssertTrue('parsed', P[0]^.Data.match = JD_ARRAY);
+  finally
+    FreeJSParameters(P);
+  end;
   P := Parsed('[1, [2, 3]]');
   try
     AssertTrue(P[0]^.Data.match = JD_ARRAY);

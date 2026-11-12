@@ -1502,11 +1502,12 @@ const
   { The commands an extension may run, each with the subcommands it may
     not ('' for none); a command not listed is refused. pr create may
     push the local branch and repo rename rewrites the clone's remote;
-    release verify-asset reads a local file it is given. }
+    release verify-asset and issue artifact create read a local file
+    they are given (the artifact group is refused whole). }
   Allowed: array[0..10, 0..1] of string = (
     ('api', ''),
     ('pr', ' checkout create '),
-    ('issue', ''),
+    ('issue', ' artifact '),
     ('repo', ' clone create sync set-default deploy-key rename '),
     ('run', ' download '),
     ('workflow', ''),

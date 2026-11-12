@@ -421,8 +421,10 @@ begin
   { On the disk before the rename: a crash after it could otherwise leave
     the new name on a file whose bytes never got there, and the old one
     gone. }
+  { A flush that fails leaves the old file: the new one may not be on
+    the disk. }
   if Result then
-    FileFlush(F);
+    Result := FileFlush(F);
   FileClose(F);
   if not Result then
   begin

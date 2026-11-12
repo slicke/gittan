@@ -727,7 +727,15 @@ begin
   AddLocked(L, 'syn', '2.0.0-beta.1');
   AssertEquals('a pre-release is below its release', '2.0.0', Resolved('>=1'));
   AssertEquals('and does not meet it', '2.0.0', Resolved('<=2.0.0'));
-  AssertEquals('one asked for', '2.0.0-beta.1', Resolved('=2.0.0-beta.1'));
+  AssertEquals('one asked for', '2.0.0-beta.1', Resolved('=2.0.0-beta.1'));  L := nil;
+  AddLocked(L, 'syn', '1.4');
+  AddLocked(L, 'syn', '1.4.post1');
+  AssertEquals('a post-release is above its release', '1.4.post1', Resolved('>=1.4'));
+  L := nil;
+  AddLocked(L, 'syn', '1.5.0');
+  AddLocked(L, 'syn', '2.0.0');
+  AssertEquals('a pre-release ends a hyphen range whole', '1.5.0',
+    Resolved('1.0.0 - 2.0.0-beta.1'));
 end;
 
 procedure TProjectTest.TestPickedChecks;

@@ -566,9 +566,17 @@ begin
 
   // A script that sets timers without end is stopped at a number no
   // extension needs, rather than filling the list the tick goes through.
+  // Cleared and fired ones wait in FDeadTimers until it is safe to free
+  // them (not inside a timer's callback, which this may be); they count
+  // too, or clearTimeout(setTimeout(f)) in a loop would grow that list
+  // without end.
+  Engine.DrainDeadTimers;
   Mine := 0;
   for i := 0 to Engine.FJSTimers.Count - 1 do
     if Engine.FJSTimers.Data[i]^.Context = ctx then
+      Inc(Mine);
+  for i := 0 to Engine.FDeadTimers.Count - 1 do
+    if Engine.FDeadTimers[i]^.Context = ctx then
       Inc(Mine);
   if Mine >= MaxTimersPerContext then
   begin

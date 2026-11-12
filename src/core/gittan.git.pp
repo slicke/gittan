@@ -2135,8 +2135,10 @@ begin
   begin
     { With a timeout: WaitOnExit() keeps the exit code where Running and
       this keep the raw wait status, so ExitStatus would be one or the
-      other as the tool ended (and RunTool's callers decode the raw). }
-    P.WaitOnExit(High(DWord));
+      other as the tool ended (and RunTool's callers decode the raw). A
+      short one, so RunTool asks its cancel again while a tool that
+      closed its output goes on running. }
+    P.WaitOnExit(Timeout);
     Exit;
   end;
   fpFD_ZERO(Fds);
@@ -3842,9 +3844,9 @@ begin
     end;
     try
       { A link the revert put there goes, rather than the file it leads
-        to being written. }
-      if IsLinkAt(FullPath(Path)) then
-        DeleteFile(FullPath(Path));
+        to being written; one that will not go stops this file. }
+      if IsLinkAt(FullPath(Path)) and not DeleteFile(FullPath(Path)) then
+        raise EInOutError.CreateFmt('Could not remove the link %s.', [Path]);
       ForceDirectories(ExtractFileDir(FullPath(Path)));
       WriteBytes(FullPath(Path), Data);
     except

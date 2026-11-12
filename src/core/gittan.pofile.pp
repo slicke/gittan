@@ -139,7 +139,7 @@ var
   HasId, Started: boolean;
   Field: TPoField;
   StrIndex, n, i, k: integer;
-  Skipping: boolean;
+  Skipping, SkippedForm: boolean;
   Line, Rest: string;
 
   procedure Finish;
@@ -161,6 +161,7 @@ var
     HasId := False;
     Started := False;
     Field := pfNone;
+    SkippedForm := False;
   end;
 
   procedure Append(const AValue: string);
@@ -179,7 +180,9 @@ var
     also when no blank line comes between. }
   procedure Begin_;
   begin
-    if Field = pfStr then
+    { A form left out was a translation too: the msgid after it is the
+      next entry's. }
+    if (Field = pfStr) or SkippedForm then
       Finish;
     Started := True;
   end;
@@ -206,6 +209,7 @@ begin
   Field := pfNone;
   StrIndex := 0;
   Skipping := False;
+  SkippedForm := False;
   Lines := TStringList.Create;
   try
     Lines.Text := AText;
@@ -279,8 +283,11 @@ begin
         begin
           Started := True;
           Skipping := True;
+          SkippedForm := True;
           Continue;
         end;
+        { A form the entry may have after one left out continues it. }
+        SkippedForm := False;
         { A form after the first continues the entry it is in. }
         if (Field = pfStr) and (k > 0) then
           Field := pfNone;

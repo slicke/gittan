@@ -5054,6 +5054,17 @@ begin
   finally
     Deadline.Free;
   end;
+  { A tool that closes its output and goes on: the wait for its exit
+    asks the deadline too. }
+  Deadline := TGittanDeadline.Create(1);
+  try
+    Start := GetTickCount64;
+    AssertFalse(RunAgentCli('/bin/sh', FDir, ['-c', 'exec >&- 2>&-; sleep 30'], '',
+      @Deadline.Passed, Output, Err));
+    AssertTrue('ended at the deadline, its output closed', GetTickCount64 - Start < 10000);
+  finally
+    Deadline.Free;
+  end;
 end;
 {$else}
 begin
