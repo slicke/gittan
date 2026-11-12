@@ -63,7 +63,7 @@ type
 implementation
 
 uses
-  {$IFDEF UNIX}BaseUnix,{$ENDIF} testhelpers;
+  {$IFDEF UNIX}BaseUnix,{$ENDIF} fpjson, testhelpers;
 
 const
   AllPerms: TExtPermSet = [epData, epUI, epTimers, epNet, epExec, epSettings, epForge];
@@ -437,11 +437,15 @@ var
   Info: PExtContextInfo;
   Ctx: JSContext;
   GiveUpAt: QWord;
-  Marker: string;
+  Marker, Command: string;
 begin
   Marker := IncludeTrailingPathDelimiter(FDir) + 'started';
-  Info := Load('slow', 'Gittan.exec.run("sh", ["-c", "touch ' + Marker +
-    '; sleep 5"]).then(function (r) { globalThis.done = true; });', AllPerms);
+  { Quoted for sh, then as a JSON string for the script: the temporary
+    folder may hold a space, a quote or a backslash. }
+  Command := 'touch ''' + StringReplace(Marker, '''', '''\''''', [rfReplaceAll]) +
+    '''; sleep 5';
+  Info := Load('slow', 'Gittan.exec.run("sh", ["-c", "' + StringToJSONString(Command) +
+    '"]).then(function (r) { globalThis.done = true; });', AllPerms);
   Ctx := Info^.Ctx;
   AssertTrue('a live context has a generation', ExtContextGeneration(Ctx) > 0);
   AssertEquals('the task runs', 1, ActiveAsyncTaskCount);

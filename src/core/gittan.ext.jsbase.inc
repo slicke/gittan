@@ -531,6 +531,17 @@ end;
                        required so clearTimeout's JS_ToInt32 can parse it —
                        BigInt IDs made clearing timers fail)
 }
+{** Whether ctx may still set things up: the engine's own context, or an
+  extension's that is loaded. A dropped one (its script threw as it
+  loaded) can still run a promise reaction it queued, since a queued job
+  keeps its context alive; what that reaction registers would outlive
+  the drop, and a failed load must run nothing. }
+function ContextAccepts(Engine: TGittanExtEngine; ctx: JSContext): boolean;
+begin
+  Result := (Engine <> nil) and ((ctx = Engine.FContext) or
+    (Engine.GenerationForContext(ctx) > 0));
+end;
+
 function JSSetTimerImpl(ctx: JSContext; argc: integer; argv: PJSValues;
 IsInterval: boolean): JSValueRaw;
 var
@@ -548,6 +559,11 @@ begin
   Engine := TGittanExtEngine.Instance;
   if Engine = nil then
     Exit;
+  if not ContextAccepts(Engine, ctx) then
+  begin
+    Result := JS_ThrowError(ctx, 'setTimeout: this extension is not loaded').Raw;
+    Exit;
+  end;
 
   // Verify first argument is a function
   if not JS_IsFunction(ctx, argv^[0].Raw) then
@@ -772,6 +788,11 @@ begin
   end;
   if eng = nil then
     Exit;
+  if not ContextAccepts(eng, ctx) then
+  begin
+    res^ := JS_ThrowError(ctx, 'Gittan.on: this extension is not loaded');
+    Exit;
+  end;
   eng.Registry.AddListener(eng.ExtensionIdForContext(ctx), ev, ctx,
     JS_DupValue(ctx, argv^[1]));
   res^ := JS_DupValue(ctx, argv^[1]);

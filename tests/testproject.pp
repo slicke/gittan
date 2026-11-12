@@ -731,6 +731,15 @@ begin
   AddLocked(L, 'syn', '1.4');
   AddLocked(L, 'syn', '1.4.post1');
   AssertEquals('a post-release is above its release', '1.4.post1', Resolved('>=1.4'));
+  AssertEquals('==1.4 is not its post-release', '1.4', Resolved('==1.4'));
+  L := nil;
+  AddLocked(L, 'syn', '1.4.post1');
+  AddLocked(L, 'syn', '1.4.5');
+  AssertEquals('nor anything else locked', '', Resolved('==1.4'));
+  L := nil;
+  AddLocked(L, 'syn', '1.4.0');
+  AddLocked(L, 'syn', '1.4.0-post1');
+  AssertEquals('SemVer''s -post1 is a pre-release', '1.4.0', Resolved('>=1.4.0'));
   L := nil;
   AddLocked(L, 'syn', '1.5.0');
   AddLocked(L, 'syn', '2.0.0');

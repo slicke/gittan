@@ -624,11 +624,21 @@ begin
     Delete(Result, 1, 1);
 end;
 
-{ Whether AVersion is a Python post-release, "1.4.post1": after the
-  release with the same numbers. }
+{ Whether AVersion is a Python post-release, "1.4.post1" or "1.4post1":
+  after the release with the same numbers. Not "1.4.0-post1", which in
+  SemVer (npm, Cargo) is a pre-release of 1.4.0. }
 function IsPostRelease(const AVersion: string): boolean;
+var
+  i: integer;
 begin
-  Result := Copy(VersionSuffix(AVersion), 1, 4) = 'post';
+  i := 1;
+  if (i <= Length(AVersion)) and (AVersion[i] in ['v', 'V']) then
+    Inc(i);
+  while (i <= Length(AVersion)) and (AVersion[i] in ['0'..'9', '.']) do
+    Inc(i);
+  { The dot before "post" is taken with the numbers above. }
+  Result := (i <= Length(AVersion)) and (AVersion[i] <> '-') and
+    (Copy(VersionSuffix(AVersion), 1, 4) = 'post');
 end;
 
 { Whether AVersion is a pre-release: something after its numbers, as
@@ -714,8 +724,8 @@ end;
   bare "1.2" (Cargo's and npm's caret: the same major, the same 0.x
   below 1), "!=1.3". One without a number ("*", "workspace", "latest")
   is met by every version. }
-function MeetsConstraint(const AVersion: TStringArray; APreRelease: boolean;
-  const AConstraint: string): boolean;
+function MeetsConstraint(const AVersion: TStringArray; const AText: string;
+  APreRelease: boolean; const AConstraint: string): boolean;
 var
   Op: string;
   Want, Prefix: TStringArray;
@@ -750,7 +760,8 @@ begin
     Result := c <> 0
   else if (Op = '===') or ((Op = '==') and (Pos('*', AConstraint) = 0)) then
     { Python's ==1.4 is 1.4 alone; ==1.4.* is 1.4.x. }
-    Result := (c = 0) and (APreRelease or not WantPre)
+    { 1.4.post1 is not ==1.4 either: what follows the numbers is the same. }
+    Result := (c = 0) and (VersionSuffix(AText) = VersionSuffix(Copy(AConstraint, i, MaxInt)))
   else if (Op = '=') or (Op = '==') then
     { Cargo's and npm's =1.2 is 1.2.x; =2.0.0-beta.1 a pre-release. }
     Result := HasVersionPrefix(AVersion, Want) and (APreRelease or not WantPre)
@@ -808,14 +819,14 @@ begin
         InRange := (CompareVersionParts(Version, Upper) <= 0) or
           HasVersionPrefix(Version, Upper);
       if InRange and
-        MeetsConstraint(Version, Pre, '>=' + Trim(Copy(Alternatives[i], 1, p - 1))) then
+        MeetsConstraint(Version, AVersion, Pre, '>=' + Trim(Copy(Alternatives[i], 1, p - 1))) then
         Exit(True);
       Continue;
     end;
     Constraints := Alternatives[i].Split([',', ' '], TStringSplitOptions.ExcludeEmpty);
     All := True;
     for k := 0 to High(Constraints) do
-      if not MeetsConstraint(Version, Pre, Constraints[k]) then
+      if not MeetsConstraint(Version, AVersion, Pre, Constraints[k]) then
         All := False;
     if All then
       Exit(True);
