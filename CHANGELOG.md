@@ -20,6 +20,7 @@
 - The AI features through an OpenAI-compatible API work on changes to a file that is not UTF-8 (a Windows-1252 file with an é in it), where the server refused the request.
 - The check for branches gone from their remote and the submodule check run ssh in batch mode, as fetch and push do, so a key with a passphrase can no longer leave them waiting on a prompt in the terminal Gittan was started from.
 - Batch's Set Remote HEAD refuses a branch name from the remote that git would not take for one, where a name such as `x:refs/heads/main` made the fetch write the local main branch.
+- On Windows a server that sends its answer a byte now and then can no longer keep the update check or another web request going for good: the whole request gets its time limit, as on macOS and Linux.
 - A promise of an extension that ends after Reload Extensions (a slow fetch or command) is no longer settled in the extension's freed context.
 - An extension can no longer exhaust Gittan's memory or stack by passing an argument that claims a huge length or contains itself, and an exception raised while Gittan reads an argument is thrown where the extension made the call, instead of breaking its next call.
 - An extension with the forge permission can no longer have gh read a local file through `--recover` or `release verify-asset`.

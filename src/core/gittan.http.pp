@@ -434,6 +434,7 @@ var
   Value, Size, Got: DWORD;
   Buffer: array[0..16383] of byte;
   Body: TMemoryStream;
+  Deadline: QWord;
 
   procedure Fail;
   var
@@ -447,6 +448,11 @@ var
   end;
 
 begin
+  { WinHTTP's timeouts are for each step, so a server that sends a byte
+    now and then would keep the request going for good: the whole of it
+    gets TimeoutSeconds, as libcurl's CURLOPT_TIMEOUT and the macOS
+    session's resource timeout give it. }
+  Deadline := GetTickCount64 + QWord(ARequest.TimeoutSeconds) * 1000;
   if not SplitUrl(ARequest.Url, Secure, Host, Port, Path) then
   begin
     AResponse.Error := 'Not a URL: ' + ARequest.Url;
@@ -535,6 +541,11 @@ begin
         Exit;
       end;
       Body.WriteBuffer(Buffer[0], Got);
+      if (Got > 0) and (GetTickCount64 > Deadline) then
+      begin
+        AResponse.Error := 'The request timed out.';
+        Exit;
+      end;
     until Got = 0;
     AResponse.Status := Value;
     SetLength(AResponse.Body, Body.Size);
