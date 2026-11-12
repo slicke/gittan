@@ -820,35 +820,39 @@ jobs:
           # round is run again: a failure in both stops the leg, one in the
           # first alone is a warning.
           # The output goes to a file, so a test that hangs showed nothing
-          # until the job's 90 minutes ran out (twice on 2026-11-12): each
-          # test's name goes to a trace as it starts (GITTAN_TEST_TRACE),
-          # and a round is given 15 minutes, after which the last name is
-          # the test that hung.
+          # until the job's 90 minutes ran out: each test's name goes to a
+          # trace as it starts (GITTAN_TEST_TRACE), and a round is given 15
+          # minutes. Git itself now and then hangs on Haiku as it now and
+          # then fails (TBatchTest.TestStatusGoneUpstream sat in plain local
+          # git calls in one round of 2026-11-12, after passing the round
+          # before), so a hang is taken as a failed round: up to three
+          # rounds, the leg stopped when the last one fails too, a warning
+          # naming the test otherwise.
           export GITTAN_TEST_TRACE=1
           TIMEOUT=""
           command -v timeout > /dev/null && TIMEOUT="timeout 900"
-          tests_round() {
-            $TIMEOUT make test > /tmp/gittan-tests.log 2> /tmp/gittan-trace.log
-            CODE=$?
-            grep -v '^test: ' /tmp/gittan-trace.log >> /tmp/gittan-tests.log
+          FAILED=""
+          for ROUND in 1 2 3; do
+            CODE=0
+            $TIMEOUT make test > /tmp/gittan-tests.log 2> /tmp/gittan-trace.log || CODE=$?
+            grep -v '^test: ' /tmp/gittan-trace.log >> /tmp/gittan-tests.log || true
+            cat /tmp/gittan-tests.log
+            [ $CODE = 0 ] && break
             if [ $CODE = 124 ]; then
-              cat /tmp/gittan-tests.log
-              echo "::error::The tests hung on Haiku in $(grep '^test: ' /tmp/gittan-trace.log | tail -1)"
+              WHAT="hung in $(grep '^test: ' /tmp/gittan-trace.log | tail -1 | cut -c7- || true)"
+            else
+              # The failed and erred tests' messages, not the ignored ones'.
+              WHAT="failed: $(awk '/^List of (failures|errors):/ {on=1} /^List of ignored tests:/ {on=0}
+                on && /Message:/ {sub(/^ *Message: */, ""); print}' /tmp/gittan-tests.log | head -3 | tr '\n' ' ' || true)"
+            fi
+            FAILED="$FAILED [round $ROUND $WHAT]"
+            if [ $ROUND = 3 ]; then
+              echo "::error::The tests on Haiku failed in every round:$FAILED"
               exit 1
             fi
-            return $CODE
-          }
-          if ! tests_round; then
-            cat /tmp/gittan-tests.log
-            # The failed and erred tests' messages, not the ignored ones'.
-            FIRST=$(awk '/^List of (failures|errors):/ {on=1} /^List of ignored tests:/ {on=0}
-              on && /Message:/ {sub(/^ *Message: */, ""); print}' /tmp/gittan-tests.log | head -3 | tr '\n' ' ')
-            echo "The tests failed once; running them again"
-            tests_round || { cat /tmp/gittan-tests.log; exit 1; }
-            echo "::warning::A test failed on Haiku in the first round only: $FIRST"
-          else
-            cat /tmp/gittan-tests.log
-          fi
+            echo "Round $ROUND of the tests $WHAT; running them again"
+          done
+          [ -n "$FAILED" ] && echo "::warning::The tests on Haiku passed only after:$FAILED"
           mkdir -p dist/Gittan
           cp Gittan dist/Gittan/
           cp -r lexlib dist/Gittan/
