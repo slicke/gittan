@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+- Opening a repository whose .github or .gittan folder holds a link to a folder no longer hangs Gittan: a link such as `.github/a -> .` was walked into for ever. Linked folders are left out of the Config section's files.
+- A repository can no longer crash Gittan or run it out of memory on open with a .lpi or .lpk whose DOCTYPE expands entities to gigabytes, a package.json, lock file, commands.toml or repo.toml nested many thousand levels deep, or a .po file with a plural index such as `msgstr[-1]`. A commands.toml or repo.toml nested too deep says so on the Commands page.
+- A package.json script whose name holds a line break is no longer listed, where running it ran the rest of its name as a second command, and a script name with spaces or other characters the shell reads is quoted. A Makefile target that starts with "-" is no longer listed, where `make -C..` would have run another folder's Makefile.
+- On Windows a build mode or file name with a quote or a % in it no longer breaks out of its quotes in the command Gittan runs.
+- Push and Force Push on a branch that tracks a local branch (`git switch -c feat --track main`) push it to the remote under its own name, where they moved the local branch it tracks and said it was pushed.
+- An extension with only the data permission can no longer read or write files outside the repository through `Gittan.repo.commit`, `blame` or `diff`, or by replacing JavaScript's own functions.
+
 ## 0.19 (build-144, 2026-11-10)
 
 ### Added
