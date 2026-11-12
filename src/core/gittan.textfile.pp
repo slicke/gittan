@@ -418,6 +418,11 @@ begin
   if F = THandle(-1) then
     Exit;
   Result := (AText = '') or (FileWrite(F, AText[1], Length(AText)) = Length(AText));
+  { On the disk before the rename: a crash after it could otherwise leave
+    the new name on a file whose bytes never got there, and the old one
+    gone. }
+  if Result then
+    FileFlush(F);
   FileClose(F);
   if not Result then
   begin

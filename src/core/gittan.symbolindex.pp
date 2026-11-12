@@ -336,8 +336,9 @@ begin
           E.Items[j].Col, E.Items[j].Depth, Escape(E.Items[j].Name),
           Escape(E.Items[j].Line)]));
     end;
-    ForceDirectories(ExtractFileDir(AFileName));
-    Lines.SaveToFile(AFileName);
+    { Replaced in one step: written in place, a file cut off after an F
+      line read as that file indexed with no symbols. }
+    WriteFileReplacing(AFileName, Lines.Text);
   finally
     Lines.Free;
   end;
