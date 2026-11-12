@@ -357,6 +357,8 @@ procedure JS_FreeContext(ctx: JSContext); cdecl; external QJSLIB;
 procedure JS_SetContextOpaque(ctx: JSContext; opaque: pointer); cdecl; external QJSLIB;
 function JS_GetContextOpaque(ctx: JSContext): pointer; cdecl; external QJSLIB;
 function JS_GetRuntime(ctx: JSContext): JSRuntime; cdecl; external QJSLIB;
+{** Whether an exception is pending on ctx (quickjs-ng; C bool). }
+function JS_HasException(ctx: JSContext): ByteBool; cdecl; external QJSLIB;
 
 function JS_AddIntrinsicDate(ctx: JSContext): integer; cdecl; external QJSLIB;
 function JS_AddIntrinsicPromise(ctx: JSContext): integer; cdecl; external QJSLIB;
@@ -683,6 +685,15 @@ begin
   // JS_IsException paths report it like any other failure.
   try
     Natives[magic].Func(res, ctx, this_val, argc, argv, magic);
+    { A native that returned normally with an exception left pending (a
+      toString that threw while an argument was read, a getter that threw)
+      throws it now; left there, the next call into the context failed
+      with an error it never raised. }
+    if not res^.IsException and JS_HasException(ctx) then
+    begin
+      JS_FreeValue(ctx, res^);
+      res^ := JS_EXCEPTION;
+    end;
   except
     on E: Exception do
     begin

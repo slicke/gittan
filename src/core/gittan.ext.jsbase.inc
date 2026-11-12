@@ -537,9 +537,7 @@ var
   Engine: TGittanExtEngine;
   TimerInfo: PJSTimerInfo;
   DelayMs: Int32;
-  Timer: TFPTimer;
-  Handler: TJSTimerHandler;
-  i: integer;
+  i, Mine: integer;
   idVal: JSValue;
 begin
   Result := JS_UNDEFINED;
@@ -564,12 +562,20 @@ begin
     if DelayMs < 0 then
       DelayMs := 0;
   end;
-  // TFPCustomTimer treats Interval = 0 as "inactive" (see IsActive in fptimer),
-  // so a literal 0 ms would arm a timer that never fires - and setTimeout(fn, 0)
-  // is the single most common form there is. 0 means "as soon as possible", so
-  // round it up to the shortest interval the timer can actually run at.
-  if DelayMs < 1 then
-    DelayMs := 1;
+  // The engine's tick runs the timers, so 0 ms means the next tick.
+
+  // A script that sets timers without end is stopped at a number no
+  // extension needs, rather than filling the list the tick goes through.
+  Mine := 0;
+  for i := 0 to Engine.FJSTimers.Count - 1 do
+    if Engine.FJSTimers.Data[i]^.Context = ctx then
+      Inc(Mine);
+  if Mine >= MaxTimersPerContext then
+  begin
+    Result := JS_ThrowError(ctx, RawUtf8(Format('More than %d timers at once',
+      [MaxTimersPerContext]))).Raw;
+    Exit;
+  end;
 
   // Create timer info; New initializes the managed Args field
   New(TimerInfo);
@@ -585,19 +591,11 @@ begin
   end;
   TimerInfo^.IsInterval := IsInterval;
   TimerInfo^.Context := ctx;
+  TimerInfo^.Interval := DelayMs;
+  TimerInfo^.Due := GetTickCount64 + QWord(DelayMs);
 
-  // Create timer handler and timer
-  Handler := TJSTimerHandler.Create;
-  Timer := TFPTimer.Create(nil);
-  Timer.Interval := DelayMs;
-  Timer.Tag := PtrInt(TimerInfo); // Store timer info in Tag
-  Timer.OnTimer := @Handler.OnTimer;
-  TimerInfo^.Timer := Timer;
-  TimerInfo^.Handler := Handler; // Keep reference to prevent premature freeing
-
-  // Store in map, then arm
+  // The engine's tick fires it once it is due.
   Engine.FJSTimers.Add(TimerInfo^.TimerID, TimerInfo);
-  Timer.Enabled := True;
 
   // Return timer ID as a plain number
   idVal.From64(TimerInfo^.TimerID);
@@ -658,10 +656,9 @@ begin
   begin
     TimerInfo := Engine.FJSTimers.Data[idx];
 
-    // Stop the timer, but defer destruction: clearTimeout/clearInterval may be
-    // called from inside the timer's own callback, and freeing it here would
-    // destroy objects whose event frame is still on the stack.
-    TimerInfo^.Timer.Enabled := False;
+    // Out of the list at once, so it never fires again, but freed later:
+    // clearTimeout/clearInterval may be called from inside the timer's own
+    // callback, whose values are still in use.
     Engine.FJSTimers.Delete(idx);
     Engine.FDeadTimers.Add(TimerInfo);
   end;

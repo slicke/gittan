@@ -33,6 +33,7 @@ type
     procedure TestChangedWhileAsked;
     procedure TestReloadPicksUpEdits;
     procedure TestScriptErrorListed;
+    procedure TestThrowDropsWhatWasRegistered;
     procedure TestCaseTwinRefused;
     procedure TestCaseTwinWithEqualsRefused;
     procedure TestNameRefused;
@@ -224,6 +225,32 @@ begin
   AssertFalse('not loaded', Inf.Loaded);
   AssertTrue('the error: ' + Inf.Error, Pos('SyntaxError', Inf.Error) > 0);
   AssertEquals('reported once', 1, FHost.Errors.Count);
+end;
+
+{ A script that throws after it registered something is shown as not
+  loaded, so what it registered goes too; a script whose last value is
+  a string starting with Error: did not throw and is loaded. }
+procedure TExtLoaderTest.TestThrowDropsWhatWasRegistered;
+var
+  Inf: TGittanExtInfo;
+  Engine: TGittanExtEngine;
+begin
+  Put('half.js', '/* @name Half */' + LineEnding +
+    'Gittan.on("commit.before", function () { return "stopped"; });' + LineEnding +
+    'Gittan.commands.register({id: "x", title: "X", run: function () {}});' + LineEnding +
+    'setInterval(function () {}, 60000);' + LineEnding +
+    'throw new Error("late");');
+  Put('says.js', '/* @name Says */' + LineEnding + '"Error: not one";');
+  FLoader.Load;
+  Engine := TGittanExtEngine.Instance;
+  AssertTrue(FLoader.FindInfo('half', Inf));
+  AssertFalse('not loaded', Inf.Loaded);
+  AssertTrue(Inf.Error, Pos('late', Inf.Error) > 0);
+  AssertEquals('its listener gone', 0, Engine.Registry.ListenerCount);
+  AssertEquals('its command gone', 0, Engine.Registry.CommandCount);
+  AssertTrue(FLoader.FindInfo('says', Inf));
+  AssertTrue('a string is no error', Inf.Loaded);
+  AssertEquals('one context, the one that loaded', 1, Engine.ExtensionCount);
 end;
 
 { Test.js and test.js share the id test; the second is refused, so one

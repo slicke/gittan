@@ -370,9 +370,14 @@ begin
       end;
     end;
     Res := string(Engine.ExtExecuteFile(Ext));
-    if Pos('Error:', Res) = 1 then
-      { Reported by the engine as it happened. }
-      Inf.Error := Copy(Res, 7, MaxInt).Trim
+    if Engine.LastLoadFailed then
+    begin
+      { Reported by the engine as it happened. What the script did
+        before it threw (a listener, a command, a timer) goes with its
+        context, so one shown as not loaded runs nothing. }
+      Inf.Error := Copy(Res, 7, MaxInt).Trim;
+      Engine.DropExtensionContext(Ext);
+    end
     else
       Inf.Loaded := True;
   finally

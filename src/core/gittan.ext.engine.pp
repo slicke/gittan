@@ -70,18 +70,12 @@ TCallbacks = specialize TFPGList<PJSCallback>;
   {** Alias: promises are managed as callbacks. }
 TPromises = TCallbacks;
 
-  {** Simple helper class to bridge timer events to JS function calls.
-      Each timer gets its own handler instance with the timer info in the Tag. }
-TJSTimerHandler = class
-public
-  procedure OnTimer(Sender: TObject);
-end;
 
   {** Information for a registered JS timer (setTimeout/setInterval). }
 TJSTimerInfo = record
   TimerID: integer;           // Unique ID returned to JS
-  Timer: TFPTimer;            // The actual timer object
-  Handler: TJSTimerHandler;   // Handler object for timer events
+  Due: QWord;                 // GetTickCount64 at which it fires next
+  Interval: integer;          // Its delay in ms, again after each run of an interval
   Callback: JSValueRaw;       // Duplicated JS function value; owned, freed on disposal
   Args: array of JSValueRaw;  // Duplicated extra args (setTimeout(fn, ms, ...args)); owned
   IsInterval: boolean;        // True for setInterval, False for setTimeout
@@ -172,6 +166,7 @@ private
     {** >0 while a JS timer callback is on the stack; blocks FDeadTimers
         draining so a timer is never freed beneath its own event. }
   FInTimerCallback: integer;
+  FLastLoadFailed: boolean;
     {** Rejections seen by PromiseRejectionTracker, reported (or cancelled)
         on the next job-pump tick. }
   FPendingRejections: array of TPendingRejection;
@@ -207,6 +202,7 @@ private
     {** Dispose timers parked in FDeadTimers. Safe to call anytime; no-ops
         while a timer callback is running. }
   procedure DrainDeadTimers;
+  procedure RunDueTimers;
 
     {** Find a registered callback by name.
 
@@ -550,8 +546,17 @@ public
     const Name: string = '<shim>'): boolean;
 
     {** Load the file at Ext.FileName into Ext.Ctx and evaluate it. Returns the
-        evaluation result (or 'Error: ...' on failure, matching ExecuteFile). }
+        evaluation result (or 'Error: ...' on failure, matching ExecuteFile);
+        LastLoadFailed says which, since a script's own last value may be a
+        string that starts with Error: too. }
   function ExtExecuteFile(Ext: PExtContextInfo): RawUtf8;
+    {** Whether the last ExtExecuteFile threw rather than ran to its end. }
+  property LastLoadFailed: boolean read FLastLoadFailed;
+    {** Takes one extension's context out and frees it, with what it
+        registered and its timers: one whose script threw as it loaded,
+        which is not loaded but would otherwise keep its listeners,
+        commands and timers. }
+  procedure DropExtensionContext(Ext: PExtContextInfo);
     {** Module-shaped extensions are evaluated through @code(import());
         called by @code(ExtExecuteFile) when the file has static
         @code(import)/@code(export) statements. }
@@ -704,6 +709,11 @@ implementation
 uses
   gittan.forge;
 
+const
+  { The timers one extension may have at once (setTimeout and
+    setInterval together). }
+  MaxTimersPerContext = 1000;
+
 {$I gittan.ext.jsbase.inc }
 
 {******************************************************************************
@@ -721,13 +731,6 @@ var
 begin
   if info = nil then
     Exit;
-  if Assigned(info^.Timer) then
-  begin
-    info^.Timer.Enabled := false;
-    info^.Timer.Free;
-  end;
-  if Assigned(info^.Handler) then
-    info^.Handler.Free;
   if info^.Context <> nil then
   begin
     info^.Context^.FreeInlined(PJSValue(@info^.Callback));
@@ -737,22 +740,18 @@ begin
   Dispose(info);
 end;
 
-procedure TJSTimerHandler.OnTimer(Sender: TObject);
+{ Runs one timer that is due, from the engine's tick on the main thread.
+  The timers have no thread of their own: a TFPTimer had one each, so a
+  script could start thousands, and a tick its thread had queued through
+  Synchronize ran on the timer after clearTimeout or Reload freed it. }
+procedure FireTimer(TimerInfo: PJSTimerInfo);
 var
-  TimerInfo: PJSTimerInfo;
   Engine: TGittanExtEngine;
   RetVal: JSValueRaw;
   idx, nargs: integer;
-  Timer: TFPTimer;
   argp: PJSValueConstArr;
   err: RawUtf8;
 begin
-  if not (Sender is TFPTimer) then
-    Exit;
-
-  Timer := TFPTimer(Sender);
-  TimerInfo := PJSTimerInfo(Timer.Tag);
-
   if TimerInfo = nil then
     Exit;
 
@@ -799,13 +798,15 @@ begin
       idx := Engine.FJSTimers.IndexOf(TimerInfo^.TimerID);
       if idx >= 0 then
       begin
-        Timer.Enabled := false;
         Engine.FJSTimers.Delete(idx);
-        // Freeing the timer/handler here would run their destructors beneath
-        // this very event; park them for the engine's job pump instead.
+        // Freeing its values here would pull them from beneath this call;
+        // park it for the engine's job pump instead.
         Engine.FDeadTimers.Add(TimerInfo);
       end;
-    end;
+    end
+    else if Engine.FJSTimers.IndexOf(TimerInfo^.TimerID) >= 0 then
+      // An interval not cleared runs again its delay after this run ended.
+      TimerInfo^.Due := GetTickCount64 + QWord(TimerInfo^.Interval);
   finally
     Dec(Engine.FInTimerCallback);
   end;
@@ -1224,6 +1225,15 @@ begin
     eng.SetOutput(string(msg));
 end;
 
+{ For the promise tasks (gittan.ext.promise), which may not use this unit:
+  the generation of a context, 0 once it is freed. }
+function EngineContextGeneration(ctx: JSContext): QWord;
+begin
+  Result := 0;
+  if TGittanExtEngine.FInstance <> nil then
+    Result := TGittanExtEngine.FInstance.GenerationForContext(ctx);
+end;
+
 {** Create QuickJS runtime/context, expose 'Gittan', set up promises and timer, register base functions. }
 constructor TGittanExtEngine.Create;
 var
@@ -1233,6 +1243,7 @@ begin
 
   // Clear shutdown guard at startup
   SetExtShuttingDown(false);
+  ExtContextGeneration := @EngineContextGeneration;
 
   // Create the QuickJS runtime
   FRuntime := JS_NewRuntime;
@@ -1956,13 +1967,6 @@ begin
         eventTimer.Enabled := false;
     except
     end;
-    try
-      if Assigned(FJSTimers) then
-        for i := 0 to FJSTimers.Count - 1 do
-          if (FJSTimers.Data[i] <> nil) and Assigned(FJSTimers.Data[i]^.Timer) then
-            FJSTimers.Data[i]^.Timer.Enabled := false;
-    except
-    end;
 
     // Clear references only - no QuickJS API calls whatsoever
     FContext := nil;
@@ -2438,6 +2442,40 @@ begin
   end;
 end;
 
+procedure TGittanExtEngine.DropExtensionContext(Ext: PExtContextInfo);
+var
+  i: integer;
+  ctx: JSContext;
+begin
+  if (Ext = nil) or (Ext^.Ctx = nil) or not Assigned(FExtContexts) then
+    Exit;
+  i := FExtContexts.IndexOf(Ext);
+  if i < 0 then
+    Exit;
+  ctx := Ext^.Ctx;
+  FRegistry.RemoveContext(ctx);
+  { Its timers hold values of the context, so they go before it. }
+  if Assigned(FJSTimers) then
+    for i := FJSTimers.Count - 1 downto 0 do
+      if FJSTimers.Data[i]^.Context = ctx then
+      begin
+        DisposeTimerInfo(FJSTimers.Data[i]);
+        FJSTimers.Delete(i);
+      end;
+  if Assigned(FDeadTimers) then
+    for i := FDeadTimers.Count - 1 downto 0 do
+      if FDeadTimers[i]^.Context = ctx then
+      begin
+        DisposeTimerInfo(FDeadTimers[i]);
+        FDeadTimers.Delete(i);
+      end;
+  { Out of the list first: a promise task of it then finds no generation
+    and leaves its promise alone. }
+  FExtContexts.Remove(Ext);
+  JS_FreeContext(ctx);
+  Dispose(Ext);
+end;
+
 procedure TGittanExtEngine.UnloadExtensions;
 var
   i, timeoutCounter: integer;
@@ -2653,6 +2691,7 @@ begin
   begin
     ctx^.Free(EvalResult);
     ExtError('Error loading', err);
+    FLastLoadFailed := true;
     Exit('Error: ' + err);
   end;
   ctx^.Free(EvalResult);
@@ -2678,6 +2717,7 @@ begin
   if loadErr <> '' then
   try
     ExtError('Error loading', loadErr);
+    FLastLoadFailed := true;
     Result := 'Error: ' + loadErr;
   except
     on E: Exception do
@@ -2698,6 +2738,7 @@ var
   ctx: JSContext;
 begin
   Result := '';
+  FLastLoadFailed := false;
   if (Ext = nil) or IsGlobalShutdown then Exit;
   ctx := Ext^.Ctx;
   if ctx = nil then Exit;
@@ -2740,6 +2781,7 @@ begin
     // that still exists. Fetching it a second time yields [uninitialized], and
     // reading properties off that leaves a fresh TypeError pending.
     ExtError('Error loading', err);
+    FLastLoadFailed := true;
     Result := 'Error: ' + err;
   except
     on E: Exception do
@@ -2819,6 +2861,7 @@ begin
     // Present the error. Eval already cleared the exception and put its message
     // and stack in err; asking the context again returns [uninitialized].
     ExtError('Error loading', err);
+    FLastLoadFailed := true;
     Result := 'Error: ' + err;
   except
     on E: Exception do
@@ -3397,6 +3440,8 @@ begin
   // Dispose timers retired since the last tick (never while one is firing).
   DrainDeadTimers;
 
+  RunDueTimers;
+
   // Rejections that survived a full job-queue drain are genuinely unhandled --
   // but only a full one. A budget-truncated pump leaves jobs queued, and one of
   // them may be the .catch() that handles a rejection already on the pending
@@ -3455,7 +3500,35 @@ begin
       alert('Unhandled Promise rejection: [no error message]');
 end;
 
-{** Free retired timers parked by TJSTimerHandler.OnTimer / JSClearTimer.
+{** Runs the extensions' timers that are due. The ids are taken first: a
+    callback may clear or set timers, so each is looked up again. }
+procedure TGittanExtEngine.RunDueTimers;
+var
+  Due: array of integer;
+  TickNow: QWord;
+  i, idx: integer;
+begin
+  if (not Assigned(FJSTimers)) or (FInTimerCallback > 0) then
+    Exit;
+  TickNow := GetTickCount64;
+  Due := nil;
+  for i := 0 to FJSTimers.Count - 1 do
+    if (FJSTimers.Data[i] <> nil) and (FJSTimers.Data[i]^.Due <= TickNow) then
+    begin
+      SetLength(Due, Length(Due) + 1);
+      Due[High(Due)] := FJSTimers.Keys[i];
+    end;
+  for i := 0 to High(Due) do
+  begin
+    if IsExtShuttingDown or IsGlobalShutdown then
+      Exit;
+    idx := FJSTimers.IndexOf(Due[i]);
+    if (idx >= 0) and (FJSTimers.Data[idx]^.Due <= TickNow) then
+      FireTimer(FJSTimers.Data[idx]);
+  end;
+end;
+
+{** Free retired timers parked by FireTimer / JSClearTimer.
     Skipped while a timer callback is on the stack: a nested message pump
     (e.g. a modal dialog opened from JS) must not free the very timer whose
     OnTimer frame is still live. }
@@ -3554,6 +3627,7 @@ end;
 function ReadCancel(ctx: JSContext; const ret: JSValue; out AMessage: string): boolean;
 var
   prop: JSValue;
+  err: RawUtf8;
 begin
   Result := False;
   AMessage := '';
@@ -3576,6 +3650,15 @@ begin
         AMessage := string(JS_ToUtf8(ctx, prop));
       JS_FreeValue(ctx, prop);
     end;
+  end;
+  { A getter of cancel or message that threw cancels nothing, as a
+    listener that throws does, and its exception is taken off the
+    context, where the next call into it would have met it. }
+  if JS_HasException(ctx) then
+  begin
+    ctx^.DumpError(err);
+    Result := False;
+    AMessage := '';
   end;
 end;
 

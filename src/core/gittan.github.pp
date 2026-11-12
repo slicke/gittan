@@ -1501,7 +1501,8 @@ class function TGittanGitHubForge.CliAllows(const AArgs: array of string;
 const
   { The commands an extension may run, each with the subcommands it may
     not ('' for none); a command not listed is refused. pr create may
-    push the local branch and repo rename rewrites the clone's remote. }
+    push the local branch and repo rename rewrites the clone's remote;
+    release verify-asset reads a local file it is given. }
   Allowed: array[0..10, 0..1] of string = (
     ('api', ''),
     ('pr', ' checkout create '),
@@ -1509,17 +1510,18 @@ const
     ('repo', ' clone create sync set-default deploy-key rename '),
     ('run', ' download '),
     ('workflow', ''),
-    ('release', ' create upload download '),
+    ('release', ' create upload download verify-asset '),
     ('search', ''),
     ('label', ''),
     ('status', ''),
     ('cache', ''));
   { Flags that read or write a local file, work in a local clone or
-    start another program, in any command. }
-  Refused: array[0..16] of string = ('--input', '--body-file', '--notes-file',
+    start another program, in any command (issue and pr create's
+    --recover reads the file it names). }
+  Refused: array[0..17] of string = ('--input', '--body-file', '--notes-file',
     '--output', '--dir', '--clobber', '--clone', '--remote', '--checkout', '--web',
     '--editor', '--template-file', '--env-file', '--show-token', '--exec',
-    '--attach', '--worktree');
+    '--attach', '--worktree', '--recover');
   { Flags refused in one subcommand alone, short and long: pr merge's and
     pr close's -d delete the local branch too (-d is --draft elsewhere),
     issue develop's -c checks the branch out, repo read-file's -o writes

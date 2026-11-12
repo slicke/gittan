@@ -150,6 +150,10 @@ begin
   AssertFalse('pr create', Allows(['pr', 'create', '--fill']));
   AssertFalse('repo rename', Allows(['repo', 'rename', 'x', '--yes']));
   AssertFalse('an attachment', Allows(['issue', 'comment', '1', '--attach', '/etc/passwd']));
+  AssertFalse('a file to recover from', Allows(['issue', 'create', '--recover', '/tmp/x.json']));
+  AssertFalse('a file to recover from, joined',
+    Allows(['issue', 'create', '--recover=/tmp/x.json']));
+  AssertFalse('a local file to verify', Allows(['release', 'verify-asset', 'v1', '/etc/passwd']));
   AssertFalse('read-file -o', Allows(['repo', 'read-file', 'README.md', '-o', '/tmp/x']));
   AssertTrue('read-file', Allows(['repo', 'read-file', 'README.md']));
 end;

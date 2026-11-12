@@ -12,6 +12,11 @@
 - Undo Revert puts a symbolic link back as the link it was. It wrote the content of the file the link led to into the file the reverted link leads to, and left the link as HEAD had it; a link to a folder or to nothing is reverted and put back too, where it was left out or deleted.
 - Discard on a file with a carriage return inside a line (not a Windows line end) puts a deleted line back where it was, not one line further down.
 - The AI features run Claude Code with your own settings alone: a repository's .claude/settings.json, whose hooks ran when you asked for a commit message, review or summary in a repository you had cloned, is no longer read, and no MCP server is started.
+- An extension whose script throws as it loads no longer keeps running what it set up before the throw (listeners that could stop a commit, commands, timers) while the Extensions page says it did not load; and one whose last line happens to be a string that starts with "Error:" is no longer taken for one that failed.
+- Extension timers no longer start a thread each, and an extension can have at most 1000 at once; a timer that fired just as it was cleared, or as the extensions were reloaded, can no longer run on freed memory. Timers now fire on the engine's 50 ms tick.
+- A promise of an extension that ends after Reload Extensions (a slow fetch or command) is no longer settled in the extension's freed context.
+- An extension can no longer exhaust Gittan's memory or stack by passing an argument that claims a huge length or contains itself, and an exception raised while Gittan reads an argument is thrown where the extension made the call, instead of breaking its next call.
+- An extension with the forge permission can no longer have gh read a local file through `--recover` or `release verify-asset`.
 
 ## 0.19 (build-144, 2026-11-10)
 
