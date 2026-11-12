@@ -23,6 +23,7 @@
 - On Windows a server that sends its answer a byte now and then can no longer keep the update check or another web request going for good: the whole request gets its time limit, as on macOS and Linux.
 - A submodule's commit list shows a subject or author that starts with a quote whole, where `"Quoted" thing here` showed as `Quoted`.
 - The account menu checks the active login of every host, where with gh logged in to github.com and a GitHub Enterprise host only the last host's showed a check.
+- On Windows the kept menu bar (View > Menu Bar) still moves the window from its empty part and keeps its caption buttons working after the window moves to a screen with another scale.
 - A promise of an extension that ends after Reload Extensions (a slow fetch or command) is no longer settled in the extension's freed context.
 - An extension can no longer exhaust Gittan's memory or stack by passing an argument that claims a huge length or contains itself, and an exception raised while Gittan reads an argument is thrown where the extension made the call, instead of breaking its next call.
 - An extension with the forge permission can no longer have gh read a local file through `--recover` or `release verify-asset`.

@@ -122,6 +122,7 @@ type
     procedure OpenAsync(Data: PtrInt);
   protected
     procedure Notification(AComponent: TComponent; Operation: TOperation); override;
+    procedure CreateWnd; override;
     procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
       const AXProportion, AYProportion: double); override;
     procedure Paint; override;
@@ -269,8 +270,9 @@ type
     procedure WindowMove; virtual;
     procedure WindowZoom; virtual;
     procedure WindowMenu; virtual;
-    {** The menu strip has just been made, with its handle (Windows lets
-      the form answer the mouse on its empty part and its buttons). }
+    {** The menu strip has a new handle: when it is made, and again when
+      the LCL makes its window anew (a DPI change). Windows lets the
+      form answer the mouse on its empty part and its buttons. }
     procedure StripMade(AStrip: TGittanMenuStrip); virtual;
   public
     constructor Create(AOwner: TComponent); override;
@@ -965,7 +967,7 @@ begin
     FStrip.Visible := False;
     FStrip.Align := alTop;
     FStrip.Parent := Parent;
-    StripMade(FStrip);
+    { StripMade comes from its CreateWnd, when it gets its window. }
   end;
   Result := FStrip;
 end;
@@ -1403,6 +1405,14 @@ begin
     Result := Result + S[i];
     Inc(i);
   end;
+end;
+
+{ Each window the strip gets, not the first alone, is told to the bar:
+  Windows subclasses it, and a window made anew has lost that. }
+procedure TGittanMenuStrip.CreateWnd;
+begin
+  inherited CreateWnd;
+  FBar.StripMade(Self);
 end;
 
 constructor TGittanMenuStrip.Create(AOwner: TComponent);
