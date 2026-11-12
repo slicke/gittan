@@ -437,14 +437,20 @@ var
   Info: PExtContextInfo;
   Ctx: JSContext;
   GiveUpAt: QWord;
+  Marker: string;
 begin
-  Info := Load('slow', 'Gittan.exec.run("sleep", ["5"]).then(function (r) {' +
-    'globalThis.done = true; });', AllPerms);
+  Marker := IncludeTrailingPathDelimiter(FDir) + 'started';
+  Info := Load('slow', 'Gittan.exec.run("sh", ["-c", "touch ' + Marker +
+    '; sleep 5"]).then(function (r) { globalThis.done = true; });', AllPerms);
   Ctx := Info^.Ctx;
   AssertTrue('a live context has a generation', ExtContextGeneration(Ctx) > 0);
   AssertEquals('the task runs', 1, ActiveAsyncTaskCount);
-  { Into sleep, past the check a task makes as it starts. }
-  Sleep(300);
+  { Into sleep, past the check a task makes as it starts: a slow CI
+    machine took more than a fixed wait to get there. }
+  GiveUpAt := GetTickCount64 + 10000;
+  while not FileExists(Marker) and (GetTickCount64 < GiveUpAt) do
+    Sleep(10);
+  AssertTrue('the command started', FileExists(Marker));
   FEngine.UnloadExtensions;
   AssertEquals('a freed one has none', 0, ExtContextGeneration(Ctx));
   AssertEquals('still running after the capped wait', 1, ActiveAsyncTaskCount);
