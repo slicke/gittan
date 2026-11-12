@@ -1944,6 +1944,7 @@ var
   cb: PJSCallback;
   tmpCtx: JSContext;
   timeoutCounter: integer;
+  WaitUntil: QWord;
   globalObj, timersObj: JSValueRaw;
   i: integer;
 begin
@@ -2022,13 +2023,14 @@ begin
 
   // Give background promise threads time to notice shutdown and complete.
   // ProcessMessages keeps Synchronize() calls draining; exits as soon as the
-  // last TJSAsyncTask is gone, with a 2s cap as a safety net.
-  timeoutCounter := 0;
-  while (ActiveAsyncTaskCount > 0) and (timeoutCounter < 400) do
+  // last TJSAsyncTask is gone, with a 2s cap as a safety net. The cap
+  // is time, not turns: a Pump and a Sleep(5) took several times their
+  // length on a busy machine (macOS CI), and the cap with them.
+  WaitUntil := GetTickCount64 + 2000;
+  while (ActiveAsyncTaskCount > 0) and (GetTickCount64 < WaitUntil) do
   begin
     ExtHost.Pump;
     Sleep(5);
-    Inc(timeoutCounter);
   end;
 
   // Unregister host promise rejection tracker and the watchdog hook (its
@@ -2479,6 +2481,7 @@ end;
 procedure TGittanExtEngine.UnloadExtensions;
 var
   i, timeoutCounter: integer;
+  WaitUntil: QWord;
   tmpCtx: JSContext;
 begin
   if IsGlobalShutdown or ExtHost.Terminated then Exit;
@@ -2508,14 +2511,14 @@ begin
   // Signal in-flight promise threads to bail before we free their target ctxs.
   SetExtShuttingDown(true);
   try
-    // Wait for in-flight promise threads to finish (up to ~1s); exits
-    // immediately when none are running, so reloads stay snappy.
-    timeoutCounter := 0;
-    while (ActiveAsyncTaskCount > 0) and (timeoutCounter < 200) do
+    // Wait for in-flight promise threads to finish (up to 1s, by the
+    // clock, as above); exits immediately when none are running, so
+    // reloads stay snappy.
+    WaitUntil := GetTickCount64 + 1000;
+    while (ActiveAsyncTaskCount > 0) and (GetTickCount64 < WaitUntil) do
     begin
       ExtHost.Pump;
       Sleep(5);
-      Inc(timeoutCounter);
     end;
 
     // Drain any pending microtasks/promise jobs queued against soon-to-die ctxs.
