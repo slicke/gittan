@@ -191,7 +191,12 @@ begin
   AssertEquals('abc', Commits[0].Short);
   AssertEquals('2026-10-01', Commits[0].Date);
   AssertEquals('Ann Author', Commits[0].Author);
-  AssertEquals('Fix: a | b', Commits[0].Subject);
+  AssertEquals('Fix: a | b', Commits[0].Subject);  { A field that starts with a quote is not a quoted one. }
+  ParseSubmoduleLog('abcdef'#31'abc'#31'2026-10-01'#31'"Ann" A'#31'"Quoted" thing here'#10,
+    Commits);
+  AssertEquals(1, Length(Commits));
+  AssertEquals('"Ann" A', Commits[0].Author);
+  AssertEquals('"Quoted" thing here', Commits[0].Subject);
 end;
 
 procedure TSubmodulesTest.TestNoSubmodules;
