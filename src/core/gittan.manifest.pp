@@ -167,7 +167,7 @@ end;
 function ReadToml(const AText: string): TGittanTomlEntries;
 var
   Start, P, Depth: integer;
-  Line, Table, Next: string;
+  Line, Table, Next, Quote: string;
   Index: integer;
   Arrays: TStringList;
 begin
@@ -222,6 +222,21 @@ begin
       Result[High(Result)].Index := Index;
       Result[High(Result)].Key := BareKey(Copy(Line, 1, P - 1));
       Line := Trim(Copy(Line, P + 1, MaxInt));
+      { A multi-line string runs on to its closing quotes; its lines are
+        not keys or tables (a description with "version = " in it). }
+      Quote := Copy(Line, 1, 3);
+      if (Quote = '"""') or (Quote = '''''''') then
+      begin
+        if Pos(Quote, Copy(Line, 4, MaxInt)) = 0 then
+          while NextLine(AText, Start, Next) do
+          begin
+            Line := Line + LineEnding + Next;
+            if Pos(Quote, Next) > 0 then
+              Break;
+          end;
+        Result[High(Result)].Value := Line;
+        Continue;
+      end;
       { An array or an inline table may run on: join the lines until
         it closes. }
       Depth := OpenDepth(Line);

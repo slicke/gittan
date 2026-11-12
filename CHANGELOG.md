@@ -26,6 +26,7 @@
 - On Windows the kept menu bar (View > Menu Bar) still moves the window from its empty part and keeps its caption buttons working after the window moves to a screen with another scale.
 - A link in a pull request comment or a Markdown preview opens only when it is a web or mail address, where a link of another scheme could start whatever application the system has for it.
 - An AI command line tool that does not answer `--version` no longer keeps Gittan from quitting after the settings were open; it is given ten seconds.
+- A Cargo.toml whose description is a multi-line string no longer has its lines read as keys and tables, where a line such as `[badge]` in it hid the version after it.
 - A promise of an extension that ends after Reload Extensions (a slow fetch or command) is no longer settled in the extension's freed context.
 - An extension can no longer exhaust Gittan's memory or stack by passing an argument that claims a huge length or contains itself, and an exception raised while Gittan reads an argument is thrown where the extension made the call, instead of breaking its next call.
 - An extension with the forge permission can no longer have gh read a local file through `--recover` or `release verify-asset`.
