@@ -277,10 +277,15 @@ begin
     Result := Local;
 end;
 
+{ The agent runs in the repository, and claude -p reads the project's
+  .claude/settings.json without asking: a cloned repository's hooks,
+  apiKeyHelper or MCP servers would run with the user's rights. Only the
+  user's own settings are read, and no MCP server. }
 function TGittanClaude.Args(ATask: TGittanAITask): TStringArray;
 begin
   Result := ['-p', Prompt(ATask), '--output-format', 'json', '--tools', 'Read,Grep,Glob',
-    '--no-session-persistence', '--max-turns', IntToStr(TaskTurns[ATask])];
+    '--no-session-persistence', '--max-turns', IntToStr(TaskTurns[ATask]),
+    '--setting-sources', 'user', '--strict-mcp-config'];
   if Model <> '' then
     Result := Concat(Result, ['--model', Model]);
 end;

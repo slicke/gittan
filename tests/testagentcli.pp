@@ -59,6 +59,9 @@ begin
     AssertTrue(Pos('--output-format json', Line) > 0);
     AssertTrue('read-only tools', Pos('--tools Read,Grep,Glob', Line) > 0);
     AssertTrue('no session kept', Pos('--no-session-persistence', Line) > 0);
+    AssertTrue('not the repository''s settings or hooks',
+      Pos('--setting-sources user', Line) > 0);
+    AssertTrue('no MCP server', Pos('--strict-mcp-config', Line) > 0);
     AssertTrue(Pos('--max-turns ' + IntToStr(MessageMaxTurns), Line) > 0);
     AssertEquals('no model without one', 0, Pos('--model', Line));
     AssertEquals('the prompt is the task''s', TaskPrompt(atMessage, True), Args[1]);
