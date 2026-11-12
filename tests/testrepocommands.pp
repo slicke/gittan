@@ -38,6 +38,7 @@ type
     procedure TestPersonalFile;
     procedure TestPackageScripts;
     procedure TestPackageNotJson;
+    procedure TestScriptNamesQuoted;
     procedure TestMakefileTargets;
     procedure TestRunner;
     procedure TestDiscoverOrder;
@@ -435,6 +436,25 @@ begin
   AssertEquals(0, Length(ParsePackageScripts('{"name": "x"}')));
 end;
 
+{ A script name is a word on the shell's command line: one that is not
+  plain is quoted, and one with a line feed, which would start a second
+  command the page does not show, is not listed. }
+procedure TRepoCommandsTest.TestScriptNamesQuoted;
+var
+  C: TGittanRepoCommands;
+begin
+  Put('package.json', '{"scripts": {"build:prod": "x", "two words": "y", ' +
+    '"test\ntouch pwned": "jest"}}');
+  C := DiscoverRepoCommands(FDir);
+  AssertEquals('the line feed one left out', 2, Length(C));
+  AssertEquals('npm run build:prod', C[0].Command);
+  {$IFDEF WINDOWS}
+  AssertEquals('npm run "two words"', C[1].Command);
+  {$ELSE}
+  AssertEquals('npm run ''two words''', C[1].Command);
+  {$ENDIF}
+end;
+
 procedure TRepoCommandsTest.TestMakefileTargets;
 var
   T: TStringArray;
@@ -451,6 +471,7 @@ begin
     '%.o: %.c' + #10 +
     'lib/%.ppu: src/%.pp' + #10 +
     '# clean: not a rule' + #10 +
+    '-C..:' + #10 +
     'clean::' + #10 +
     'all:' + #10 +
     'make-lexlib: ; echo' + #10 +

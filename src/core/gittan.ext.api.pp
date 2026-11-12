@@ -309,31 +309,6 @@ begin
   ReturnJson(res, ctx, FileStatsJson(ExtHost.StatsFor(Root)));
 end;
 
-procedure JSDiff(res: PJSValue; ctx: JSContext; this_val: PJSValue;
-  argc: integer; argv: PJSValues; magic: integer);
-var
-  Repo: TGittanRepo;
-  Path: string;
-  Lines: TStringList;
-begin
-  Repo := RepoArg(res, ctx, argc, argv);
-  if Repo = nil then
-    Exit;
-  Path := Arg(ctx, argc, argv, 1);
-  if Path = '' then
-    ReturnString(res, ctx, Repo.Diff)
-  else
-  begin
-    Lines := TStringList.Create;
-    try
-      if Repo.FileChanges(Path, Lines) then
-        ReturnString(res, ctx, Lines.Text);
-    finally
-      Lines.Free;
-    end;
-  end;
-end;
-
 { Does APath, relative to the repository, name a file inside it? The data
   grant covers the repository, not the files around it. In the work tree
   (no ARef) a link on the way could lead out of it, so none may be there;
@@ -350,6 +325,31 @@ begin
     Result := SameText(Copy(Full, 1, Length(Root)), Root);
   Result := Result and (APath <> '') and
     ((ARef <> '') or not PathHasLinkBelowRoot(Root, Full));
+end;
+
+procedure JSDiff(res: PJSValue; ctx: JSContext; this_val: PJSValue;
+  argc: integer; argv: PJSValues; magic: integer);
+var
+  Repo: TGittanRepo;
+  Path: string;
+  Lines: TStringList;
+begin
+  Repo := RepoArg(res, ctx, argc, argv);
+  if Repo = nil then
+    Exit;
+  Path := Arg(ctx, argc, argv, 1);
+  if Path = '' then
+    ReturnString(res, ctx, Repo.Diff)
+  else if InsideRepo(Repo, Path, '') then
+  begin
+    Lines := TStringList.Create;
+    try
+      if Repo.FileChanges(Path, Lines) then
+        ReturnString(res, ctx, Lines.Text);
+    finally
+      Lines.Free;
+    end;
+  end;
 end;
 
 procedure JSFileText(res: PJSValue; ctx: JSContext; this_val: PJSValue;
@@ -378,7 +378,10 @@ begin
   Repo := RepoArg(res, ctx, argc, argv);
   if Repo = nil then
     Exit;
-  if Repo.Blame(Arg(ctx, argc, argv, 1), Arg(ctx, argc, argv, 2), Output) then
+  { Blame without a ref reads the work tree's file, as the diff of an
+    unchanged or new file does: a link may not lead out of it. }
+  if InsideRepo(Repo, Arg(ctx, argc, argv, 1), Arg(ctx, argc, argv, 2)) and
+    Repo.Blame(Arg(ctx, argc, argv, 1), Arg(ctx, argc, argv, 2), Output) then
     ReturnString(res, ctx, Output);
 end;
 
@@ -1282,7 +1285,7 @@ begin
         Text := Repo.Diff;
         Got := True;
       end
-      else
+      else if InsideRepo(Repo, Path, '') then
       begin
         Lines := TStringList.Create;
         try
@@ -1294,7 +1297,7 @@ begin
       end;
     end
     else if Kind = 'blame' then
-      Got := Repo.Blame(Path, Ref, Text)
+      Got := InsideRepo(Repo, Path, Ref) and Repo.Blame(Path, Ref, Text)
     else if Kind = 'fileText' then
     begin
       Got := InsideRepo(Repo, Path, Ref) and Repo.FileBlob(Path, Ref, Data);
@@ -1451,7 +1454,8 @@ const
     '(function () {' + LineEnding +
     '  var t = Gittan;' + LineEnding +
     '  var has = function (n) { return typeof t[n] === "function"; };' + LineEnding +
-    '  var J = function (s) { return s === undefined ? undefined : JSON.parse(s); };' + LineEnding +
+    '  var JP = JSON.parse;' + LineEnding +
+    '  var J = function (s) { return s === undefined ? undefined : JP(s); };' + LineEnding +
     '  var R = function (o) { return (o && o.repo) ? String(o.repo) : t._root(); };' + LineEnding +
     '  var A = function (a) { return JSON.stringify((a || []).map(String)); };' + LineEnding +
     '  var FORGES = ';
@@ -1485,7 +1489,7 @@ const
     '    var repoReadF = globalThis.repoRead, repoStateF = t._repoState;' + LineEnding +
     '    delete globalThis.repoRead; delete t._repoState;' + LineEnding +
     '    var RR = function (kind, path, ref, o) {' + LineEnding +
-    '      var s = repoStateF.call(t, R(o));' + LineEnding +
+    '      var s = repoStateF(R(o));' + LineEnding +
     '      if (s === undefined) return Promise.resolve(undefined);' + LineEnding +
     '      return repoReadF(s, kind, path === undefined ? "" : String(path), ref === undefined ? "" : String(ref))' + LineEnding +
     '        .then(function (r) { var v = JSON.parse(r).value; return v === null ? undefined : v; });' + LineEnding +
@@ -1503,7 +1507,7 @@ const
     '  if (has("_forgeInfo") && typeof forgeRun === "function") {' + LineEnding +
     '    var forgeInfoF = t._forgeInfo, forgeRunF = globalThis.forgeRun;' + LineEnding +
     '    delete t._forgeInfo; delete globalThis.forgeRun;' + LineEnding +
-    '    var FI = function (o) { return J(forgeInfoF.call(t, (o && o.repo) ? String(o.repo) : "", (o && o.forge) ? String(o.forge) : "")); };' + LineEnding +
+    '    var FI = function (o) { return J(forgeInfoF((o && o.repo) ? String(o.repo) : "", (o && o.forge) ? String(o.forge) : "")); };' + LineEnding +
     '    var FR = function (who, want, args, o) {' + LineEnding +
     '      var i = FI(o);' + LineEnding +
     '      var where = (o && o.repo) ? "the repository " + o.repo : "here";' + LineEnding +

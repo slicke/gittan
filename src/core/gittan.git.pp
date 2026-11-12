@@ -4669,8 +4669,21 @@ begin
   Name := Trim(Name);
   if RunGit(FRoot, ['config', 'branch.' + Name + '.remote'], Remote) and
     RunGit(FRoot, ['config', 'branch.' + Name + '.merge'], Merge) and
-    (Trim(Remote) <> '') and (Trim(Merge) <> '') then
+    (Trim(Remote) <> '') and (Trim(Merge) <> '') and (Trim(Remote) <> '.') then
     Result := RunRemote(['push', '--progress', Trim(Remote), 'HEAD:' + Trim(Merge)])
+  else if Trim(Remote) = '.' then
+  begin
+    { A branch tracking a local one: "." is the repository itself, and
+      a push there would move the local branch, not reach a server. The
+      branch goes to the remote under its own name, its upstream kept. }
+    Remote := RemoteFor('');
+    if Remote = '' then
+    begin
+      FError := 'The repository has no remote to push to.';
+      Exit;
+    end;
+    Result := RunRemote(['push', '--progress', Remote, 'HEAD:refs/heads/' + Name]);
+  end
   else
   begin
     Remote := RemoteFor('');
@@ -4710,8 +4723,23 @@ begin
     FError := Format('%s has no upstream to push over.', [Name]);
     Exit;
   end;
+  Remote := Trim(Remote);
+  Merge := Trim(Merge);
+  { "." is the repository itself (a branch tracking a local one): the
+    force goes to the remote's branch of the same name, never to the
+    local branch tracked. }
+  if Remote = '.' then
+  begin
+    Remote := RemoteFor('');
+    if Remote = '' then
+    begin
+      FError := 'The repository has no remote to push to.';
+      Exit;
+    end;
+    Merge := 'refs/heads/' + Name;
+  end;
   Result := RunRemote(['push', '--progress', '--force-with-lease', '--force-if-includes',
-    Trim(Remote), 'HEAD:' + Trim(Merge)]);
+    Remote, 'HEAD:' + Merge]);
   if not Result then
   begin
     AStale := Pos('stale info', FError) > 0;
@@ -8306,6 +8334,8 @@ begin
     Exit(False);
   if ARef <> '' then
   begin
+    if ARef[1] = '-' then
+      Exit(False);
     Result := RunGit(FRoot, ['cat-file', 'blob', ARef + ':' + APath], Output);
     if Result then
     begin
@@ -8347,7 +8377,10 @@ var
 begin
   ACommit := Default(TGittanCommitLine);
   ABody := '';
-  Result := (FRoot <> '') and (AHash <> '') and RunGit(FRoot, ['log', '-1', '--no-color',
+  { A hash that starts with "-" would be an option to git log (--output=
+    writes a file), and an extension may pass any text. }
+  Result := (FRoot <> '') and (AHash <> '') and (AHash[1] <> '-') and
+    RunGit(FRoot, ['log', '-1', '--no-color',
     '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%s%x1f%b%x00%N', AHash, '--'], Output);
   if not Result then
     Exit;
@@ -8386,6 +8419,10 @@ begin
   end;
   if ARef <> '' then
   begin
+    { A ref that starts with "-" would be an option (--contents= reads
+      any file), and an extension may pass any text. }
+    if ARef[1] = '-' then
+      Exit(False);
     Args[n] := ARef;
     Inc(n);
   end;

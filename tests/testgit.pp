@@ -124,6 +124,8 @@ type
     procedure TestStashes;
     procedure TestStashConflicts;
     procedure TestForcePush;
+    procedure TestPushLocalUpstream;
+    procedure TestOptionRefsRefused;
     procedure TestParseGitVersion;
     procedure TestGitNotRun;
     procedure TestUpstream;
@@ -4330,6 +4332,68 @@ begin
     RemoveTree(Remote);
     RemoveTree(Other);
   end;
+end;
+
+{ A branch tracking a local one has "." as its remote: Push and
+  ForcePush send it to the remote under its own name, and leave the
+  local branch it tracks where it was. }
+procedure TGitRepoTest.TestPushLocalUpstream;
+var
+  Remote, Output, Main, Feat: string;
+  Code: integer;
+  Rejected, Stale, Unseen: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  Remote := FDir + '-remote';
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
+    [poStderrToOutPut]);
+  try
+    Git(['remote', 'add', 'origin', Remote]);
+    Main := Trim(Git(['symbolic-ref', '--short', 'HEAD']));
+    Git(['switch', '-q', '-c', 'feat', '--track', Main]);
+    AssertEquals('.', Trim(Git(['config', 'branch.feat.remote'])));
+    WriteFile('a.txt', 'feature'#10);
+    Commit('feature');
+    Feat := Trim(Git(['rev-parse', 'HEAD']));
+    AssertTrue(FRepo.Open(FDir));
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    AssertFalse('the local branch not moved', Trim(Git(['rev-parse', Main])) = Feat);
+    AssertEquals('the remote has it', Feat,
+      Trim(Git(['--git-dir=' + Remote, 'rev-parse', 'refs/heads/feat'])));
+    AssertEquals('the upstream kept', '.', Trim(Git(['config', 'branch.feat.remote'])));
+
+    Git(['fetch', '-q', 'origin']);
+    Git(['commit', '-q', '--amend', '-m', 'rewritten']);
+    AssertTrue(FRepo.Error, FRepo.ForcePush(Stale, Unseen));
+    AssertFalse('the local branch still not moved',
+      Trim(Git(['rev-parse', Main])) = Trim(Git(['rev-parse', 'HEAD'])));
+    AssertEquals('rewritten', Trim(Git(['--git-dir=' + Remote, 'log', '-1', '--format=%s',
+      'refs/heads/feat'])));
+  finally
+    RemoveTree(Remote);
+  end;
+end;
+
+{ A ref or hash that starts with "-" would be an option to git, which an
+  extension could pass: --output= writes a file, --contents= reads one. }
+procedure TGitRepoTest.TestOptionRefsRefused;
+var
+  Line: TGittanCommitLine;
+  Body, Output, Target: string;
+  Data: RawByteString;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Target := IncludeTrailingPathDelimiter(FDir) + 'written.txt';
+  AssertFalse(FRepo.CommitDetails('--output=' + Target, Line, Body));
+  AssertFalse('no file written', FileExists(Target));
+  AssertTrue('a real hash still', FRepo.CommitDetails('HEAD', Line, Body));
+  AssertFalse(FRepo.Blame('a.txt', '--contents=' + IncludeTrailingPathDelimiter(FDir) +
+    'del.txt', Output));
+  AssertEquals('', Output);
+  AssertFalse(FRepo.FileBlob('a.txt', '--batch', Data));
 end;
 
 { An empty argument is refused on Unix, where TProcess would end the
