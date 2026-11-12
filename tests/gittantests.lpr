@@ -12,7 +12,7 @@ uses
   {$IFDEF WINDOWS}
   Windows,
   {$ENDIF}
-  Classes, SysUtils, consoletestrunner,
+  Classes, SysUtils, consoletestrunner, fpcunit, fpcunitreport, plaintestreport,
   testworddiff, testgit, testsettings, testsymbols, testlexerpick,
   testsymbolindex, testsnapshots, testblame, testhistory, testsyntaxthemes,
   testgithub, testconflicts, testcli, testsymbolchanges,
@@ -73,8 +73,37 @@ begin
     SetTestVariable('GIT_CEILING_DIRECTORIES', ExcludeTrailingPathDelimiter(GetTempDir));
 end;
 
+type
+  { With GITTAN_TEST_TRACE set, each test's name goes to stderr as it
+    starts, at once: a leg whose output goes to a file (Haiku's) shows
+    nothing when a test hangs, and the last name says which. }
+  TTracingWriter = class(TPlainResultsWriter)
+  public
+    procedure StartTest(ATest: TTest); override;
+  end;
+
+  TGittanTestRunner = class(TTestRunner)
+  protected
+    function GetResultsWriter: TCustomResultsWriter; override;
+  end;
+
+procedure TTracingWriter.StartTest(ATest: TTest);
+begin
+  inherited StartTest(ATest);
+  WriteLn(StdErr, 'test: ', ATest.TestSuiteName, '.', ATest.TestName);
+  Flush(StdErr);
+end;
+
+function TGittanTestRunner.GetResultsWriter: TCustomResultsWriter;
+begin
+  if GetEnvironmentVariable('GITTAN_TEST_TRACE') <> '' then
+    Result := TTracingWriter.Create(nil)
+  else
+    Result := inherited GetResultsWriter;
+end;
+
 var
-  App: TTestRunner;
+  App: TGittanTestRunner;
   GitConfig: string;
 begin
   { Strings are UTF-8, as LazUTF8 makes them in the app; without it a
@@ -85,7 +114,7 @@ begin
   SetMultiByteConversionCodePage(CP_UTF8);
   SetMultiByteRTLFileSystemCodePage(CP_UTF8);
   GitConfig := IsolateGitConfig;
-  App := TTestRunner.Create(nil);
+  App := TGittanTestRunner.Create(nil);
   try
     App.Initialize;
     App.Title := 'Gittan tests';

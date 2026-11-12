@@ -241,13 +241,25 @@ begin
   Result := ReadAnswer(Exited, Output, Errors, AText, AError);
 end;
 
+{ Asked from the settings' versions job, which quitting waits for: a
+  command that does not answer is given ten seconds. }
 function TGittanAgentCli.About: string;
 var
   Output, Error, Version: string;
+  Deadline: TGittanDeadline;
+  Ran: boolean;
 begin
   Result := '';
-  if (Path = '') or not RunAgentCli(Path, GetUserDir, ['--version'], '', nil, Output,
-      Error) then
+  if Path = '' then
+    Exit;
+  Deadline := TGittanDeadline.Create(10);
+  try
+    Ran := RunAgentCli(Path, GetUserDir, ['--version'], '', @Deadline.Passed, Output,
+      Error);
+  finally
+    Deadline.Free;
+  end;
+  if not Ran then
     Exit;
   Version := VersionOf(Output, '');
   if Version <> '' then
@@ -277,10 +289,15 @@ begin
     Result := Local;
 end;
 
+{ The agent runs in the repository, and claude -p reads the project's
+  .claude/settings.json without asking: a cloned repository's hooks,
+  apiKeyHelper or MCP servers would run with the user's rights. Only the
+  user's own settings are read, and no MCP server. }
 function TGittanClaude.Args(ATask: TGittanAITask): TStringArray;
 begin
   Result := ['-p', Prompt(ATask), '--output-format', 'json', '--tools', 'Read,Grep,Glob',
-    '--no-session-persistence', '--max-turns', IntToStr(TaskTurns[ATask])];
+    '--no-session-persistence', '--max-turns', IntToStr(TaskTurns[ATask]),
+    '--setting-sources', 'user', '--strict-mcp-config'];
   if Model <> '' then
     Result := Concat(Result, ['--model', Model]);
 end;

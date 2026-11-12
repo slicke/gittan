@@ -8,7 +8,8 @@ unit testrepofiles;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.repofiles, testhelpers;
+  Classes, SysUtils, {$IFDEF UNIX}BaseUnix,{$ENDIF} fpcunit, testregistry, gittan.repofiles,
+  testhelpers;
 
 type
   TRepoFilesTest = class(TTestCase)
@@ -22,6 +23,7 @@ type
   published
     procedure TestListOrder;
     procedure TestListEmpty;
+    procedure TestListSkipsFolderLinks;
     procedure TestPatterns;
     procedure TestIsRepoFile;
     procedure TestAddMakesFile;
@@ -99,6 +101,38 @@ begin
     L.Free;
   end;
 end;
+
+{ A repository can commit links: .github/a -> . would walk on for ever,
+  and a .gittan that links elsewhere would list another folder. }
+procedure TRepoFilesTest.TestListSkipsFolderLinks;
+{$IFDEF UNIX}
+var
+  L: TStringList;
+  Root: string;
+begin
+  Touch('.github/ci.yml');
+  Touch('elsewhere/secret.txt');
+  Root := IncludeTrailingPathDelimiter(FDir);
+  AssertEquals(0, fpSymlink('.', PChar(Root + '.github/a')));
+  AssertEquals(0, fpSymlink('.', PChar(Root + '.github/b')));
+  AssertEquals(0, fpSymlink(PChar(Root + 'elsewhere'), PChar(Root + '.gittan')));
+  L := TStringList.Create;
+  try
+    ListRepoFiles(FDir, L);
+    AssertEquals(L.Text, 1, L.Count);
+    AssertEquals('.github/ci.yml', L[0]);
+  finally
+    L.Free;
+    { Before TearDown's RemoveTree, which would follow them. }
+    fpUnlink(PChar(Root + '.github/a'));
+    fpUnlink(PChar(Root + '.github/b'));
+    fpUnlink(PChar(Root + '.gittan'));
+  end;
+end;
+{$ELSE}
+begin
+end;
+{$ENDIF}
 
 procedure TRepoFilesTest.TestListEmpty;
 var

@@ -93,7 +93,7 @@ implementation
 
 uses
   LCLIntf, URIParser, Math, BGRABitmap, BGRABitmapTypes, BGRASVG, BGRACanvas2D,
-  InkMarkdown, gittan.imagediff, gittan.richdiff, gittan.theme;
+  InkMarkdown, gittan.imagediff, gittan.richdiff, gittan.theme, gittan.git;
 
 resourcestring
   rsCannotReadSvg = 'The SVG cannot be read.';
@@ -627,7 +627,9 @@ begin
       FOnOpenFile(Self, Path);
     Exit;
   end;
-  OpenURL(Link.URL);
+  { A README may link any scheme; only the web and mail leave Gittan. }
+  if IsWebUrl(Link.URL) then
+    OpenURL(Link.URL);
 end;
 
 end.

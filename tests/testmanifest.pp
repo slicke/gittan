@@ -18,6 +18,7 @@ type
     procedure TestTomlMultiLine;
     procedure TestTomlValues;
     procedure TestTomlEscapes;
+    procedure TestTomlMultiLineString;
     procedure TestTomlLock;
     procedure TestJsonObject;
   end;
@@ -26,6 +27,36 @@ implementation
 
 const
   LE = LineEnding;
+
+{ The lines of a multi-line string are not keys: the version after a
+  description with a badge line in it is still read. }
+procedure TManifestTest.TestTomlMultiLineString;
+const
+  Q3 = '''''''';
+var
+  E: TGittanTomlEntries;
+begin
+  E := ReadToml('[package]' + LE + 'description = """' + LE + '[badge]' + LE +
+    'version = "9"' + LE + '"""' + LE + 'version = "1.2.0"' + LE +
+    'notes = ' + Q3 + 'one' + LE + 'name = "x"' + LE + Q3 + LE +
+    'edition = "2021"' + LE + 'short = """inline"""' + LE + 'last = 1' + LE);
+  AssertEquals(6, Length(E));
+  AssertEquals('package', E[1].Table);
+  AssertEquals('version', E[1].Key);
+  AssertEquals('"1.2.0"', E[1].Value);
+  AssertEquals('notes', E[2].Key);
+  AssertEquals('edition', E[3].Key);
+  AssertEquals('short', E[4].Key);
+  AssertEquals('last', E[5].Key);
+  { An escaped quote and two more do not end it; an even run of
+    backslashes before the quotes does. }
+  E := ReadToml('description = """say \"""' + LE + 'dependencies = ["fake"]' + LE +
+    'end \\\\"""' + LE + 'name = "x"' + LE);
+  AssertEquals(2, Length(E));
+  AssertEquals('name', E[1].Key);
+  AssertEquals('the value runs to its end', 'description', E[0].Key);
+  AssertTrue(E[0].Value, Pos('dependencies', E[0].Value) > 0);
+end;
 
 procedure TManifestTest.TestTomlTables;
 var

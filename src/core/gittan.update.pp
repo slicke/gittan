@@ -48,7 +48,6 @@ type
   private
     FRelease: TGittanRelease;
     FOk: boolean;
-    FError: string;
   protected
     procedure Execute; override;
   public

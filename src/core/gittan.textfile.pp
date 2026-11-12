@@ -33,6 +33,29 @@ function NextLine(const S: string; var AStart: integer; out ALine: string): bool
   backslash before any other character for that character. }
 function UnescapeC(const S: string): string;
 
+{** The deepest a JSON or TOML file a repository holds may nest its
+  arrays and tables. fpjson and toml-fp read nesting by recursion, and
+  100 000 levels end the process on a stack overflow that no except
+  catches, so a deeper text is refused before it is parsed. }
+const
+  MaxNesting = 200;
+
+resourcestring
+  rsNestedTooDeep = 'Nested deeper than %d levels.';
+
+{** Whether AJson nests arrays and objects deeper than MaxNesting, its
+  strings left out. }
+function JsonTooDeep(const AJson: string): boolean;
+
+{** The same for TOML: its basic, literal and multi-line strings and its
+  comments left out, inline tables and arrays counted. }
+function TomlTooDeep(const AToml: string): boolean;
+
+{** S with every byte that does not start a valid UTF-8 character (a
+  CP1252 é, a character cut in half, an overlong form or a surrogate)
+  replaced by U+FFFD, so a JSON body built from it is valid UTF-8. }
+function Utf8Clean(const S: RawByteString): RawByteString;
+
 {** Writes AText as the whole of AFileName, creating its folder: into a
   temporary file beside it first (AFileName, the process id, a count of
   the writes and .tmp, so two writers never share one), then renamed over
@@ -140,6 +163,192 @@ begin
   SetLength(Result, n);
 end;
 
+function JsonTooDeep(const AJson: string): boolean;
+var
+  i, Depth: integer;
+begin
+  Depth := 0;
+  i := 1;
+  while i <= Length(AJson) do
+  begin
+    case AJson[i] of
+      '"':
+      begin
+        Inc(i);
+        while (i <= Length(AJson)) and (AJson[i] <> '"') do
+        begin
+          if AJson[i] = '\' then
+            Inc(i);
+          Inc(i);
+        end;
+      end;
+      '[', '{':
+      begin
+        Inc(Depth);
+        if Depth > MaxNesting then
+          Exit(True);
+      end;
+      ']', '}':
+        if Depth > 0 then
+          Dec(Depth);
+    end;
+    Inc(i);
+  end;
+  Result := False;
+end;
+
+function Utf8Clean(const S: RawByteString): RawByteString;
+const
+  Bad = #$EF#$BF#$BD;
+var
+  i, n, Len, k: integer;
+  b: byte;
+  Code, Least: longword;
+  Ok: boolean;
+  Out: integer;
+begin
+  Len := Length(S);
+  { A bad byte grows to three. }
+  SetLength(Result, Len * 3);
+  Out := 0;
+  i := 1;
+  while i <= Len do
+  begin
+    b := Ord(S[i]);
+    if b < $80 then
+    begin
+      n := 0;
+      Least := 0;
+      Code := b;
+    end
+    else if b and $E0 = $C0 then
+    begin
+      n := 1;
+      Least := $80;
+      Code := b and $1F;
+    end
+    else if b and $F0 = $E0 then
+    begin
+      n := 2;
+      Least := $800;
+      Code := b and $0F;
+    end
+    else if b and $F8 = $F0 then
+    begin
+      n := 3;
+      Least := $10000;
+      Code := b and $07;
+    end
+    else
+      n := -1;
+    Ok := (n >= 0) and (i + n <= Len);
+    if Ok then
+      for k := 1 to n do
+        if Ord(S[i + k]) and $C0 <> $80 then
+        begin
+          Ok := False;
+          Break;
+        end
+        else
+          Code := (Code shl 6) or (Ord(S[i + k]) and $3F);
+    { Overlong forms, surrogates and code points past U+10FFFF are not
+      UTF-8 either. }
+    if Ok and ((Code < Least) or (Code > $10FFFF) or
+      ((Code >= $D800) and (Code <= $DFFF))) then
+      Ok := False;
+    if Ok then
+    begin
+      Move(S[i], Result[Out + 1], n + 1);
+      Inc(Out, n + 1);
+      Inc(i, n + 1);
+    end
+    else
+    begin
+      Move(Bad[1], Result[Out + 1], 3);
+      Inc(Out, 3);
+      Inc(i);
+    end;
+  end;
+  SetLength(Result, Out);
+end;
+
+function TomlTooDeep(const AToml: string): boolean;
+var
+  i, Depth: integer;
+
+  function At(const AQuote: string): boolean;
+  begin
+    Result := Copy(AToml, i, Length(AQuote)) = AQuote;
+  end;
+
+  { Past a multi-line string opened at i: to its closing three quotes
+    and the one or two quotes of the content TOML lets stand before
+    them. A backslash escapes in the basic kind only. }
+  procedure SkipMultiLine(AQuote: char; AEscapes: boolean);
+  begin
+    Inc(i, 3);
+    while (i <= Length(AToml)) and not At(StringOfChar(AQuote, 3)) do
+    begin
+      if AEscapes and (AToml[i] = '\') then
+        Inc(i);
+      Inc(i);
+    end;
+    Inc(i, 3);
+    while (i <= Length(AToml)) and (AToml[i] = AQuote) do
+      Inc(i);
+  end;
+
+  { Past a one-line string opened at i, to its quote or the end of the
+    line, where a string that is not closed ends. }
+  procedure SkipLine(AQuote: char; AEscapes: boolean);
+  begin
+    Inc(i);
+    while (i <= Length(AToml)) and not (AToml[i] in [AQuote, #10]) do
+    begin
+      if AEscapes and (AToml[i] = '\') and (i < Length(AToml)) and
+        (AToml[i + 1] <> #10) then
+        Inc(i);
+      Inc(i);
+    end;
+    Inc(i);
+  end;
+
+begin
+  Depth := 0;
+  i := 1;
+  while i <= Length(AToml) do
+    if At('"""') then
+      SkipMultiLine('"', True)
+    else if At('''''''') then
+      SkipMultiLine('''', False)
+    else
+    begin
+      case AToml[i] of
+        '"': SkipLine('"', True);
+        '''': SkipLine('''', False);
+        '#':
+          while (i <= Length(AToml)) and (AToml[i] <> #10) do
+            Inc(i);
+        '[', '{':
+        begin
+          Inc(Depth);
+          if Depth > MaxNesting then
+            Exit(True);
+          Inc(i);
+        end;
+        ']', '}':
+        begin
+          if Depth > 0 then
+            Dec(Depth);
+          Inc(i);
+        end;
+        else
+          Inc(i);
+      end;
+    end;
+  Result := False;
+end;
+
 {$IFDEF WINDOWS}
 { Declared here rather than taken from the Windows unit, whose DeleteFile
   would shadow that of SysUtils. }
@@ -209,6 +418,13 @@ begin
   if F = THandle(-1) then
     Exit;
   Result := (AText = '') or (FileWrite(F, AText[1], Length(AText)) = Length(AText));
+  { On the disk before the rename: a crash after it could otherwise leave
+    the new name on a file whose bytes never got there, and the old one
+    gone. }
+  { A flush that fails leaves the old file: the new one may not be on
+    the disk. }
+  if Result then
+    Result := FileFlush(F);
   FileClose(F);
   if not Result then
   begin

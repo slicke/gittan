@@ -416,7 +416,6 @@ type
     FHasPull: boolean;
     FGone: TStringList;
     FPulls, FReviewPulls: TGittanPullRequests;
-    FError: string;
   protected
     {** The pull request of the branch checked out in Root; false when it
       has none or the forge could not say. }
@@ -461,7 +460,7 @@ type
     forge in a message. A forge fills in Ask. }
   TGittanForgeJob = class(TGittanJob)
   private
-    FForgeName, FRoot, FLogin, FError: string;
+    FForgeName, FRoot, FLogin: string;
     FAvatarUrl, FKnownAvatarUrl, FAvatar: string;
     FMine, FReview: TGittanForgePulls;
     FMineLeft, FReviewLeft: integer;
@@ -526,7 +525,7 @@ type
     words when it did not. A forge fills in Ask. }
   TGittanPullActionJob = class(TGittanJob)
   private
-    FRoot, FRepo, FText, FError: string;
+    FRoot, FRepo, FText: string;
     FNumber: integer;
     FAction: TGittanPullAction;
     FOk: boolean;

@@ -163,22 +163,29 @@ resourcestring
   Reading the XML
   --------------------------------------------------------------------------- }
 
+{ No DOCTYPE is read: Lazarus writes none, and its entities would be
+  expanded without a limit (a file under a kilobyte can ask for
+  gigabytes, the "billion laughs"). }
 function LoadXml(const AXml: string): TXMLDocument;
 var
-  Stream: TStringStream;
+  Parser: TDOMParser;
+  Source: TXMLInputSource;
 begin
   Result := nil;
   if Trim(AXml) = '' then
     Exit;
-  Stream := TStringStream.Create(AXml);
+  Parser := TDOMParser.Create;
+  Source := TXMLInputSource.Create(AXml);
   try
+    Parser.Options.DisallowDoctype := True;
     try
-      ReadXMLFile(Result, Stream);
+      Parser.Parse(Source, Result);
     except
       FreeAndNil(Result);
     end;
   finally
-    Stream.Free;
+    Source.Free;
+    Parser.Free;
   end;
 end;
 

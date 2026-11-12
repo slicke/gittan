@@ -29,6 +29,16 @@ type
     property Worked: boolean read FWorked;
   end;
 
+  { Raises in Execute with ARaise, else ends without calling Done. }
+  TFailingJob = class(TGittanJob)
+  private
+    FRaise: boolean;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(ARaise: boolean);
+  end;
+
   TJobTest = class(TTestCase)
   private
     FDone: integer;
@@ -42,6 +52,7 @@ type
     procedure TestStopKeepsRunning;
     procedure TestFreeRunning;
     procedure TestReaper;
+    procedure TestDoneAfterRaise;
   end;
 
 implementation
@@ -80,6 +91,18 @@ end;
 procedure TWaitingJob.Release;
 begin
   RTLEventSetEvent(FGo);
+end;
+
+constructor TFailingJob.Create(ARaise: boolean);
+begin
+  inherited Create(True);
+  FRaise := ARaise;
+end;
+
+procedure TFailingJob.Execute;
+begin
+  if FRaise then
+    raise Exception.Create('broken');
 end;
 
 procedure TJobTest.SetUp;
@@ -224,6 +247,35 @@ begin
   CheckSynchronize(0);
 end;
 
+{ An Execute that raises, or ends without Done, still tells the handler,
+  once, with the exception's message in Error; the form waited for good
+  otherwise. }
+procedure TJobTest.TestDoneAfterRaise;
+var
+  Job: TFailingJob;
+  Raising: boolean;
+begin
+  for Raising in [True, False] do
+  begin
+    FDone := 0;
+    Job := TFailingJob.Create(Raising);
+    try
+      Job.OnDone := @JobDone;
+      Job.Start;
+      Job.WaitFor;
+      CheckSynchronize(0);
+      AssertEquals(1, FDone);
+      if Raising then
+        AssertEquals('broken', Job.Error)
+      else
+        AssertEquals('', Job.Error);
+    finally
+      Job.Free;
+    end;
+  end;
+end;
+
 initialization
   RegisterTest(TJobTest);
+
 end.

@@ -111,7 +111,7 @@ begin
   else if Assigned(FForge) and FForge.FileOfWebUrl(AUrl, Repo, Path, Line) and
     FRepo.HasRemoteFor(Repo) and RepoFileExists(Path) then
     ShowFileLine(Path, Line)
-  else
+  else if IsWebUrl(AUrl) then
     OpenURL(AUrl);
 end;
 

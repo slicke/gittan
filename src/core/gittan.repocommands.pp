@@ -346,6 +346,11 @@ end;
 function ReadTomlText(const AText: string; out AError: string): TTOMLTable;
 begin
   AError := '';
+  if TomlTooDeep(AText) then
+  begin
+    AError := Format(rsNestedTooDeep, [MaxNesting]);
+    Exit(nil);
+  end;
   try
     Result := ParseTOMLString(AText);
   except
@@ -653,6 +658,22 @@ end;
   package.json and the Makefile
   --------------------------------------------------------------------------- }
 
+{ A script name the command line can carry: ShellName quotes it, but a
+  control character (a line feed starts a second command in sh) is
+  refused, and on Windows a " or a %, which cmd reads inside quotes. }
+function PlainScript(const AName: string): boolean;
+var
+  i: integer;
+begin
+  if AName = '' then
+    Exit(False);
+  for i := 1 to Length(AName) do
+    if (AName[i] < ' ') or (AName[i] = #127)
+      {$IFDEF WINDOWS} or (AName[i] in ['"', '%']){$ENDIF} then
+      Exit(False);
+  Result := True;
+end;
+
 function ParsePackageScripts(const AJson: string): TGittanRepoCommands;
 var
   Data: TJSONData;
@@ -660,7 +681,7 @@ var
   i: integer;
 begin
   Result := nil;
-  if Trim(AJson) = '' then
+  if (Trim(AJson) = '') or JsonTooDeep(AJson) then
     Exit;
   try
     Data := GetJSON(AJson);
@@ -674,7 +695,8 @@ begin
     if not (Scripts is TJSONObject) then
       Exit;
     for i := 0 to TJSONObject(Scripts).Count - 1 do
-      if TJSONObject(Scripts).Items[i].JSONType = jtString then
+      if (TJSONObject(Scripts).Items[i].JSONType = jtString) and
+        PlainScript(TJSONObject(Scripts).Names[i]) then
       begin
         SetLength(Result, Length(Result) + 1);
         Result[High(Result)] := Default(TGittanRepoCommand);
@@ -688,12 +710,13 @@ begin
 end;
 
 { A plain target name: letters, digits, "_", "-" and "." after the first
-  character, which is not a ".". }
+  character, which is not a "." nor a "-" (make would read it as an
+  option: -C.. runs another folder's Makefile). }
 function PlainTarget(const AName: string): boolean;
 var
   i: integer;
 begin
-  if (AName = '') or (AName[1] = '.') then
+  if (AName = '') or (AName[1] in ['.', '-']) then
     Exit(False);
   for i := 1 to Length(AName) do
     if not (AName[i] in ['A'..'Z', 'a'..'z', '0'..'9', '_', '-', '.', '+']) then
@@ -978,7 +1001,7 @@ begin
     Runner := PackageRunner(ARoot);
     for i := 0 to High(Scripts) do
     begin
-      Scripts[i].Command := Runner + ' ' + Scripts[i].Name;
+      Scripts[i].Command := Runner + ' ' + ShellName(Scripts[i].Name);
       TakeFromFile(Scripts[i]);
     end;
   end;

@@ -12,7 +12,7 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry, gittan.ext.quickjs, gittan.ext.engine,
   gittan.ext.host, gittan.ext.perm, gittan.ext.api, gittan.ext.registry, gittan.git,
-  gittan.settings, testextengine;
+  gittan.settings, gittan.ext.promise, testextengine;
 
 type
   { The fake host with a repository. }
@@ -49,6 +49,7 @@ type
     procedure TestAsyncReads;
     procedure TestGitRun;
     procedure TestExecRun;
+    procedure TestPromiseAfterUnload;
     procedure TestExecWithoutData;
     procedure TestRunInput;
     procedure TestStorage;
@@ -62,7 +63,7 @@ type
 implementation
 
 uses
-  {$IFDEF UNIX}BaseUnix,{$ENDIF} testhelpers;
+  {$IFDEF UNIX}BaseUnix,{$ENDIF} fpjson, testhelpers;
 
 const
   AllPerms: TExtPermSet = [epData, epUI, epTimers, epNet, epExec, epSettings, epForge];
@@ -294,6 +295,18 @@ begin
     { Before TearDown's RemoveTree, which would follow it. }
     fpUnlink(PChar(IncludeTrailingPathDelimiter(FRepoDir) + 'out'));
   end;
+  { A link to a folder outside, and .. after it: the path expands to one
+    in the repository without the link, the system resolves it past
+    the link. }
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'sub');
+  AssertEquals('link made', 0, fpSymlink(PChar(IncludeTrailingPathDelimiter(FDir) + 'sub'),
+    PChar(IncludeTrailingPathDelimiter(FRepoDir) + 'in')));
+  try
+    AssertEquals('through a link and ..', 'undefined',
+      EvalIn(Info^.Ctx, 'String(Gittan.repo.fileText("in/../outside.txt"))'));
+  finally
+    fpUnlink(PChar(IncludeTrailingPathDelimiter(FRepoDir) + 'in'));
+  end;
   {$ENDIF}
 end;
 
@@ -412,6 +425,51 @@ begin
   AssertEquals('git ran', 'true:git version', EvalIn(Info^.Ctx, 'globalThis.out'));
   AssertEquals('unknown rejected', 'true', EvalIn(Info^.Ctx, 'String(globalThis.ok.indexOf("rejected") === 0)'));
 end;
+
+{ Reload Extensions frees the contexts after waiting about a second for
+  the promise threads; one that finishes later (a slow fetch or command)
+  found the shutdown flag cleared again and settled its promise on the
+  freed context. The task keeps the context's generation and leaves a
+  promise of a context that is gone alone. }
+procedure TExtApiTest.TestPromiseAfterUnload;
+{$IFDEF UNIX}
+var
+  Info: PExtContextInfo;
+  Ctx: JSContext;
+  GiveUpAt: QWord;
+  Marker, Command: string;
+begin
+  Marker := IncludeTrailingPathDelimiter(FDir) + 'started';
+  { Quoted for sh, then as a JSON string for the script: the temporary
+    folder may hold a space, a quote or a backslash. }
+  Command := 'touch ''' + StringReplace(Marker, '''', '''\''''', [rfReplaceAll]) +
+    '''; sleep 5';
+  Info := Load('slow', 'Gittan.exec.run("sh", ["-c", "' + StringToJSONString(Command) +
+    '"]).then(function (r) { globalThis.done = true; });', AllPerms);
+  Ctx := Info^.Ctx;
+  AssertTrue('a live context has a generation', ExtContextGeneration(Ctx) > 0);
+  AssertEquals('the task runs', 1, ActiveAsyncTaskCount);
+  { Into sleep, past the check a task makes as it starts: a slow CI
+    machine took more than a fixed wait to get there. }
+  GiveUpAt := GetTickCount64 + 10000;
+  while not FileExists(Marker) and (GetTickCount64 < GiveUpAt) do
+    Sleep(10);
+  AssertTrue('the command started', FileExists(Marker));
+  FEngine.UnloadExtensions;
+  AssertEquals('a freed one has none', 0, ExtContextGeneration(Ctx));
+  AssertEquals('still running after the capped wait', 1, ActiveAsyncTaskCount);
+  GiveUpAt := GetTickCount64 + 10000;
+  while (ActiveAsyncTaskCount > 0) and (GetTickCount64 < GiveUpAt) do
+  begin
+    CheckSynchronize(10);
+    FEngine.PumpJobs;
+  end;
+  AssertEquals('the task ended without touching the context', 0, ActiveAsyncTaskCount);
+end;
+{$ELSE}
+begin
+end;
+{$ENDIF}
 
 procedure TExtApiTest.TestStorage;
 var

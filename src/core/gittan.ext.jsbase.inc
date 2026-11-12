@@ -531,15 +531,24 @@ end;
                        required so clearTimeout's JS_ToInt32 can parse it —
                        BigInt IDs made clearing timers fail)
 }
+{** Whether ctx may still set things up: the engine's own context, or an
+  extension's that is loaded. A dropped one (its script threw as it
+  loaded) can still run a promise reaction it queued, since a queued job
+  keeps its context alive; what that reaction registers would outlive
+  the drop, and a failed load must run nothing. }
+function ContextAccepts(Engine: TGittanExtEngine; ctx: JSContext): boolean;
+begin
+  Result := (Engine <> nil) and ((ctx = Engine.FContext) or
+    (Engine.GenerationForContext(ctx) > 0));
+end;
+
 function JSSetTimerImpl(ctx: JSContext; argc: integer; argv: PJSValues;
 IsInterval: boolean): JSValueRaw;
 var
   Engine: TGittanExtEngine;
   TimerInfo: PJSTimerInfo;
   DelayMs: Int32;
-  Timer: TFPTimer;
-  Handler: TJSTimerHandler;
-  i: integer;
+  i, Mine: integer;
   idVal: JSValue;
 begin
   Result := JS_UNDEFINED;
@@ -550,6 +559,11 @@ begin
   Engine := TGittanExtEngine.Instance;
   if Engine = nil then
     Exit;
+  if not ContextAccepts(Engine, ctx) then
+  begin
+    Result := JS_ThrowError(ctx, 'setTimeout: this extension is not loaded').Raw;
+    Exit;
+  end;
 
   // Verify first argument is a function
   if not JS_IsFunction(ctx, argv^[0].Raw) then
@@ -564,12 +578,28 @@ begin
     if DelayMs < 0 then
       DelayMs := 0;
   end;
-  // TFPCustomTimer treats Interval = 0 as "inactive" (see IsActive in fptimer),
-  // so a literal 0 ms would arm a timer that never fires - and setTimeout(fn, 0)
-  // is the single most common form there is. 0 means "as soon as possible", so
-  // round it up to the shortest interval the timer can actually run at.
-  if DelayMs < 1 then
-    DelayMs := 1;
+  // The engine's tick runs the timers, so 0 ms means the next tick.
+
+  // A script that sets timers without end is stopped at a number no
+  // extension needs, rather than filling the list the tick goes through.
+  // Cleared and fired ones wait in FDeadTimers until it is safe to free
+  // them (not inside a timer's callback, which this may be); they count
+  // too, or clearTimeout(setTimeout(f)) in a loop would grow that list
+  // without end.
+  Engine.DrainDeadTimers;
+  Mine := 0;
+  for i := 0 to Engine.FJSTimers.Count - 1 do
+    if Engine.FJSTimers.Data[i]^.Context = ctx then
+      Inc(Mine);
+  for i := 0 to Engine.FDeadTimers.Count - 1 do
+    if Engine.FDeadTimers[i]^.Context = ctx then
+      Inc(Mine);
+  if Mine >= MaxTimersPerContext then
+  begin
+    Result := JS_ThrowError(ctx, RawUtf8(Format('More than %d timers at once',
+      [MaxTimersPerContext]))).Raw;
+    Exit;
+  end;
 
   // Create timer info; New initializes the managed Args field
   New(TimerInfo);
@@ -585,19 +615,11 @@ begin
   end;
   TimerInfo^.IsInterval := IsInterval;
   TimerInfo^.Context := ctx;
+  TimerInfo^.Interval := DelayMs;
+  TimerInfo^.Due := GetTickCount64 + QWord(DelayMs);
 
-  // Create timer handler and timer
-  Handler := TJSTimerHandler.Create;
-  Timer := TFPTimer.Create(nil);
-  Timer.Interval := DelayMs;
-  Timer.Tag := PtrInt(TimerInfo); // Store timer info in Tag
-  Timer.OnTimer := @Handler.OnTimer;
-  TimerInfo^.Timer := Timer;
-  TimerInfo^.Handler := Handler; // Keep reference to prevent premature freeing
-
-  // Store in map, then arm
+  // The engine's tick fires it once it is due.
   Engine.FJSTimers.Add(TimerInfo^.TimerID, TimerInfo);
-  Timer.Enabled := True;
 
   // Return timer ID as a plain number
   idVal.From64(TimerInfo^.TimerID);
@@ -658,10 +680,9 @@ begin
   begin
     TimerInfo := Engine.FJSTimers.Data[idx];
 
-    // Stop the timer, but defer destruction: clearTimeout/clearInterval may be
-    // called from inside the timer's own callback, and freeing it here would
-    // destroy objects whose event frame is still on the stack.
-    TimerInfo^.Timer.Enabled := False;
+    // Out of the list at once, so it never fires again, but freed later:
+    // clearTimeout/clearInterval may be called from inside the timer's own
+    // callback, whose values are still in use.
     Engine.FJSTimers.Delete(idx);
     Engine.FDeadTimers.Add(TimerInfo);
   end;
@@ -767,6 +788,11 @@ begin
   end;
   if eng = nil then
     Exit;
+  if not ContextAccepts(eng, ctx) then
+  begin
+    res^ := JS_ThrowError(ctx, 'Gittan.on: this extension is not loaded');
+    Exit;
+  end;
   eng.Registry.AddListener(eng.ExtensionIdForContext(ctx), ev, ctx,
     JS_DupValue(ctx, argv^[1]));
   res^ := JS_DupValue(ctx, argv^[1]);

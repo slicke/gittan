@@ -608,6 +608,57 @@ begin
   end;
 end;
 
+{ What follows the numbers of AVersion, in lower case, without the
+  separator before it: "post1" of "1.4.post1". }
+function VersionSuffix(const AVersion: string): string;
+var
+  i: integer;
+begin
+  i := 1;
+  if (i <= Length(AVersion)) and (AVersion[i] in ['v', 'V']) then
+    Inc(i);
+  while (i <= Length(AVersion)) and (AVersion[i] in ['0'..'9', '.', '*', 'x', 'X']) do
+    Inc(i);
+  Result := LowerCase(Copy(AVersion, i, MaxInt));
+  while (Result <> '') and (Result[1] in ['.', '-', '_']) do
+    Delete(Result, 1, 1);
+end;
+
+{ Whether AVersion is a Python post-release, "1.4.post1" or "1.4post1":
+  after the release with the same numbers. Not "1.4.0-post1", which in
+  SemVer (npm, Cargo) is a pre-release of 1.4.0. }
+function IsPostRelease(const AVersion: string): boolean;
+var
+  i: integer;
+begin
+  i := 1;
+  if (i <= Length(AVersion)) and (AVersion[i] in ['v', 'V']) then
+    Inc(i);
+  while (i <= Length(AVersion)) and (AVersion[i] in ['0'..'9', '.']) do
+    Inc(i);
+  { The dot before "post" is taken with the numbers above. }
+  Result := (i <= Length(AVersion)) and (AVersion[i] <> '-') and
+    (Copy(VersionSuffix(AVersion), 1, 4) = 'post');
+end;
+
+{ Whether AVersion is a pre-release: something after its numbers, as
+  "1.2.3-beta" or Python's "1.2rc1"; it comes before the release itself.
+  Build metadata after "+" is not one, nor a wildcard or a post-release. }
+function IsPreRelease(const AVersion: string): boolean;
+var
+  i: integer;
+begin
+  if IsPostRelease(AVersion) then
+    Exit(False);
+  i := 1;
+  if (i <= Length(AVersion)) and (AVersion[i] in ['v', 'V']) then
+    Inc(i);
+  { A wildcard, as in 1.4.* or 1.x, is no pre-release either. }
+  while (i <= Length(AVersion)) and (AVersion[i] in ['0'..'9', '.', '*', 'x', 'X']) do
+    Inc(i);
+  Result := (i <= Length(AVersion)) and (AVersion[i] <> '+');
+end;
+
 { -1, 0 or 1 as the version A is below, equal to or above B, by their
   numbers, a missing one counted as 0. }
 function CompareVersionParts(const A, B: TStringArray): integer;
@@ -634,6 +685,27 @@ begin
   Result := 0;
 end;
 
+{ CompareVersionParts of two versions as written, a pre-release below
+  the release with the same numbers and a post-release above it. }
+function CompareVersions(const A, B: string): integer;
+
+  { A pre-release, the release, a post-release. }
+  function Rank(const AVersion: string): integer;
+  begin
+    if IsPreRelease(AVersion) then
+      Result := -1
+    else if IsPostRelease(AVersion) then
+      Result := 1
+    else
+      Result := 0;
+  end;
+
+begin
+  Result := CompareVersionParts(VersionParts(A), VersionParts(B));
+  if Result = 0 then
+    Result := Rank(A) - Rank(B);
+end;
+
 { Whether AVersion starts with the numbers of APrefix. }
 function HasVersionPrefix(const AVersion, APrefix: TStringArray): boolean;
 var
@@ -652,11 +724,13 @@ end;
   bare "1.2" (Cargo's and npm's caret: the same major, the same 0.x
   below 1), "!=1.3". One without a number ("*", "workspace", "latest")
   is met by every version. }
-function MeetsConstraint(const AVersion: TStringArray; const AConstraint: string): boolean;
+function MeetsConstraint(const AVersion: TStringArray; const AText: string;
+  APreRelease: boolean; const AConstraint: string): boolean;
 var
   Op: string;
   Want, Prefix: TStringArray;
   i, c: integer;
+  WantPre: boolean;
 begin
   i := 1;
   while (i <= Length(AConstraint)) and (AConstraint[i] in ['<', '>', '=', '!', '~', '^']) do
@@ -669,6 +743,11 @@ begin
   if Length(Want) = 0 then
     Exit(True);
   c := CompareVersionParts(AVersion, Want);
+  { 1.2.3-beta is below 1.2.3, unless the constraint names a pre-release
+    itself. }
+  WantPre := IsPreRelease(Copy(AConstraint, i, MaxInt));
+  if (c = 0) and APreRelease and not WantPre then
+    c := -1;
   if Op = '>=' then
     Result := c >= 0
   else if Op = '>' then
@@ -679,8 +758,13 @@ begin
     Result := c < 0
   else if Op = '!=' then
     Result := c <> 0
-  else if (Op = '=') or (Op = '==') or (Op = '===') then
-    Result := HasVersionPrefix(AVersion, Want)
+  else if (Op = '===') or ((Op = '==') and (Pos('*', AConstraint) = 0)) then
+    { Python's ==1.4 is 1.4 alone; ==1.4.* is 1.4.x. }
+    { 1.4.post1 is not ==1.4 either: what follows the numbers is the same. }
+    Result := (c = 0) and (VersionSuffix(AText) = VersionSuffix(Copy(AConstraint, i, MaxInt)))
+  else if (Op = '=') or (Op = '==') then
+    { Cargo's and npm's =1.2 is 1.2.x; =2.0.0-beta.1 a pre-release. }
+    Result := HasVersionPrefix(AVersion, Want) and (APreRelease or not WantPre)
   else if (Op = '~') or (Op = '~=') then
   begin
     { ~1.2 is 1.2.x, ~1 is 1.x; Python's ~=1.4.2 is 1.4.x. }
@@ -704,12 +788,13 @@ end;
   (">=1.2, <2", ">=1.2 <2"). }
 function MeetsRequirement(const AVersion, ARequirement: string): boolean;
 var
-  Version, Alternatives, Constraints: TStringArray;
-  Req: string;
-  i, k: integer;
-  All: boolean;
+  Version, Alternatives, Constraints, Upper: TStringArray;
+  Req, UpperText: string;
+  i, k, p: integer;
+  All, Pre, InRange: boolean;
 begin
   Version := VersionParts(AVersion);
+  Pre := IsPreRelease(AVersion);
   { An operator and its number are one constraint: ">= 1.2". }
   Req := '';
   for i := 1 to Length(ARequirement) do
@@ -719,10 +804,29 @@ begin
   Alternatives := Req.Split(['||']);
   for i := 0 to High(Alternatives) do
   begin
+    { npm's hyphen range, "1.2 - 2.3": from the first to the second, a
+      partial one standing for all of its versions (2.3.x). }
+    p := Pos(' - ', Alternatives[i]);
+    if p > 0 then
+    begin
+      UpperText := Trim(Copy(Alternatives[i], p + 3, MaxInt)).TrimLeft(['v']);
+      Upper := VersionParts(UpperText);
+      { A pre-release as the end is a whole version: 2.0.0 is past
+        2.0.0-beta.1. }
+      if IsPreRelease(UpperText) then
+        InRange := CompareVersions(AVersion, UpperText) <= 0
+      else
+        InRange := (CompareVersionParts(Version, Upper) <= 0) or
+          HasVersionPrefix(Version, Upper);
+      if InRange and
+        MeetsConstraint(Version, AVersion, Pre, '>=' + Trim(Copy(Alternatives[i], 1, p - 1))) then
+        Exit(True);
+      Continue;
+    end;
     Constraints := Alternatives[i].Split([',', ' '], TStringSplitOptions.ExcludeEmpty);
     All := True;
     for k := 0 to High(Constraints) do
-      if not MeetsConstraint(Version, Constraints[k]) then
+      if not MeetsConstraint(Version, AVersion, Pre, Constraints[k]) then
         All := False;
     if All then
       Exit(True);
@@ -760,8 +864,8 @@ begin
             Best := j;
             Break;
           end;
-          if (Best < 0) or (CompareVersionParts(VersionParts(ALocked[j].Resolved),
-            VersionParts(ALocked[Best].Resolved)) > 0) then
+          if (Best < 0) or (CompareVersions(ALocked[j].Resolved,
+            ALocked[Best].Resolved) > 0) then
             Best := j;
         end;
     end;
@@ -1295,7 +1399,12 @@ begin
   for i := 1 to Length(AName) do
     if not (AName[i] in ['A'..'Z', 'a'..'z', '0'..'9', '_', '-', '.', '/', '+', '=', ':', ',']) then
       {$IFDEF WINDOWS}
-      Exit('"' + StringReplace(AName, '"', '\"', [rfReplaceAll]) + '"');
+      { cmd.exe reads no \" (a name like x" & calc & " ran calc): a quote
+        is doubled, which turns cmd's quoting off and on again and is one
+        quote to the program. cmd expands %VAR% inside quotes too, so a %
+        stands in quotes of its own: %"PATH"% names no variable. }
+      Exit('"' + StringReplace(StringReplace(AName, '"', '""', [rfReplaceAll]), '%', '"%"',
+        [rfReplaceAll]) + '"');
       {$ELSE}
       { Single quotes, where sh reads nothing ($, `, \ and " included);
         a quote of the name ends them, is escaped and opens them again. }

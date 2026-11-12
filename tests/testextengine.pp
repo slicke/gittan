@@ -93,6 +93,8 @@ type
     procedure TestListenerScopedToForges;
     procedure TestForgeTabsAndBatch;
     procedure TestCommandKeysApart;
+    procedure TestTimers;
+    procedure TestNoExceptionLeftPending;
   end;
 
 implementation
@@ -587,6 +589,75 @@ end;
 
 { A command whose id looks like a tab's or an operation's key is found
   apart from them: each kind has its mark. }
+{ The timers run from the engine's tick: a timeout once, an interval
+  until it clears itself from its own callback, and no more than
+  MaxTimersPerContext at once, where each had a thread of its own. }
+procedure TExtEngineTest.TestTimers;
+var
+  Info: PExtContextInfo;
+  GiveUpAt: QWord;
+begin
+  Info := Load('timers', 'globalThis.t = 0; setTimeout(function (a) { globalThis.t = a; }, 0, 7);' +
+    'globalThis.n = 0; var id = setInterval(function () { if (++globalThis.n === 3) clearInterval(id); }, 1);' +
+    'globalThis.never = 0; clearTimeout(setTimeout(function () { globalThis.never = 1; }, 0));' +
+    'try { for (var i = 0; i < 2000; i++) setTimeout(function () {}, 600000); globalThis.cap = "none"; }' +
+    ' catch (e) { globalThis.cap = String(e); } "loaded";', PermBaseline);
+  AssertLoaded('timers', string(FEngine.ExtExecuteFile(Info)));
+  AssertEquals('not before a tick', '0', EvalIn(Info^.Ctx, 'String(globalThis.t)'));
+  AssertTrue(EvalIn(Info^.Ctx, 'globalThis.cap'),
+    Pos('More than 1000 timers', EvalIn(Info^.Ctx, 'globalThis.cap')) > 0);
+  GiveUpAt := GetTickCount64 + 5000;
+  while (EvalIn(Info^.Ctx, 'String(globalThis.t === 7 && globalThis.n === 3)') <> 'true') and
+    (GetTickCount64 < GiveUpAt) do
+  begin
+    Sleep(5);
+    FEngine.OnJSTimer(nil);
+  end;
+  AssertEquals('the timeout ran with its argument', '7', EvalIn(Info^.Ctx, 'String(globalThis.t)'));
+  AssertEquals('the interval ran three times', '3', EvalIn(Info^.Ctx, 'String(globalThis.n)'));
+  Sleep(20);
+  FEngine.OnJSTimer(nil);
+  FEngine.OnJSTimer(nil);
+  AssertEquals('and was cleared', '3', EvalIn(Info^.Ctx, 'String(globalThis.n)'));
+  AssertEquals('a cleared timeout never runs', '0', EvalIn(Info^.Ctx, 'String(globalThis.never)'));  { Set and cleared at once: freed when it is safe, at the top level at
+    the next set; inside a timer's callback they wait, and count. }
+  Info := Load('churn', 'for (var i = 0; i < 5000; i++) clearTimeout(setTimeout(function () {}, 600000));' +
+    'globalThis.inner = "";' +
+    'setTimeout(function () { try { for (var j = 0; j < 2000; j++)' +
+    ' clearTimeout(setTimeout(function () {}, 600000)); globalThis.inner = "none"; }' +
+    ' catch (e) { globalThis.inner = String(e); } }, 0); "loaded";', PermBaseline);
+  AssertLoaded('churn', string(FEngine.ExtExecuteFile(Info)));
+  GiveUpAt := GetTickCount64 + 5000;
+  while (EvalIn(Info^.Ctx, 'globalThis.inner') = '') and (GetTickCount64 < GiveUpAt) do
+  begin
+    Sleep(5);
+    FEngine.OnJSTimer(nil);
+  end;
+  AssertTrue(EvalIn(Info^.Ctx, 'globalThis.inner'),
+    Pos('More than 1000 timers', EvalIn(Info^.Ctx, 'globalThis.inner')) > 0);
+end;
+
+{ An exception raised while a native read its argument (a toString that
+  throws) or while the engine read a listener's answer (a getter of
+  cancel that throws) was left pending on the context, and the next call
+  into it failed with an error it never raised. The native's is thrown
+  where it was called; the getter's cancels nothing and is cleared. }
+procedure TExtEngineTest.TestNoExceptionLeftPending;
+var
+  Info: PExtContextInfo;
+  Msg: string;
+begin
+  Info := Load('pending', 'try { alert({toString: function () { throw new Error("ts"); }});' +
+    ' globalThis.r = "no throw"; } catch (e) { globalThis.r = e.message; }' +
+    'Gittan.on("commit.before", function () {' +
+    ' return {get cancel() { throw new Error("getter"); }}; }); "loaded";', PermBaseline);
+  AssertLoaded('pending', string(FEngine.ExtExecuteFile(Info)));
+  AssertEquals('thrown where alert was called', 'ts', EvalIn(Info^.Ctx, 'globalThis.r'));
+  AssertEquals('the next call is clean', '2', EvalIn(Info^.Ctx, 'String(1 + 1)'));
+  AssertTrue('a getter that throws cancels nothing', FEngine.Fire('commit.before', '{}', Msg));
+  AssertEquals('and leaves the context clean', '3', EvalIn(Info^.Ctx, 'String(1 + 2)'));
+end;
+
 procedure TExtEngineTest.TestCommandKeysApart;
 var
   Info: PExtContextInfo;

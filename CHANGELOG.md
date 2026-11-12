@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+### Fixed
+- Opening a repository whose .github or .gittan folder holds a link to a folder no longer hangs Gittan: a link such as `.github/a -> .` was walked into for ever. Linked folders are left out of the Config section's files.
+- A repository can no longer crash Gittan or run it out of memory on open with a .lpi or .lpk whose DOCTYPE expands entities to gigabytes, a package.json, lock file, commands.toml or repo.toml nested many thousand levels deep, or a .po file with a plural index such as `msgstr[-1]`. A commands.toml or repo.toml nested too deep says so on the Commands page.
+- A package.json script whose name holds a line break is no longer listed, where running it ran the rest of its name as a second command, and a script name with spaces or other characters the shell reads is quoted. A Makefile target that starts with "-" is no longer listed, where `make -C..` would have run another folder's Makefile.
+- On Windows a build mode or file name with a quote or a % in it no longer breaks out of its quotes in the command Gittan runs.
+- Push and Force Push on a branch that tracks a local branch (`git switch -c feat --track main`) push it to the remote under its own name, where they moved the local branch it tracks and said it was pushed.
+- An extension with only the data permission can no longer read or write files outside the repository through `Gittan.repo.commit`, `blame` or `diff`, or by replacing JavaScript's own functions.
+- Undo Revert puts a symbolic link back as the link it was. It wrote the content of the file the link led to into the file the reverted link leads to, and left the link as HEAD had it; a link to a folder or to nothing is reverted and put back too, where it was left out or deleted.
+- Discard on a file with a carriage return inside a line (not a Windows line end) puts a deleted line back where it was, not one line further down.
+- The AI features run Claude Code with your own settings alone: a repository's .claude/settings.json, whose hooks ran when you asked for a commit message, review or summary in a repository you had cloned, is no longer read, and no MCP server is started.
+- An extension whose script throws as it loads no longer keeps running what it set up before the throw (listeners that could stop a commit, commands, timers) while the Extensions page says it did not load; and one whose last line happens to be a string that starts with "Error:" is no longer taken for one that failed.
+- Extension timers no longer start a thread each, and an extension can have at most 1000 at once; a timer that fired just as it was cleared, or as the extensions were reloaded, can no longer run on freed memory. Timers now fire on the engine's 50 ms tick.
+- Move to a New Branch, Push, Force Push and git-flow work on a branch that has a tag of the same name, where the move left you on the new branch and Push named the branch `heads/<name>`. When a move cannot go back to the branch it started on, it says so.
+- Move to a New Branch refuses a file that `git rm --cached` took out of the index but left on disk, which git would not let it switch back over, and a copy of left-out changes it could not write back is no longer replaced by a later one with the same name.
+- A background task that fails unexpectedly (an AI request, a forge or update check, a signing key lookup) no longer leaves Gittan waiting for it for good: it ends with its error shown. The blame band of a repository that could not be opened is no longer left waiting either.
+- The AI features through an OpenAI-compatible API work on changes to a file that is not UTF-8 (a Windows-1252 file with an é in it), where the server refused the request.
+- The check for branches gone from their remote and the submodule check run ssh in batch mode, as fetch and push do, so a key with a passphrase can no longer leave them waiting on a prompt in the terminal Gittan was started from.
+- Batch's Set Remote HEAD refuses a branch name from the remote that git would not take for one, where a name such as `x:refs/heads/main` made the fetch write the local main branch.
+- On Windows a server that sends its answer a byte now and then can no longer keep the update check or another web request going for good: the whole request gets its time limit, as on macOS and Linux.
+- A submodule's commit list shows a subject or author that starts with a quote whole, where `"Quoted" thing here` showed as `Quoted`.
+- The account menu checks the active login of every host, where with gh logged in to github.com and a GitHub Enterprise host only the last host's showed a check.
+- On Windows the kept menu bar (View > Menu Bar) still moves the window from its empty part and keeps its caption buttons working after the window moves to a screen with another scale.
+- A link in a pull request comment or a Markdown preview opens only when it is a web or mail address, where a link of another scheme could start whatever application the system has for it.
+- An AI command line tool that does not answer `--version` no longer keeps Gittan from quitting after the settings were open; it is given ten seconds.
+- A Cargo.toml whose description is a multi-line string no longer has its lines read as keys and tables, where a line such as `[badge]` in it hid the version after it.
+- The files Gittan replaces in one step (settings, state) are on the disk before the old one goes, and the symbol index is replaced in one step too, where a crash while saving it left a cut file that took the last files for indexed with no symbols.
+- The project page shows the right locked version when a lock file has several of one package: Python's `==1.4` is 1.4 alone, not 1.4.5, an npm range such as `1.0 - 1.4` is read, and a pre-release such as 2.0.0-beta.1 counts below 2.0.0.
+- An extension with the data permission can no longer read a file outside the repository with a path such as `link/../secret` through a link in the work tree, and an extension's array that holds itself twice no longer runs Gittan out of memory.
+- An AI review whose answer could not be read says so, where it reported the review done with nothing found.
+- A promise of an extension that ends after Reload Extensions (a slow fetch or command) is no longer settled in the extension's freed context.
+- An extension can no longer exhaust Gittan's memory or stack by passing an argument that claims a huge length or contains itself, and an exception raised while Gittan reads an argument is thrown where the extension made the call, instead of breaking its next call.
+- An extension with the forge permission can no longer have gh read a local file through `--recover` or `release verify-asset`.
+
+## 0.19 (build-144, 2026-11-10)
+
 ### Added
 - With the AI features on, a right click on a branch in the branch list has ✦ Summarize What (your branch) Changed Since (that branch): Gittan shows what your branch did since it left that one, as a pull request to it would, and the agent summarizes it. Any branch will do, not only the default one. A right click on a commit in the graph has ✦ Summarize Changes Since This Commit, or between it and the commit you marked for comparison.
 - A right click on the globe at the top right of the window lists the accounts gh is logged in to, the one in use marked, and a pick switches to it, as the Hosting page of the settings does; the GitHub view has the same list in its new Account menu, and behind your login at the top of the page when gh is logged in to more than one account. The switch is gh's own, so the terminal's gh changes with it.

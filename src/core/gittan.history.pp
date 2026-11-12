@@ -97,7 +97,6 @@ type
     FFrom, FTo, FMax: integer;
     FIgnoreWhitespace, FNotCommitted: boolean;
     FHistory: TGittanHistory;
-    FError: string;
   protected
     procedure Execute; override;
   public

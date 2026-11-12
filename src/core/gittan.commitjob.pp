@@ -29,7 +29,7 @@ type
     FBranch: string;
     FRest: TGittanCommitParts;
     FOk, FBack: boolean;
-    FId, FError: string;
+    FId: string;
   protected
     procedure Execute; override;
   public

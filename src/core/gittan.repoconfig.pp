@@ -194,6 +194,11 @@ var
 begin
   Result := EmptyRepoConfig;
   Result.Exists := True;
+  if TomlTooDeep(AText) then
+  begin
+    Result.Error := Format(rsNestedTooDeep, [MaxNesting]);
+    Exit;
+  end;
   try
     Doc := ParseTOMLString(AText);
   except

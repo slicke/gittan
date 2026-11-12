@@ -19,6 +19,9 @@ type
     procedure TestBareLine;
     procedure TestNextLine;
     procedure TestUnescapeC;
+    procedure TestJsonTooDeep;
+    procedure TestUtf8Clean;
+    procedure TestTomlTooDeep;
     procedure TestWriteThroughLink;
   end;
 
@@ -128,6 +131,54 @@ begin
   AssertTrue(NextLine('x'#10, Start, Line));
   AssertEquals('x', Line);
   AssertFalse(NextLine('x'#10, Start, Line));
+end;
+
+{ Valid UTF-8 comes through as it is; a CP1252 byte, a cut character,
+  an overlong form and a surrogate each become U+FFFD. }
+procedure TTextFileTest.TestUtf8Clean;
+const
+  Bad = #$EF#$BF#$BD;
+begin
+  AssertEquals('', Utf8Clean(''));
+  AssertEquals('ändrad ✓ '#$F0#$9F#$98#$80, Utf8Clean('ändrad ✓ '#$F0#$9F#$98#$80));
+  AssertEquals('caf' + Bad + ' x', Utf8Clean('caf'#$E9' x'));
+  AssertEquals('cut ' + Bad + Bad, Utf8Clean('cut '#$E2#$9C));
+  AssertEquals(Bad + Bad + '/', Utf8Clean(#$C0#$AF'/'));
+  AssertEquals(Bad + Bad + Bad, Utf8Clean(#$ED#$A0#$80));
+  AssertEquals(Bad + 'a', Utf8Clean(#$FF'a'));
+end;
+
+procedure TTextFileTest.TestJsonTooDeep;
+begin
+  AssertFalse(JsonTooDeep('{"a": [1, {"b": [2]}]}'));
+  AssertFalse('at the limit', JsonTooDeep(StringOfChar('[', MaxNesting) +
+    StringOfChar(']', MaxNesting)));
+  AssertTrue('one deeper', JsonTooDeep(StringOfChar('[', MaxNesting + 1)));
+  AssertTrue(JsonTooDeep(StringOfChar('[', 100000)));
+  AssertFalse('brackets in a string', JsonTooDeep('["' + StringOfChar('[', 500) + '"]'));
+  AssertTrue('an escaped quote does not end it',
+    JsonTooDeep('["\"", ' + StringOfChar('[', 500)));
+  AssertFalse('closers do not go below none', JsonTooDeep(StringOfChar(']', 500) + '[1]'));
+end;
+
+procedure TTextFileTest.TestTomlTooDeep;
+var
+  Deep: string;
+begin
+  Deep := StringOfChar('[', MaxNesting + 1);
+  AssertFalse(TomlTooDeep('[a]'#10'x = [1, [2]]'#10'[[b]]'#10'y = {z = 1}'#10));
+  AssertTrue(TomlTooDeep('x = ' + Deep));
+  AssertFalse('in a basic string', TomlTooDeep('x = "' + Deep + '"'));
+  AssertFalse('in a literal one', TomlTooDeep('x = ''' + Deep + ''''));
+  AssertFalse('in a comment', TomlTooDeep('# ' + Deep));
+  AssertFalse('in a multi-line string', TomlTooDeep('x = """'#10 + Deep + '"""'));
+  AssertFalse('in a multi-line literal', TomlTooDeep('x = '''''''#10 + Deep + ''''''''));
+  { What would hide the nesting if the scan took these for strings. }
+  AssertTrue('a quote in a multi-line string',
+    TomlTooDeep('x = """a"b"""'#10'y = ' + Deep));
+  AssertTrue('quotes before the closing three', TomlTooDeep('x = """a""""'#10'y = ' + Deep));
+  AssertTrue('a quote in a comment', TomlTooDeep('# "'#10'y = ' + Deep));
+  AssertTrue('a string not closed ends at its line', TomlTooDeep('x = "a'#10'y = ' + Deep));
 end;
 
 procedure TTextFileTest.TestUnescapeC;

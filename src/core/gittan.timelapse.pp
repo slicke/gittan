@@ -93,7 +93,6 @@ type
     FRoot, FPath, FRef: string;
     FHistory: TGittanHistory;
     FTimelapse: TGittanTimelapse;
-    FError: string;
     FBinary: boolean;
   protected
     procedure Execute; override;

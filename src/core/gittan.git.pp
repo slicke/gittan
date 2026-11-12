@@ -27,6 +27,16 @@ type
   {** Asked while a tool runs, in the thread it runs in: True ends the
     tool (a job that was told to stop). }
   TGittanCancelEvent = function: boolean of object;
+
+  {** A cancel for a tool that must not run long: Passed is True once
+    ASeconds have gone since Create. }
+  TGittanDeadline = class
+  private
+    FEnd: QWord;
+  public
+    constructor Create(ASeconds: integer);
+    function Passed: boolean;
+  end;
 type
   {** What happened to a changed file, condensed from the two status columns
     of `git status --porcelain`. }
@@ -369,11 +379,14 @@ type
       on disk is written into the repository as a blob (`git
       hash-object -w`), so RestoreReverted can put it back: ASaved gets
       one line per file, the path, a NUL and the blob's id, which is
-      empty for a file that was not there. A submodule is left alone. }
+      empty for a file that was not there. A symbolic link is saved as
+      itself, not as the file it leads to: the path, two NULs and the
+      link's target. A submodule is left alone. }
     function RevertFiles(APaths, ASaved: TStrings): boolean;
     {** Writes back what RevertFiles saved in ASaved: each file as it
-      was on disk, and a file that was not there is deleted again. What
-      the index held is not brought back. }
+      was on disk, a link as a link, and a file that was not there is
+      deleted again. Nothing is written through a link the revert put
+      there. What the index held is not brought back. }
     function RestoreReverted(ASaved: TStrings): boolean;
     {** Whether the index holds APath (relative to Root) as a file
       (`git ls-files`), so git mv and git rm take it. }
@@ -1417,6 +1430,12 @@ function ParseLfsPointer(const AData: RawByteString; out AOid: string;
 function RunGitIn(const ADir: string; const AArgs: array of string;
   out AOutput, AError: string; const AIndexFile: string = ''): boolean;
 
+{** The branch HEAD is on in ADir, by its full ref with refs/heads/ taken
+  off: symbolic-ref --short gives heads/main when a tag main exists too,
+  which git switch and branch.<name> config do not take. False when HEAD
+  is detached. }
+function HeadBranchIn(const ADir: string; out AName: string): boolean;
+
 {** RunGitIn with the variables AEnv ("NAME=value") set besides those
   Gittan always sets, and AOnOutput told of each piece git writes as it
   runs, on either stream. ACancel, when given, is asked as git runs, and
@@ -1455,6 +1474,11 @@ function CloneFolderName(const AUrl: string): string;
   or file URL, or the scp-like user@host:path, on one line without
   spaces. For prefilling a field from the clipboard. }
 function LooksLikeCloneUrl(const AText: string): boolean;
+
+{** Whether AUrl is one to hand the system's browser or mail program:
+  http, https or mailto. A link a repository or a comment holds may name
+  any scheme, and the system opens an application for one it knows. }
+function IsWebUrl(const AUrl: string): boolean;
 
 {** AText with the carriage returns of a terminal's progress lines
   ("Writing objects:  33%" written over and over) resolved: of what a
@@ -1520,6 +1544,17 @@ implementation
 uses
   {$ifdef unix}BaseUnix,{$endif}
   Process, Pipes, md5, StrUtils, DateUtils, gittan.textfile;
+
+constructor TGittanDeadline.Create(ASeconds: integer);
+begin
+  inherited Create;
+  FEnd := GetTickCount64 + QWord(ASeconds) * 1000;
+end;
+
+function TGittanDeadline.Passed: boolean;
+begin
+  Result := GetTickCount64 >= FEnd;
+end;
 
 { ---------------------------------------------------------------------------
   The environment
@@ -2100,8 +2135,10 @@ begin
   begin
     { With a timeout: WaitOnExit() keeps the exit code where Running and
       this keep the raw wait status, so ExitStatus would be one or the
-      other as the tool ended (and RunTool's callers decode the raw). }
-    P.WaitOnExit(High(DWord));
+      other as the tool ended (and RunTool's callers decode the raw). A
+      short one, so RunTool asks its cancel again while a tool that
+      closed its output goes on running. }
+    P.WaitOnExit(Timeout);
     Exit;
   end;
   fpFD_ZERO(Fds);
@@ -2614,7 +2651,8 @@ begin
       if Asked.IndexOf(Remote) < 0 then
       begin
         Asked.Add(Remote);
-        if RunGitIn(ADir, ['ls-remote', '--heads', Remote], Output, Err) then
+        if RunGitEnv(ADir, ['ls-remote', '--heads', Remote], RemoteEnvironmentIn(ADir),
+          Output, Err) then
         begin
           for Line in Output.Split([#10]) do
             if Pos(#9, Line) > 0 then
@@ -3622,9 +3660,40 @@ begin
   Result := RunGit(FRoot, Concat(Args, [ABranch]), Output);
 end;
 
+{ Whether AFull is a symbolic link, with ATarget what it leads to. A
+  link to a folder or to nothing counts, so a revert saves and restores
+  it as the link it is rather than through it. Windows keeps links as
+  files in git by default and is left as it was. }
+function ReadLinkAt(const AFull: string; out ATarget: string): boolean;
+{$ifdef unix}
+var
+  Info: Stat;
+begin
+  ATarget := '';
+  Result := (fpLstat(AFull, Info) = 0) and fpS_ISLNK(Info.st_mode);
+  if Result then
+  begin
+    ATarget := fpReadLink(AFull);
+    Result := ATarget <> '';
+  end;
+end;
+{$else}
+begin
+  ATarget := '';
+  Result := False;
+end;
+{$endif}
+
+function IsLinkAt(const AFull: string): boolean;
+var
+  Target: string;
+begin
+  Result := ReadLinkAt(AFull, Target);
+end;
+
 function TGittanRepo.RevertFiles(APaths, ASaved: TStrings): boolean;
 var
-  Output, Entry, Path, Id, ListFile: string;
+  Output, Entry, Path, Id, ListFile, Target: string;
   Fields, Chosen, Paths, InHead, Restore, Remove: TStringList;
   i: integer;
 
@@ -3650,7 +3719,7 @@ begin
     Paths.Sorted := True;
     Paths.Duplicates := dupIgnore;
     for Path in APaths do
-      if not DirectoryExists(FullPath(Path)) then
+      if IsLinkAt(FullPath(Path)) or not DirectoryExists(FullPath(Path)) then
         Paths.Add(Path);
     { A rename's old path comes with its new one. }
     SplitNul(Output, Fields);
@@ -3681,6 +3750,16 @@ begin
     for Path in Paths do
     begin
       Id := '';
+      { hash-object would save the file a link leads to. }
+      if ReadLinkAt(FullPath(Path), Target) then
+      begin
+        ASaved.Add(Path + #0 + #0 + Target);
+        if InHead.IndexOf(Path) >= 0 then
+          Restore.Add(Path)
+        else
+          Remove.Add(Path);
+        Continue;
+      end;
       if FileExists(FullPath(Path)) then
       begin
         if not RunGit(FRoot, ['hash-object', '-w', '--no-filters', '--', Path], Id) then
@@ -3706,7 +3785,7 @@ begin
       Result := RunGit(FRoot, ['--literal-pathspecs', 'rm', '--cached', '-q',
         '--ignore-unmatch', '--pathspec-from-file=' + ListFile, '--pathspec-file-nul'], Output);
       for Path in Remove do
-        if FileExists(FullPath(Path)) then
+        if FileExists(FullPath(Path)) or IsLinkAt(FullPath(Path)) then
           DeleteFile(FullPath(Path));
     end;
   finally
@@ -3723,7 +3802,7 @@ end;
 function TGittanRepo.RestoreReverted(ASaved: TStrings): boolean;
 var
   i: integer;
-  Path, Id, Data: string;
+  Path, Id, Data, Target: string;
 begin
   Result := FRoot <> '';
   for i := 0 to ASaved.Count - 1 do
@@ -3732,9 +3811,29 @@ begin
       Continue;
     Path := Copy(ASaved[i], 1, Pos(#0, ASaved[i]) - 1);
     Id := Copy(ASaved[i], Pos(#0, ASaved[i]) + 1, MaxInt);
+    Target := '';
+    if Pos(#0, Id) > 0 then
+    begin
+      Target := Copy(Id, Pos(#0, Id) + 1, MaxInt);
+      Id := Copy(Id, 1, Pos(#0, Id) - 1);
+    end;
+    if Target <> '' then
+    begin
+      {$ifdef unix}
+      if FileExists(FullPath(Path)) or IsLinkAt(FullPath(Path)) then
+        DeleteFile(FullPath(Path));
+      ForceDirectories(ExtractFileDir(FullPath(Path)));
+      if fpSymlink(PChar(Target), PChar(FullPath(Path))) <> 0 then
+      begin
+        FError := Format('Could not make the link %s.', [Path]);
+        Result := False;
+      end;
+      {$endif}
+      Continue;
+    end;
     if Id = '' then
     begin
-      if FileExists(FullPath(Path)) then
+      if FileExists(FullPath(Path)) or IsLinkAt(FullPath(Path)) then
         DeleteFile(FullPath(Path));
       Continue;
     end;
@@ -3744,6 +3843,10 @@ begin
       Continue;
     end;
     try
+      { A link the revert put there goes, rather than the file it leads
+        to being written; one that will not go stops this file. }
+      if IsLinkAt(FullPath(Path)) and not DeleteFile(FullPath(Path)) then
+        raise EInOutError.CreateFmt('Could not remove the link %s.', [Path]);
       ForceDirectories(ExtractFileDir(FullPath(Path)));
       WriteBytes(FullPath(Path), Data);
     except
@@ -4407,6 +4510,15 @@ begin
     Result := Copy(Result, i + 1, MaxInt);
 end;
 
+function IsWebUrl(const AUrl: string): boolean;
+var
+  Lower: string;
+begin
+  Lower := LowerCase(Trim(AUrl));
+  Result := (Copy(Lower, 1, 8) = 'https://') or (Copy(Lower, 1, 7) = 'http://') or
+    (Copy(Lower, 1, 7) = 'mailto:');
+end;
+
 function LooksLikeCloneUrl(const AText: string): boolean;
 const
   Schemes: array[0..5] of string = ('https://', 'http://', 'ssh://', 'git://', 'file://',
@@ -4661,7 +4773,7 @@ begin
   Result := False;
   if FRoot = '' then
     Exit;
-  if not RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Name) or (Trim(Name) = '') then
+  if not HeadBranchIn(FRoot, Name) then
   begin
     FError := 'HEAD is not on a branch.';
     Exit;
@@ -4669,8 +4781,21 @@ begin
   Name := Trim(Name);
   if RunGit(FRoot, ['config', 'branch.' + Name + '.remote'], Remote) and
     RunGit(FRoot, ['config', 'branch.' + Name + '.merge'], Merge) and
-    (Trim(Remote) <> '') and (Trim(Merge) <> '') then
+    (Trim(Remote) <> '') and (Trim(Merge) <> '') and (Trim(Remote) <> '.') then
     Result := RunRemote(['push', '--progress', Trim(Remote), 'HEAD:' + Trim(Merge)])
+  else if Trim(Remote) = '.' then
+  begin
+    { A branch tracking a local one: "." is the repository itself, and
+      a push there would move the local branch, not reach a server. The
+      branch goes to the remote under its own name, its upstream kept. }
+    Remote := RemoteFor('');
+    if Remote = '' then
+    begin
+      FError := 'The repository has no remote to push to.';
+      Exit;
+    end;
+    Result := RunRemote(['push', '--progress', Remote, 'HEAD:refs/heads/' + Name]);
+  end
   else
   begin
     Remote := RemoteFor('');
@@ -4697,7 +4822,7 @@ begin
   Result := False;
   if FRoot = '' then
     Exit;
-  if not RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Name) or (Trim(Name) = '') then
+  if not HeadBranchIn(FRoot, Name) then
   begin
     FError := 'HEAD is not on a branch.';
     Exit;
@@ -4710,8 +4835,23 @@ begin
     FError := Format('%s has no upstream to push over.', [Name]);
     Exit;
   end;
+  Remote := Trim(Remote);
+  Merge := Trim(Merge);
+  { "." is the repository itself (a branch tracking a local one): the
+    force goes to the remote's branch of the same name, never to the
+    local branch tracked. }
+  if Remote = '.' then
+  begin
+    Remote := RemoteFor('');
+    if Remote = '' then
+    begin
+      FError := 'The repository has no remote to push to.';
+      Exit;
+    end;
+    Merge := 'refs/heads/' + Name;
+  end;
   Result := RunRemote(['push', '--progress', '--force-with-lease', '--force-if-includes',
-    Trim(Remote), 'HEAD:' + Trim(Merge)]);
+    Remote, 'HEAD:' + Merge]);
   if not Result then
   begin
     AStale := Pos('stale info', FError) > 0;
@@ -4798,7 +4938,7 @@ begin
   Result := '';
   if FRoot = '' then
     Exit;
-  if RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Name) and (Trim(Name) <> '') and
+  if HeadBranchIn(FRoot, Name) and
     RunGit(FRoot, ['config', 'branch.' + Trim(Name) + '.remote'], Result) then
     Result := Trim(Result);
   { "." is the repository itself, for a branch tracking a local one. }
@@ -4884,6 +5024,19 @@ var
   Was: array of boolean;
   Args: TStringArray;
   i: integer;
+  Untracked: TStringList;
+  Path: string;
+
+  { Whether the commit takes APath: it or a folder above it is chosen. }
+  function Chosen(const APath: string): boolean;
+  var
+    P: string;
+  begin
+    for P in APaths do
+      if (APath = P) or (Copy(APath, 1, Length(P) + 1) = P + '/') then
+        Exit(True);
+    Result := False;
+  end;
 
   function FileOf(AIndex: integer): string;
   begin
@@ -4895,11 +5048,21 @@ var
     say of it. }
   function KeepUnwritten(AIndex: integer; const AWhy: string): string;
   var
-    Folder, Kept: string;
+    Folder, Kept, Stem: string;
+    n: integer;
   begin
     Folder := IncludeTrailingPathDelimiter(GitDir) + 'gittan-left-out';
-    Kept := IncludeTrailingPathDelimiter(Folder) + IntToStr(AIndex + 1) + '-' +
-      ExtractFileName(FileOf(AIndex));
+    { Named by the commit and the time, and never over a file kept by an
+      earlier move, whose changes would be lost with it. }
+    Stem := IncludeTrailingPathDelimiter(Folder) + Copy(AId, 1, 7) + '-' +
+      FormatDateTime('yyyymmdd-hhnnss', Now) + '-' + ExtractFileName(FileOf(AIndex));
+    Kept := Stem;
+    n := 1;
+    while FileExists(Kept) do
+    begin
+      Inc(n);
+      Kept := Stem + '.' + IntToStr(n);
+    end;
     try
       ForceDirectories(Folder);
       WriteBytes(Kept, ARest[AIndex].Text);
@@ -4946,8 +5109,7 @@ begin
     FError := 'There is no commit to go back to yet.';
     Exit(False);
   end;
-  Detached := not RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], From) or
-    (Trim(From) = '');
+  Detached := not HeadBranchIn(FRoot, From);
   if Detached and not RunGit(FRoot, ['rev-parse', 'HEAD'], From) then
     Exit(False);
   From := Trim(From);
@@ -4960,13 +5122,38 @@ begin
         'include all of it or leave the file out.', [ARest[i].Path, From]);
       Exit(False);
     end;
+  { A file taken out of the index (git rm --cached) and kept on disk is
+    left untracked by the commit, and git then refuses the switch back,
+    since the branch there tracks it: asked before anything is done. }
+  if RunGit(FRoot, ['diff', '--cached', '--name-only', '-z', '--no-renames',
+    '--diff-filter=D', 'HEAD'], Output) then
+  begin
+    Untracked := TStringList.Create;
+    try
+      SplitNul(Output, Untracked);
+      for Path in Untracked do
+        if FileExists(FullPath(Path)) and Chosen(Path) then
+        begin
+          FError := Format('%s is no longer tracked but still on disk, and the ' +
+            'switch back would refuse it; commit it here, or move the file away ' +
+            'first.', [Path]);
+          Exit(False);
+        end;
+    finally
+      Untracked.Free;
+    end;
+  end;
   if not CreateBranch(AName, 'HEAD', True) then
     Exit(False);
   if not Commit(AMessage, APaths, False, AId, AParts, AOptions) then
   begin
     Err := FError;
     if Switch(From, False, Detached) then
-      DeleteBranch(AName, True, NotMerged);
+      DeleteBranch(AName, True, NotMerged)
+    else
+      { Said, since HEAD is then on the new branch with nothing on it. }
+      Err := Err + LineEnding + Format('Gittan could not go back to %s (%s), so ' +
+        'you are on %s, which has nothing new on it.', [From, Trim(FError), AName]);
     FError := Err;
     Exit(False);
   end;
@@ -7609,6 +7796,18 @@ begin
     AHashes.Text := Output;
 end;
 
+function HeadBranchIn(const ADir: string; out AName: string): boolean;
+var
+  Output, Err: string;
+begin
+  AName := '';
+  Result := RunGitIn(ADir, ['symbolic-ref', '-q', 'HEAD'], Output, Err) and
+    (Copy(Trim(Output), 1, Length('refs/heads/')) = 'refs/heads/');
+  if Result then
+    AName := Copy(Trim(Output), Length('refs/heads/') + 1, MaxInt);
+  Result := AName <> '';
+end;
+
 function TGittanRepo.Branch: string;
 var
   Detached: boolean;
@@ -7622,9 +7821,7 @@ begin
   ADetached := False;
   if FRoot = '' then
     Exit;
-  if RunGit(FRoot, ['symbolic-ref', '--short', '-q', 'HEAD'], Result) then
-    Result := Trim(Result)
-  else
+  if not HeadBranchIn(FRoot, Result) then
   begin
     ADetached := True;
     if RunGit(FRoot, ['rev-parse', '--short', 'HEAD'], Result) then
@@ -7996,9 +8193,9 @@ begin
         SplitRange(FileName, Tracked);
         if RunGit(FRoot, ['show', Tracked + ':' + APath], Output) then
         begin
-          Raw.Text := Output;
+          SplitLf(Output, Raw);
           for Line in Raw do
-            ALines.Add(' ' + Line);
+            ALines.Add(' ' + BareLine(Line));
         end;
         Exit;
       end;
@@ -8010,19 +8207,23 @@ begin
           Marker := ' '
         else
           Marker := '+';
-        Raw.LoadFromFile(FileName);
+        SplitLf(ReadFileBytes(FileName), Raw);
         for Line in Raw do
-          ALines.Add(Marker + Line);
+          ALines.Add(Marker + BareLine(Line));
       end;
       Exit;
     end;
-    Raw.Text := Output;
+    { At LF alone: TStrings.Text also breaks at a lone CR, and a line
+      with one in it became two rows, so the lines after it were counted
+      one too far down and Discard put a deleted block back one line
+      low. The CR of a CRLF line goes, as it did. }
+    SplitLf(Output, Raw);
     InHunk := False;
     for Line in Raw do
       if not InHunk then
         InHunk := Copy(Line, 1, 2) = '@@'
       else if (Line <> '') and (Line[1] in [' ', '+', '-']) then
-        ALines.Add(Line);
+        ALines.Add(BareLine(Line));
   finally
     Raw.Free;
   end;
@@ -8306,6 +8507,8 @@ begin
     Exit(False);
   if ARef <> '' then
   begin
+    if ARef[1] = '-' then
+      Exit(False);
     Result := RunGit(FRoot, ['cat-file', 'blob', ARef + ':' + APath], Output);
     if Result then
     begin
@@ -8347,7 +8550,10 @@ var
 begin
   ACommit := Default(TGittanCommitLine);
   ABody := '';
-  Result := (FRoot <> '') and (AHash <> '') and RunGit(FRoot, ['log', '-1', '--no-color',
+  { A hash that starts with "-" would be an option to git log (--output=
+    writes a file), and an extension may pass any text. }
+  Result := (FRoot <> '') and (AHash <> '') and (AHash[1] <> '-') and
+    RunGit(FRoot, ['log', '-1', '--no-color',
     '--format=%H%x1f%h%x1f%an%x1f%ct%x1f%s%x1f%b%x00%N', AHash, '--'], Output);
   if not Result then
     Exit;
@@ -8386,6 +8592,10 @@ begin
   end;
   if ARef <> '' then
   begin
+    { A ref that starts with "-" would be an option (--contents= reads
+      any file), and an extension may pass any text. }
+    if ARef[1] = '-' then
+      Exit(False);
     Args[n] := ARef;
     Inc(n);
   end;

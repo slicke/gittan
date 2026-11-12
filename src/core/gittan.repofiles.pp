@@ -90,16 +90,19 @@ uses
   gittan.textfile;
 
 { Adds every file under ADir (a full path) to AList as ARel + its name,
-  walking into the folders. }
+  walking into the folders. A link to a folder is not walked into: a
+  repository can commit .github/a -> . (which never ends) or a link to /. }
 procedure AddFolder(const ADir, ARel: string; AList: TStrings);
 var
   Info: TSearchRec;
 begin
-  if FindFirst(IncludeTrailingPathDelimiter(ADir) + '*', faAnyFile, Info) <> 0 then
+  if FindFirst(IncludeTrailingPathDelimiter(ADir) + '*', faAnyFile or faSymLink, Info) <> 0 then
     Exit;
   try
     repeat
       if (Info.Name = '.') or (Info.Name = '..') then
+        Continue;
+      if (Info.Attr and faDirectory <> 0) and (Info.Attr and faSymLink <> 0) then
         Continue;
       if Info.Attr and faDirectory <> 0 then
         AddFolder(IncludeTrailingPathDelimiter(ADir) + Info.Name,
@@ -108,6 +111,18 @@ begin
         AList.Add(ARel + Info.Name);
     until FindNext(Info) <> 0;
   finally
+    FindClose(Info);
+  end;
+end;
+
+function IsFolderLink(const APath: string): boolean;
+var
+  Info: TSearchRec;
+begin
+  Result := False;
+  if FindFirst(ExcludeTrailingPathDelimiter(APath), faAnyFile or faSymLink, Info) = 0 then
+  begin
+    Result := Info.Attr and faSymLink <> 0;
     FindClose(Info);
   end;
 end;
@@ -126,7 +141,7 @@ begin
       AList.Add(Name);
   for Name in RepoFolders do
   begin
-    if not DirectoryExists(Root + Name) then
+    if not DirectoryExists(Root + Name) or IsFolderLink(Root + Name) then
       Continue;
     Folder := TStringList.Create;
     try

@@ -47,7 +47,7 @@ type
     FKind: TGittanRemoteKind;
     FMode: TGittanPullMode;
     FOk, FDiverged, FRejected, FStale, FUnseen, FSubmodules, FNoVerify: boolean;
-    FError, FHeadRef: string;
+    FHeadRef: string;
     FRefs: TStringArray;
     FOnOutput: TNotifyEvent;
     FLock: TRTLCriticalSection;

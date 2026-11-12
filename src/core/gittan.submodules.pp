@@ -400,34 +400,27 @@ end;
 
 procedure ParseSubmoduleLog(const AOutput: string; out ACommits: TGittanSubmoduleCommits);
 var
-  Lines, Parts: TStringList;
-  i: integer;
+  Line: string;
+  Parts: TStringArray;
 begin
   ACommits := nil;
-  Lines := TStringList.Create;
-  Parts := TStringList.Create;
-  try
-    Parts.Delimiter := #31;
-    Parts.StrictDelimiter := True;
-    Lines.Text := AOutput;
-    for i := 0 to Lines.Count - 1 do
+  { Split by hand: DelimitedText takes a field that starts with a quote
+    for a quoted one, and a subject such as "Quoted" thing came out as
+    Quoted. }
+  for Line in AOutput.Split([#10]) do
+  begin
+    Parts := Line.Split([#31]);
+    if Length(Parts) < 5 then
+      Continue;
+    SetLength(ACommits, Length(ACommits) + 1);
+    with ACommits[High(ACommits)] do
     begin
-      Parts.DelimitedText := Lines[i];
-      if Parts.Count < 5 then
-        Continue;
-      SetLength(ACommits, Length(ACommits) + 1);
-      with ACommits[High(ACommits)] do
-      begin
-        Hash := Parts[0];
-        Short := Parts[1];
-        Date := Parts[2];
-        Author := Parts[3];
-        Subject := Parts[4];
-      end;
+      Hash := Parts[0];
+      Short := Parts[1];
+      Date := Parts[2];
+      Author := Parts[3];
+      Subject := TrimRight(Parts[4]);
     end;
-  finally
-    Parts.Free;
-    Lines.Free;
   end;
 end;
 
@@ -718,7 +711,8 @@ begin
       Remote := ResolveSubmoduleUrl(Trim(SuperUrl), Remote);
     end;
   end;
-  if not RunGitIn(RunDir, ['ls-remote', '--', Remote, Result.RemoteRef], Output, Err) then
+  if not RunGitEnv(RunDir, ['ls-remote', '--', Remote, Result.RemoteRef],
+    RemoteEnvironmentIn(RunDir), Output, Err) then
   begin
     Result.State := smFailed;
     Result.Error := Err;

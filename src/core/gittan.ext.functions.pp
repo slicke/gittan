@@ -685,7 +685,31 @@ begin
     end;
 end;
 
+const
+  { How deep arrays in an argument may nest, and how long one may be. An
+    extension can hand a native any object with a length (one that says
+    2e9, or an array that holds itself), which was walked with no end:
+    past these it is undefined. }
+  MaxParseDepth = 32;
+  MaxParseLength = 100000;
+  { The elements of all the arrays of one argument together: an array
+    that holds itself twice is short at each level and doubles with
+    each. }
+  MaxParseElements = 100000;
+
+function JSParseValueAt(ctx: JSContext; val: JSValue; ADepth: integer;
+  var ABudget: integer): JSValueVal; forward;
+
 function JSParseValue(ctx: JSContext; val: JSValue): JSValueVal;
+var
+  Budget: integer;
+begin
+  Budget := MaxParseElements;
+  Result := JSParseValueAt(ctx, val, 0, Budget);
+end;
+
+function JSParseValueAt(ctx: JSContext; val: JSValue; ADepth: integer;
+  var ABudget: integer): JSValueVal;
 var
   arrVal, elem: JSValueRaw;
   len, i: integer;
@@ -699,11 +723,18 @@ begin
     arrVal := JS_GetPropertyStr(ctx, val.Raw, 'length');
     isArr := (not val.IsUndefined) and (JS_ToInt32(ctx, @len, arrVal) = 0);
     JS_FreeValue(ctx, arrVal);
+    if isArr and ((ADepth >= MaxParseDepth) or (len < 0) or (len > MaxParseLength) or
+      (len > ABudget)) then
+    begin
+      Result.Data.match := JD_UNDEFINED;
+      Exit;
+    end;
     if isArr then
     begin
       // It's an array
       Result.Data.match := JD_ARRAY;
       Result.Data.ArrayVal := TJSValList.Create;
+      Dec(ABudget, len);
 
       // Extract elements
       for i := 0 to len - 1 do
@@ -712,7 +743,7 @@ begin
         // (an object, as a top-level argument, by a pointer it does not own).
         elem := JS_GetPropertyUint32(ctx, val.Raw, i);
         New(pVal);
-        pVal^ := JSParseValue(ctx, elem);
+        pVal^ := JSParseValueAt(ctx, elem, ADepth + 1, ABudget);
         JS_FreeValue(ctx, elem);
         Result.Data.ArrayVal.Add(pVal);
       end;

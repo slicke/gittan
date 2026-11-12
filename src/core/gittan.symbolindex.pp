@@ -50,7 +50,9 @@ type
     {** Reads the index from AFileName; a missing or damaged file gives
       an empty index, and a file of another version is deleted unread. }
     procedure Load(const AFileName: string);
-    {** Writes the indexed entries to AFileName, making its folder. }
+    {** Writes the indexed entries to AFileName, making its folder,
+      replacing the file in one step; raises EInOutError when it cannot
+      be written. }
     procedure Save(const AFileName: string);
     property Count: integer read GetCount;
     property Entries[AIndex: integer]: TGittanIndexEntry read GetEntry; default;
@@ -336,8 +338,10 @@ begin
           E.Items[j].Col, E.Items[j].Depth, Escape(E.Items[j].Name),
           Escape(E.Items[j].Line)]));
     end;
-    ForceDirectories(ExtractFileDir(AFileName));
-    Lines.SaveToFile(AFileName);
+    { Replaced in one step: written in place, a file cut off after an F
+      line read as that file indexed with no symbols. }
+    if not WriteFileReplacing(AFileName, Lines.Text) then
+      raise EInOutError.CreateFmt('Could not write %s.', [AFileName]);
   finally
     Lines.Free;
   end;

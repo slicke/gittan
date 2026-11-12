@@ -37,6 +37,8 @@ private
   FResult: JSVAlueVal;
     /// Result produced by the callback (QuickJS value wrapper)
   FSuccess: boolean;        /// True if callback indicates success; otherwise reject
+  FGeneration: QWord;
+    /// The context's generation when the task began; 0 when it had none
 
 protected
       {** Thread entry point. Invokes the registered callback (via ProcessResult),
@@ -65,6 +67,18 @@ public
           @param(cbfunc)  Pointer to the resolve/reject function pair (JSDoubleVal) }
   constructor Create(Context: JSContext; func: TJSCallback; cbfunc: PJSDoubleVal);
 end;
+
+type
+  {** The generation of an extension's context (a number never reused,
+      unlike the context's address), 0 for a context that is gone. }
+  TExtContextGeneration = function(ctx: JSContext): QWord;
+
+var
+  {** Set by the engine, which this unit cannot use. A task whose context
+      was freed meanwhile, by Reload Extensions while a fetch or git ran,
+      does not settle its promise on the freed context, nor on another
+      one that took its address. }
+  ExtContextGeneration: TExtContextGeneration = nil;
 
 // Global shutdown guard for extensions/promises
 procedure SetExtShuttingDown(const Value: boolean);
@@ -119,6 +133,9 @@ cbfunc: PJSDoubleVal);
 begin
   FContext := Context;
   FPromise := func;
+  FGeneration := 0;
+  if Assigned(ExtContextGeneration) and (Context <> nil) then
+    FGeneration := ExtContextGeneration(Context);
   // Copy resolve/reject function refs locally
   if cbfunc <> nil then
     funcs := cbfunc^;
@@ -273,6 +290,13 @@ begin
     Exit;
 
   if (FContext = nil) then
+    Exit;
+
+  { The context was freed after the task began (the wait in
+    UnloadExtensions is capped, and the shutdown flag is cleared once it
+    is done): its resolve and reject cannot be called, nor released. }
+  if (FGeneration <> 0) and Assigned(ExtContextGeneration) and
+    (ExtContextGeneration(FContext) <> FGeneration) then
     Exit;
 
   try

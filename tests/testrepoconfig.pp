@@ -23,6 +23,7 @@ type
     procedure TestDefaults;
     procedure TestParse;
     procedure TestWrongTypes;
+    procedure TestTooDeep;
     procedure TestLimits;
     procedure TestNotToml;
     procedure TestRead;
@@ -103,6 +104,14 @@ begin
   AssertEquals('#(\d+)', C.Issues.LogRegex);
   C := ParseRepoConfig('[issues]'#10'url = "HTTP://t.test/%BUGID%"'#10);
   AssertEquals('HTTP://t.test/%BUGID%', C.Issues.Url);
+end;
+
+procedure TRepoConfigTest.TestTooDeep;
+var
+  C: TGittanRepoConfig;
+begin
+  C := ParseRepoConfig('project = ' + StringOfChar('[', 100000));
+  AssertTrue(C.Error, Pos('Nested deeper', C.Error) > 0);
 end;
 
 procedure TRepoConfigTest.TestWrongTypes;

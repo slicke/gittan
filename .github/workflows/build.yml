@@ -757,11 +757,39 @@ jobs:
           # passes --lazarusdir. lazbuild also crashes with an access
           # violation (exit 217) on its way out, after the compile and the
           # link are done, so the wrapper lets 217 through with a warning;
-          # the executable is checked after the build.
+          # the executable is checked after the build. It may hang there
+          # instead (the leg sat until it was cancelled on 2026-11-09 and
+          # twice on 2026-11-12, the log ending at "[TCompiler.Compile]
+          # end"): the wrapper runs it in the background, and once the
+          # project's compile has ended it is given a minute to exit, then
+          # killed and let through as 217 is.
           cat > lazbuild-haiku <<WRAP
           #!/bin/bash
-          "$PWD/lazarus-haiku/lazbuild" --lazarusdir="$PWD/lazarus-haiku" --compiler="$PWD/fpc-haiku/bin/fpc" "\$@"
+          log=\$(mktemp)
+          "$PWD/lazarus-haiku/lazbuild" --lazarusdir="$PWD/lazarus-haiku" --compiler="$PWD/fpc-haiku/bin/fpc" "\$@" > "\$log" 2>&1 &
+          pid=\$!
+          shown=0
+          ended=""
+          while kill -0 \$pid 2> /dev/null; do
+            sleep 2
+            lines=\$(wc -l < "\$log")
+            if [ \$lines -gt \$shown ]; then
+              tail -n +\$((shown + 1)) "\$log" | head -n \$((lines - shown))
+              shown=\$lines
+            fi
+            if [ -z "\$ended" ] && grep -q '\[TCompiler.Compile\] end' "\$log"; then ended=\$SECONDS; fi
+            if [ -n "\$ended" ] && [ \$((SECONDS - ended)) -ge 60 ]; then
+              echo "lazbuild hung on exit after the compile; killed, going on" >&2
+              kill -9 \$pid 2> /dev/null
+              wait \$pid 2> /dev/null
+              rm -f "\$log"
+              exit 0
+            fi
+          done
+          wait \$pid
           rc=\$?
+          tail -n +\$((shown + 1)) "\$log"
+          rm -f "\$log"
           if [ \$rc = 217 ]; then echo "lazbuild crashed on exit (217); going on" >&2; exit 0; fi
           exit \$rc
           WRAP
@@ -791,17 +819,40 @@ jobs:
           # coming back empty), a different test each time, so a failed
           # round is run again: a failure in both stops the leg, one in the
           # first alone is a warning.
-          if ! make test > /tmp/gittan-tests.log 2>&1; then
+          # The output goes to a file, so a test that hangs showed nothing
+          # until the job's 90 minutes ran out: each test's name goes to a
+          # trace as it starts (GITTAN_TEST_TRACE), and a round is given 15
+          # minutes. Git itself now and then hangs on Haiku as it now and
+          # then fails (TBatchTest.TestStatusGoneUpstream sat in plain local
+          # git calls in one round of 2026-11-12, after passing the round
+          # before), so a hang is taken as a failed round: up to three
+          # rounds, the leg stopped when the last one fails too, a warning
+          # naming the test otherwise.
+          export GITTAN_TEST_TRACE=1
+          TIMEOUT=""
+          command -v timeout > /dev/null && TIMEOUT="timeout 900"
+          FAILED=""
+          for ROUND in 1 2 3; do
+            CODE=0
+            $TIMEOUT make test > /tmp/gittan-tests.log 2> /tmp/gittan-trace.log || CODE=$?
+            grep -v '^test: ' /tmp/gittan-trace.log >> /tmp/gittan-tests.log || true
             cat /tmp/gittan-tests.log
-            # The failed and erred tests' messages, not the ignored ones'.
-            FIRST=$(awk '/^List of (failures|errors):/ {on=1} /^List of ignored tests:/ {on=0}
-              on && /Message:/ {sub(/^ *Message: */, ""); print}' /tmp/gittan-tests.log | head -3 | tr '\n' ' ')
-            echo "The tests failed once; running them again"
-            make test
-            echo "::warning::A test failed on Haiku in the first round only: $FIRST"
-          else
-            cat /tmp/gittan-tests.log
-          fi
+            [ $CODE = 0 ] && break
+            if [ $CODE = 124 ]; then
+              WHAT="hung in $(grep '^test: ' /tmp/gittan-trace.log | tail -1 | cut -c7- || true)"
+            else
+              # The failed and erred tests' messages, not the ignored ones'.
+              WHAT="failed: $(awk '/^List of (failures|errors):/ {on=1} /^List of ignored tests:/ {on=0}
+                on && /Message:/ {sub(/^ *Message: */, ""); print}' /tmp/gittan-tests.log | head -3 | tr '\n' ' ' || true)"
+            fi
+            FAILED="$FAILED [round $ROUND $WHAT]"
+            if [ $ROUND = 3 ]; then
+              echo "::error::The tests on Haiku failed in every round:$FAILED"
+              exit 1
+            fi
+            echo "Round $ROUND of the tests $WHAT; running them again"
+          done
+          [ -n "$FAILED" ] && echo "::warning::The tests on Haiku passed only after:$FAILED"
           mkdir -p dist/Gittan
           cp Gittan dist/Gittan/
           cp -r lexlib dist/Gittan/
@@ -1126,11 +1177,24 @@ jobs:
       # PATH. FPC's own nightly aarch64-win64 snapshot cannot be used: each
       # of its executables, the compiler too, crashed at start (0xC0000005)
       # on this runner.
+      # The action's own cache is actions/cache@v4, which runs on the
+      # deprecated Node 20, so it is off and the folder the action installs
+      # into is cached here: the runner's tool cache, fpc-toolchain/<tag>/
+      # <host>-<first 12 of the sha256 of the targets, none>. When the
+      # folder holds a finished install the action takes it as it is; should
+      # the action move it, the cache only misses and the action downloads.
+      - name: Restore FPC 3.3.1
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.tool_cache }}/fpc-toolchain/3.3.1-b2/aarch64-win64-e3b0c44298fc
+          key: fpc-toolchain-frostney/fpc-toolchain-3.3.1-b2-aarch64-win64-e3b0c44298fc
+
       - name: Install FPC 3.3.1
         id: fpc
         uses: frostney/fpc-toolchain@v1
         with:
           version: 3.3.1-b2
+          cache: 'false'
 
       - name: Check FPC
         shell: pwsh

@@ -108,8 +108,11 @@ type
     procedure TestCoAuthors;
     procedure TestBranchManagement;
     procedure TestMoveToBranch;
+    procedure TestMoveToBranchEdges;
     procedure TestSwitchBlocked;
     procedure TestRevertFiles;
+    procedure TestRevertLinks;
+    procedure TestFileChangesLoneCR;
     procedure TestMoveAndRemove;
     procedure TestRebaseOnto;
     procedure TestBehindDefault;
@@ -124,6 +127,8 @@ type
     procedure TestStashes;
     procedure TestStashConflicts;
     procedure TestForcePush;
+    procedure TestPushLocalUpstream;
+    procedure TestOptionRefsRefused;
     procedure TestParseGitVersion;
     procedure TestGitNotRun;
     procedure TestUpstream;
@@ -138,6 +143,8 @@ type
     procedure TestTreeEntries;
     procedure TestCloneFolderName;
     procedure TestLooksLikeCloneUrl;
+    procedure TestIsWebUrl;
+    procedure TestDeadlineEndsTool;
     procedure TestCloneAndInit;
     procedure TestEditRemotes;
     procedure TestParseBisectRefs;
@@ -3860,6 +3867,45 @@ begin
   end;
 end;
 
+{ A branch that shares its name with a tag: symbolic-ref --short gave
+  heads/<name>, which git switch refused, so every move stayed on the new
+  branch. A file git rm --cached took out and left on disk is refused
+  before anything is done, since git would refuse the switch back. }
+procedure TGitRepoTest.TestMoveToBranchEdges;
+var
+  Paths: TStringList;
+  Id, Main: string;
+  Back: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Main := Trim(Git(['branch', '--show-current']));
+  Git(['tag', Main]);
+  AssertEquals('the branch, not heads/', Main, FRepo.Branch);
+  WriteFile('a.txt', 'moved'#10);
+  Paths := TStringList.Create;
+  try
+    Paths.Add('a.txt');
+    AssertTrue(FRepo.Error, FRepo.MoveToBranch('side', 'side', Paths, Id, Back));
+    AssertTrue('back on it: ' + FRepo.Error, Back);
+    AssertEquals(Main, Trim(Git(['branch', '--show-current'])));
+    AssertEquals('moved'#10, Git(['show', 'side:a.txt']));
+
+    Git(['rm', '--cached', '-q', 'del.txt']);
+    Paths.Clear;
+    Paths.Add('del.txt');
+    AssertFalse(FRepo.MoveToBranch('gone', 'gone', Paths, Id, Back));
+    AssertTrue(FRepo.Error, Pos('no longer tracked', FRepo.Error) > 0);
+    AssertFalse('no branch made', FRepo.HasCommit('refs/heads/gone'));
+    AssertEquals(Main, Trim(Git(['branch', '--show-current'])));
+    AssertTrue('the file kept', FileExists(IncludeTrailingPathDelimiter(FDir) + 'del.txt'));
+  finally
+    Paths.Free;
+  end;
+end;
+
 procedure TGitRepoTest.TestBranchManagement;
 var
   Remote, Main, R, B: string;
@@ -3965,6 +4011,104 @@ end;
 
 { Modified, staged, deleted, added, untracked and renamed files go back
   to HEAD; what was on disk comes back with RestoreReverted. }
+{ A link is reverted and put back as the link it is: before, its target
+  was saved and written back through the link the revert restored, so
+  another file got the content and the link stayed as HEAD had it. A
+  file HEAD has as a link is written back as a file, not through the
+  link, and a dangling link or one to a folder is saved too. }
+procedure TGitRepoTest.TestRevertLinks;
+{$IFDEF UNIX}
+var
+  Paths, Saved: TStringList;
+  Root: string;
+  Info: Stat;
+begin
+  MakeHistory;
+  Root := IncludeTrailingPathDelimiter(FDir);
+  AssertEquals(0, fpSymlink('a.txt', PChar(Root + 'link')));
+  AssertEquals(0, fpSymlink('a.txt', PChar(Root + 'l2')));
+  Commit('links');
+  WriteFile('b.txt', 'B'#10);
+  Git(['add', 'b.txt']);
+  Commit('b');
+  AssertTrue(FRepo.Open(FDir));
+  DeleteFile(Root + 'link');
+  AssertEquals(0, fpSymlink('b.txt', PChar(Root + 'link')));
+  DeleteFile(Root + 'l2');
+  WriteFile('l2', 'mine'#10);
+  AssertEquals(0, fpSymlink('nowhere', PChar(Root + 'dangle')));
+  AssertEquals(0, fpSymlink('dir sp', PChar(Root + 'dirlink')));
+  Paths := TStringList.Create;
+  Saved := TStringList.Create;
+  try
+    Paths.Add('link');
+    Paths.Add('l2');
+    Paths.Add('dangle');
+    Paths.Add('dirlink');
+    AssertTrue(FRepo.Error, FRepo.RevertFiles(Paths, Saved));
+    AssertEquals('every one saved', 4, Saved.Count);
+    AssertEquals('as HEAD has it', 'a.txt', fpReadLink(Root + 'link'));
+    AssertEquals('a link again', 'a.txt', fpReadLink(Root + 'l2'));
+    AssertTrue('the dangling link gone', fpLstat(Root + 'dangle', Info) <> 0);
+    AssertTrue('the folder link gone', fpLstat(Root + 'dirlink', Info) <> 0);
+    AssertTrue('the folder kept', DirectoryExists(Root + 'dir sp'));
+
+    AssertTrue(FRepo.Error, FRepo.RestoreReverted(Saved));
+    AssertEquals('the link back', 'b.txt', fpReadLink(Root + 'link'));
+    AssertEquals('nothing written through it', 'one'#10'two'#10'three'#10,
+      FileText(Root + 'a.txt'));
+    AssertEquals('B'#10, FileText(Root + 'b.txt'));
+    AssertTrue('a file again', (fpLstat(Root + 'l2', Info) = 0) and
+      not fpS_ISLNK(Info.st_mode));
+    AssertEquals('mine'#10, FileText(Root + 'l2'));
+    AssertEquals('nowhere', fpReadLink(Root + 'dangle'));
+    AssertEquals('dir sp', fpReadLink(Root + 'dirlink'));
+  finally
+    Paths.Free;
+    Saved.Free;
+    { Before TearDown's RemoveTree, which would follow it. }
+    fpUnlink(PChar(Root + 'dirlink'));
+  end;
+end;
+{$ELSE}
+begin
+end;
+{$ENDIF}
+
+{ A lone CR is part of its line: TStrings.Text broke the line there, so
+  the rows below it were counted one line too far down and Discard put a
+  deleted line back one line low. }
+procedure TGitRepoTest.TestFileChangesLoneCR;
+var
+  Lines: TStringList;
+  Block: TGittanDiscard;
+  Err: string;
+begin
+  MakeHistory;
+  WriteFile('cr.txt', 'a'#13' b'#10'c'#10'd'#10'e'#10);
+  Commit('cr');
+  WriteFile('cr.txt', 'a'#13' b'#10'c'#10'e'#10);
+  AssertTrue(FRepo.Open(FDir));
+  Lines := TStringList.Create;
+  try
+    AssertTrue(FRepo.FileChanges('cr.txt', Lines));
+    AssertEquals(4, Lines.Count);
+    AssertEquals(' a'#13' b', Lines[0]);
+    AssertEquals('-d', Lines[2]);
+    Block := DiffBlock(Lines, 2, IncludeTrailingPathDelimiter(FDir) + 'cr.txt');
+    AssertEquals('the line it goes back before', 3, Block.Line);
+    AssertTrue(Err, DiscardBlock(Block, Err));
+    AssertEquals('a'#13' b'#10'c'#10'd'#10'e'#10,
+      FileText(IncludeTrailingPathDelimiter(FDir) + 'cr.txt'));
+    { And a file with CRLF ends keeps losing only its CRs. }
+    WriteFile('crlf.txt', 'x'#13#10'y'#13#10);
+    AssertTrue(FRepo.FileChanges('crlf.txt', Lines));
+    AssertEquals('+x|+y|', Joined(Lines));
+  finally
+    Lines.Free;
+  end;
+end;
+
 procedure TGitRepoTest.TestRevertFiles;
 var
   Paths, Saved: TStringList;
@@ -4330,6 +4474,68 @@ begin
     RemoveTree(Remote);
     RemoveTree(Other);
   end;
+end;
+
+{ A branch tracking a local one has "." as its remote: Push and
+  ForcePush send it to the remote under its own name, and leave the
+  local branch it tracks where it was. }
+procedure TGitRepoTest.TestPushLocalUpstream;
+var
+  Remote, Output, Main, Feat: string;
+  Code: integer;
+  Rejected, Stale, Unseen: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  Remote := FDir + '-remote';
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
+    [poStderrToOutPut]);
+  try
+    Git(['remote', 'add', 'origin', Remote]);
+    Main := Trim(Git(['symbolic-ref', '--short', 'HEAD']));
+    Git(['switch', '-q', '-c', 'feat', '--track', Main]);
+    AssertEquals('.', Trim(Git(['config', 'branch.feat.remote'])));
+    WriteFile('a.txt', 'feature'#10);
+    Commit('feature');
+    Feat := Trim(Git(['rev-parse', 'HEAD']));
+    AssertTrue(FRepo.Open(FDir));
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    AssertFalse('the local branch not moved', Trim(Git(['rev-parse', Main])) = Feat);
+    AssertEquals('the remote has it', Feat,
+      Trim(Git(['--git-dir=' + Remote, 'rev-parse', 'refs/heads/feat'])));
+    AssertEquals('the upstream kept', '.', Trim(Git(['config', 'branch.feat.remote'])));
+
+    Git(['fetch', '-q', 'origin']);
+    Git(['commit', '-q', '--amend', '-m', 'rewritten']);
+    AssertTrue(FRepo.Error, FRepo.ForcePush(Stale, Unseen));
+    AssertFalse('the local branch still not moved',
+      Trim(Git(['rev-parse', Main])) = Trim(Git(['rev-parse', 'HEAD'])));
+    AssertEquals('rewritten', Trim(Git(['--git-dir=' + Remote, 'log', '-1', '--format=%s',
+      'refs/heads/feat'])));
+  finally
+    RemoveTree(Remote);
+  end;
+end;
+
+{ A ref or hash that starts with "-" would be an option to git, which an
+  extension could pass: --output= writes a file, --contents= reads one. }
+procedure TGitRepoTest.TestOptionRefsRefused;
+var
+  Line: TGittanCommitLine;
+  Body, Output, Target: string;
+  Data: RawByteString;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Target := IncludeTrailingPathDelimiter(FDir) + 'written.txt';
+  AssertFalse(FRepo.CommitDetails('--output=' + Target, Line, Body));
+  AssertFalse('no file written', FileExists(Target));
+  AssertTrue('a real hash still', FRepo.CommitDetails('HEAD', Line, Body));
+  AssertFalse(FRepo.Blame('a.txt', '--contents=' + IncludeTrailingPathDelimiter(FDir) +
+    'del.txt', Output));
+  AssertEquals('', Output);
+  AssertFalse(FRepo.FileBlob('a.txt', '--batch', Data));
 end;
 
 { An empty argument is refused on Unix, where TProcess would end the
@@ -4826,6 +5032,55 @@ begin
   AssertEquals('host.example', CloneFolderName('ssh://me@host.example'));
   AssertEquals('b', CloneFolderName('  ../b.bundle  '));
   AssertEquals('', CloneFolderName(''));
+end;
+
+{ Only the web and mail go to the system: a link in a comment or a README
+  may name a scheme that starts an application. }
+{ A deadline as the cancel ends a tool that does not answer (an agent's
+  --version, which quitting waits for). }
+procedure TGitRepoTest.TestDeadlineEndsTool;
+{$ifdef unix}
+var
+  Deadline: TGittanDeadline;
+  Output, Err: string;
+  Start: QWord;
+begin
+  Deadline := TGittanDeadline.Create(1);
+  try
+    Start := GetTickCount64;
+    AssertFalse(RunAgentCli('/bin/sh', FDir, ['-c', 'sleep 30'], '', @Deadline.Passed,
+      Output, Err));
+    AssertTrue('ended at the deadline', GetTickCount64 - Start < 10000);
+  finally
+    Deadline.Free;
+  end;
+  { A tool that closes its output and goes on: the wait for its exit
+    asks the deadline too. }
+  Deadline := TGittanDeadline.Create(1);
+  try
+    Start := GetTickCount64;
+    AssertFalse(RunAgentCli('/bin/sh', FDir, ['-c', 'exec >&- 2>&-; sleep 30'], '',
+      @Deadline.Passed, Output, Err));
+    AssertTrue('ended at the deadline, its output closed', GetTickCount64 - Start < 10000);
+  finally
+    Deadline.Free;
+  end;
+end;
+{$else}
+begin
+end;
+{$endif}
+
+procedure TGitRepoTest.TestIsWebUrl;
+begin
+  AssertTrue(IsWebUrl('https://github.com/o/r'));
+  AssertTrue(IsWebUrl('HTTP://example.com'));
+  AssertTrue(IsWebUrl('mailto:a@example.com'));
+  AssertFalse(IsWebUrl('file:///Applications/Calculator.app'));
+  AssertFalse(IsWebUrl('vscode://file/etc/passwd'));
+  AssertFalse(IsWebUrl('javascript:alert(1)'));
+  AssertFalse(IsWebUrl('smb://host/share'));
+  AssertFalse(IsWebUrl(''));
 end;
 
 procedure TGitRepoTest.TestLooksLikeCloneUrl;

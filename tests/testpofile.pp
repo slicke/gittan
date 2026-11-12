@@ -18,6 +18,7 @@ type
     procedure TestEntries;
     procedure TestContinuation;
     procedure TestPlural;
+    procedure TestPluralIndexOutOfRange;
     procedure TestNoBlankLine;
     procedure TestObsolete;
     procedure TestRows;
@@ -113,6 +114,29 @@ begin
   AssertEquals('%d filer', E[0].Strs[1]);
   AssertEquals(4, E[0].StrLines[1]);
   AssertTrue(IsTranslated(E[0]));
+end;
+
+{ msgstr[-1] wrote before the strings, msgstr[999999999] asked for a
+  billion of them: such a line is left out, the entry kept. }
+procedure TPoFileTest.TestPluralIndexOutOfRange;
+var
+  E: TGittanPoEntries;
+begin
+  E := ParsePo('msgid "a"' + LineEnding + 'msgstr[-1] "x"' + LineEnding + '"more"' +
+    LineEnding + 'msgstr[999999999] ""' + LineEnding + 'msgstr[0] "A"' + LineEnding +
+    LineEnding + 'msgid "b"' + LineEnding + 'msgstr "B"' + LineEnding);
+  AssertEquals(2, Length(E));
+  AssertEquals('a', E[0].Id);
+  AssertEquals(1, Length(E[0].Strs));
+  AssertEquals('A', E[0].Strs[0]);
+  AssertEquals('B', E[1].Strs[0]);  { With no blank line after a form left out, the next msgid is still
+    an entry of its own. }
+  E := ParsePo('msgid "a"' + LineEnding + 'msgstr[32] "ignored"' + LineEnding +
+    'msgid "b"' + LineEnding + 'msgstr "B"' + LineEnding);
+  AssertEquals(2, Length(E));
+  AssertEquals('a', E[0].Id);
+  AssertEquals('b', E[1].Id);
+  AssertEquals('B', E[1].Strs[0]);
 end;
 
 procedure TPoFileTest.TestNoBlankLine;

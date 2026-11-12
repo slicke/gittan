@@ -20,7 +20,7 @@ interface
 
 uses
   fpcunit, testregistry, SysUtils, Classes, Variants, gittan.ext.quickjs,
-  gittan.ext.modules;
+  gittan.ext.modules, gittan.ext.functions;
 
 type
   TExtQuickJSTest = class(TTestCase)
@@ -37,6 +37,7 @@ type
     procedure TestJSValueSizeMatches;
     procedure TestEvalReturnsInteger;
     procedure TestEvalReturnsString;
+    procedure TestParseValueLimits;
     procedure TestEvalReturnsFloat;
     procedure TestEvalReturnsBool;
     procedure TestValuePredicates;
@@ -201,6 +202,63 @@ begin
     AssertEquals(42, i);
   finally
     JS_FreeValue(FContext, v);
+  end;
+end;
+
+{ An argument with a length an extension made up, or an array holding
+  itself, was walked with no end: past the limits it is undefined. }
+procedure TExtQuickJSTest.TestParseValueLimits;
+
+  function Parsed(const ASrc: RawUtf8): JSParameters;
+  var
+    v: JSValue;
+  begin
+    v := JS_Eval(FContext, ASrc, 'test.js', JS_EVAL_TYPE_GLOBAL);
+    try
+      AssertFalse(string(ASrc), JS_IsException(v));
+      Result := JSParseParameters(FContext, 1, PJSValueConst(@v));
+    finally
+      JS_FreeValue(FContext, v);
+    end;
+  end;
+
+var
+  P, Inner: JSParameters;
+  Depth: integer;
+begin
+  P := Parsed('({length: 2e9})');
+  try
+    AssertTrue('a made-up length', P[0]^.Data.match = JD_UNDEFINED);
+  finally
+    FreeJSParameters(P);
+  end;
+  P := Parsed('var a = []; a[0] = a; a');
+  try
+    Depth := 0;
+    Inner := P;
+    while Inner[0]^.Data.match = JD_ARRAY do
+    begin
+      Inner := JSParameters(Inner[0]^.Data.ArrayVal);
+      Inc(Depth);
+    end;
+    AssertTrue('an array holding itself stops', Inner[0]^.Data.match = JD_UNDEFINED);
+    AssertTrue(IntToStr(Depth), (Depth > 1) and (Depth <= 33));
+  finally
+    FreeJSParameters(P);
+  end;
+  { Twice in itself: two at each level, 2^32 in all without a budget. }
+  P := Parsed('var a = []; a.push(a, a); a');
+  try
+    AssertTrue('parsed', P[0]^.Data.match = JD_ARRAY);
+  finally
+    FreeJSParameters(P);
+  end;
+  P := Parsed('[1, [2, 3]]');
+  try
+    AssertTrue(P[0]^.Data.match = JD_ARRAY);
+    AssertEquals('a plain one is kept', 2, JSParameters(P[0]^.Data.ArrayVal).Count);
+  finally
+    FreeJSParameters(P);
   end;
 end;
 
