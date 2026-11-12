@@ -791,13 +791,32 @@ jobs:
           # coming back empty), a different test each time, so a failed
           # round is run again: a failure in both stops the leg, one in the
           # first alone is a warning.
-          if ! make test > /tmp/gittan-tests.log 2>&1; then
+          # The output goes to a file, so a test that hangs showed nothing
+          # until the job's 90 minutes ran out (twice on 2026-11-12): each
+          # test's name goes to a trace as it starts (GITTAN_TEST_TRACE),
+          # and a round is given 15 minutes, after which the last name is
+          # the test that hung.
+          export GITTAN_TEST_TRACE=1
+          TIMEOUT=""
+          command -v timeout > /dev/null && TIMEOUT="timeout 900"
+          tests_round() {
+            $TIMEOUT make test > /tmp/gittan-tests.log 2> /tmp/gittan-trace.log
+            CODE=$?
+            grep -v '^test: ' /tmp/gittan-trace.log >> /tmp/gittan-tests.log
+            if [ $CODE = 124 ]; then
+              cat /tmp/gittan-tests.log
+              echo "::error::The tests hung on Haiku in $(grep '^test: ' /tmp/gittan-trace.log | tail -1)"
+              exit 1
+            fi
+            return $CODE
+          }
+          if ! tests_round; then
             cat /tmp/gittan-tests.log
             # The failed and erred tests' messages, not the ignored ones'.
             FIRST=$(awk '/^List of (failures|errors):/ {on=1} /^List of ignored tests:/ {on=0}
               on && /Message:/ {sub(/^ *Message: */, ""); print}' /tmp/gittan-tests.log | head -3 | tr '\n' ' ')
             echo "The tests failed once; running them again"
-            make test
+            tests_round || { cat /tmp/gittan-tests.log; exit 1; }
             echo "::warning::A test failed on Haiku in the first round only: $FIRST"
           else
             cat /tmp/gittan-tests.log
