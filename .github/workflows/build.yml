@@ -757,11 +757,39 @@ jobs:
           # passes --lazarusdir. lazbuild also crashes with an access
           # violation (exit 217) on its way out, after the compile and the
           # link are done, so the wrapper lets 217 through with a warning;
-          # the executable is checked after the build.
+          # the executable is checked after the build. It may hang there
+          # instead (the leg sat until it was cancelled on 2026-11-09 and
+          # twice on 2026-11-12, the log ending at "[TCompiler.Compile]
+          # end"): the wrapper runs it in the background, and once the
+          # project's compile has ended it is given a minute to exit, then
+          # killed and let through as 217 is.
           cat > lazbuild-haiku <<WRAP
           #!/bin/bash
-          "$PWD/lazarus-haiku/lazbuild" --lazarusdir="$PWD/lazarus-haiku" --compiler="$PWD/fpc-haiku/bin/fpc" "\$@"
+          log=\$(mktemp)
+          "$PWD/lazarus-haiku/lazbuild" --lazarusdir="$PWD/lazarus-haiku" --compiler="$PWD/fpc-haiku/bin/fpc" "\$@" > "\$log" 2>&1 &
+          pid=\$!
+          shown=0
+          ended=""
+          while kill -0 \$pid 2> /dev/null; do
+            sleep 2
+            lines=\$(wc -l < "\$log")
+            if [ \$lines -gt \$shown ]; then
+              tail -n +\$((shown + 1)) "\$log" | head -n \$((lines - shown))
+              shown=\$lines
+            fi
+            if [ -z "\$ended" ] && grep -q '\[TCompiler.Compile\] end' "\$log"; then ended=\$SECONDS; fi
+            if [ -n "\$ended" ] && [ \$((SECONDS - ended)) -ge 60 ]; then
+              echo "lazbuild hung on exit after the compile; killed, going on" >&2
+              kill -9 \$pid 2> /dev/null
+              wait \$pid 2> /dev/null
+              rm -f "\$log"
+              exit 0
+            fi
+          done
+          wait \$pid
           rc=\$?
+          tail -n +\$((shown + 1)) "\$log"
+          rm -f "\$log"
           if [ \$rc = 217 ]; then echo "lazbuild crashed on exit (217); going on" >&2; exit 0; fi
           exit \$rc
           WRAP
