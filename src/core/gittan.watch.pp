@@ -69,7 +69,7 @@ type
     IgnoreWhitespace before Start, as the form's own repository has it. }
   TGittanOpenJob = class(TGittanJob)
   private
-    FDir, FRoot, FGitDir, FError: string;
+    FDir, FRoot, FGitDir: string;
     FOpened, FIgnoreWhitespace: boolean;
     FSnapshot: TGittanRepoSnapshot;
   protected

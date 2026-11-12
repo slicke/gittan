@@ -436,7 +436,7 @@ type
     FPaths: TStringList;
     FAmend: boolean;
     FOk: boolean;
-    FMessage, FError: string;
+    FMessage: string;
   protected
     procedure Execute; override;
   public
@@ -462,7 +462,6 @@ type
     FPaths: TStringList;
     FOk: boolean;
     FThreads: TGittanReviewThreads;
-    FError: string;
   protected
     procedure Execute; override;
   public
@@ -485,7 +484,6 @@ type
     FQuestion: string;
     FOk: boolean;
     FFiles: TGittanFoundFiles;
-    FError: string;
     procedure LocateLines(const AList: string);
   protected
     procedure Execute; override;
@@ -508,7 +506,7 @@ type
     FRebase: boolean;
     FBlock: TGittanDiscard;
     FOk: boolean;
-    FWhy, FError: string;
+    FWhy: string;
   protected
     procedure Execute; override;
   public
@@ -533,7 +531,6 @@ type
     FPaths: TStringList;
     FOk: boolean;
     FPlan: TGittanCommitPlan;
-    FError: string;
   protected
     procedure Execute; override;
   public
@@ -556,7 +553,7 @@ type
     FFinding: TGittanReviewThread;
     FOk, FChanged: boolean;
     FBlock: TGittanDiscard;
-    FWhy, FError: string;
+    FWhy: string;
   protected
     procedure Execute; override;
   public
@@ -582,7 +579,7 @@ type
     FPath, FRef: string;
     FFrom, FTo: integer;
     FOk: boolean;
-    FText, FError: string;
+    FText: string;
   protected
     procedure Execute; override;
   public
@@ -606,7 +603,7 @@ type
     FRange: boolean;
     FPaths: TStringList;
     FOk: boolean;
-    FText, FMarkdown, FError: string;
+    FText, FMarkdown: string;
   protected
     procedure Execute; override;
   public

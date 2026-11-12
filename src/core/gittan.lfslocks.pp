@@ -33,7 +33,7 @@ type
     and Error. }
   TGittanLfsLocksJob = class(TGittanJob)
   private
-    FRoot, FError: string;
+    FRoot: string;
     FOk: boolean;
     FLocks: TGittanLfsLocks;
     function Cancelled: boolean;

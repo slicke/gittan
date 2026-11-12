@@ -146,7 +146,6 @@ type
   private
     FRoot, FRepoPath: string;
     FNumber: integer;
-    FError: string;
   protected
     FThreads: TGittanReviewThreads;
     FNotes: TGittanPullNotes;

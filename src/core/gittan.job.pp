@@ -13,7 +13,13 @@ unit gittan.job;
   while the handler is set and the job has not been told to end. Freeing
   a job drops the handler first, since WaitFor in the main thread lets
   queued calls through while it waits, then waits for the thread, and
-  only then do the descendants free what the thread works with. }
+  only then do the descendants free what the thread works with.
+
+  An Execute that raises, or ends without Done while the job is still
+  wanted, is told to the main thread all the same: DoTerminate, which
+  the thread runs after Execute whatever happened, calls Done for it,
+  with the exception's message in Error, so the form is never left
+  waiting on a job that is gone. }
 
 {$mode objfpc}{$H+}
 
@@ -27,14 +33,19 @@ type
   private
     FOnDone: TNotifyEvent;
     FEndOnStop: boolean;
+    FDoneSent: boolean;
     procedure Notify;
   protected
+    {** Why the work failed, if it did; empty when it went well. }
+    FError: string;
     {** Tells the main thread the work is done, unless the job was told
       to end; the last thing Execute does. }
     procedure Done;
     {** Drops the handlers. A descendant with more of them drops those
       too. }
     procedure Detach; virtual;
+    {** Calls Done when Execute did not, after an exception too. }
+    procedure DoTerminate; override;
   public
     {** A job created suspended; Start runs it. AEndOnStop: Stop also
       ends the thread, for work that may be given up. }
@@ -47,6 +58,8 @@ type
     procedure Stop(AWait: boolean = False);
     {** Called in the main thread when the work is done. }
     property OnDone: TNotifyEvent read FOnDone write FOnDone;
+    {** Why the work failed; empty when it went well. }
+    property Error: string read FError;
   end;
 
   {** The jobs done with whose thread may still run: one given up
@@ -66,6 +79,9 @@ type
   end;
 
 implementation
+
+resourcestring
+  rsJobFailed = 'The work stopped on an error.';
 
 constructor TGittanJob.Create(AEndOnStop: boolean);
 begin
@@ -90,8 +106,26 @@ end;
 
 procedure TGittanJob.Done;
 begin
+  FDoneSent := True;
   if not Terminated then
     Queue(@Notify);
+end;
+
+procedure TGittanJob.DoTerminate;
+begin
+  if not FDoneSent then
+  begin
+    if FatalException is Exception then
+    begin
+      if FError <> '' then
+        FError := FError + LineEnding;
+      FError := FError + Exception(FatalException).Message;
+    end
+    else if Assigned(FatalException) then
+      FError := FError + rsJobFailed;
+    Done;
+  end;
+  inherited DoTerminate;
 end;
 
 procedure TGittanJob.Detach;

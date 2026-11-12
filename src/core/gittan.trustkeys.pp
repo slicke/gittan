@@ -39,7 +39,6 @@ type
     FRoot, FHost, FOwner, FRepo, FHash, FGpgProgram, FAllowedFile, FCli: string;
     FTrusted, FUsers: TStringArray;
     FSshAdded: integer;
-    FError: string;
     function Cancelled: boolean;
   protected
     procedure Execute; override;

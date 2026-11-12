@@ -89,7 +89,6 @@ type
     FHashes, FTrusted: TStringArray;
     FResults: TGittanSignedCommits;
     FFinished: integer;
-    FError: string;
     FOnProgress: TNotifyEvent;
     procedure NotifyProgress;
     function Cancelled: boolean;

@@ -28,7 +28,7 @@ type
     the answer is still wanted. Stop ends git. }
   TGittanChangeJob = class(TGittanJob)
   private
-    FRoot, FError: string;
+    FRoot: string;
     FChanges: TStringArray;
     FMax: integer;
     FOk: boolean;
