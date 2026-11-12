@@ -885,7 +885,9 @@ begin
   AssertEquals('Trndi.lpi', ShellName('Trndi.lpi'));
   {$IFDEF WINDOWS}
   AssertEquals('"No Ext (Release)"', ShellName('No Ext (Release)'));
-  AssertEquals('"a\"b"', ShellName('a"b'));
+  AssertEquals('a quote doubled', '"a""b"', ShellName('a"b'));
+  AssertEquals('cmd stays in quotes', '"x"" & calc & """', ShellName('x" & calc & "'));
+  AssertEquals('a % in quotes of its own', '"a"%"PATH"%"b"', ShellName('a%PATH%b'));
   {$ELSE}
   AssertEquals('''No Ext (Release)''', ShellName('No Ext (Release)'));
   AssertEquals('nothing sh reads in single quotes', '''a"$b`c\d''', ShellName('a"$b`c\d'));

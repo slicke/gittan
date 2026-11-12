@@ -125,6 +125,10 @@ begin
       Exit(True);
 end;
 
+const
+  { More plural forms than any language has (gettext's most is six). }
+  MaxPoForms = 32;
+
 type
   TPoField = (pfNone, pfContext, pfId, pfPlural, pfStr);
 
@@ -135,6 +139,7 @@ var
   HasId, Started: boolean;
   Field: TPoField;
   StrIndex, n, i, k: integer;
+  Skipping: boolean;
   Line, Rest: string;
 
   procedure Finish;
@@ -160,6 +165,8 @@ var
 
   procedure Append(const AValue: string);
   begin
+    if Skipping then
+      Exit;
     case Field of
       pfContext: E.Context := E.Context + AValue;
       pfId: E.Id := E.Id + AValue;
@@ -198,6 +205,7 @@ begin
   Started := False;
   Field := pfNone;
   StrIndex := 0;
+  Skipping := False;
   Lines := TStringList.Create;
   try
     Lines.Text := AText;
@@ -210,6 +218,9 @@ begin
           Finish;
         Continue;
       end;
+      { A line that is no continuation ends what a skipped one left out. }
+      if Line[1] <> '"' then
+        Skipping := False;
       { An obsolete entry keeps its lines behind "#~"; its previous
         strings ("#~|") are comments. }
       if Copy(Line, 1, 2) = '#~' then
@@ -261,6 +272,15 @@ begin
         k := 0;
         if (Rest <> '') and (Rest[1] = '[') then
           k := StrToIntDef(Copy(Rest, 2, Pos(']', Rest) - 2), 0);
+        { An index no language has (msgstr[-1] wrote before the strings,
+          msgstr[999999999] asked for a billion): the line and its
+          continuations are left out, the entry kept. }
+        if (k < 0) or (k >= MaxPoForms) then
+        begin
+          Started := True;
+          Skipping := True;
+          Continue;
+        end;
         { A form after the first continues the entry it is in. }
         if (Field = pfStr) and (k > 0) then
           Field := pfNone;

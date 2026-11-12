@@ -1295,7 +1295,12 @@ begin
   for i := 1 to Length(AName) do
     if not (AName[i] in ['A'..'Z', 'a'..'z', '0'..'9', '_', '-', '.', '/', '+', '=', ':', ',']) then
       {$IFDEF WINDOWS}
-      Exit('"' + StringReplace(AName, '"', '\"', [rfReplaceAll]) + '"');
+      { cmd.exe reads no \" (a name like x" & calc & " ran calc): a quote
+        is doubled, which turns cmd's quoting off and on again and is one
+        quote to the program. cmd expands %VAR% inside quotes too, so a %
+        stands in quotes of its own: %"PATH"% names no variable. }
+      Exit('"' + StringReplace(StringReplace(AName, '"', '""', [rfReplaceAll]), '%', '"%"',
+        [rfReplaceAll]) + '"');
       {$ELSE}
       { Single quotes, where sh reads nothing ($, `, \ and " included);
         a quote of the name ends them, is escaped and opens them again. }

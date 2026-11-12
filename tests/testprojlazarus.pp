@@ -181,6 +181,20 @@ begin
   AssertEquals(4, Length(P.Packages));
   AssertEquals('>= 2.4', P.Packages[0].Version);
   AssertEquals('not XML', 0, Length(ReadLazProject('<nope').Modes));
+  { Entities ten times each, nine deep: about 30 GB if expanded. }
+  AssertEquals('a DOCTYPE is not read', 0, Length(ReadLazProject(
+    '<?xml version="1.0"?><!DOCTYPE CONFIG [<!ENTITY a0 "xxxxxxxxxx">' +
+    '<!ENTITY a1 "&a0;&a0;&a0;&a0;&a0;&a0;&a0;&a0;&a0;&a0;">' +
+    '<!ENTITY a2 "&a1;&a1;&a1;&a1;&a1;&a1;&a1;&a1;&a1;&a1;">' +
+    '<!ENTITY a3 "&a2;&a2;&a2;&a2;&a2;&a2;&a2;&a2;&a2;&a2;">' +
+    '<!ENTITY a4 "&a3;&a3;&a3;&a3;&a3;&a3;&a3;&a3;&a3;&a3;">' +
+    '<!ENTITY a5 "&a4;&a4;&a4;&a4;&a4;&a4;&a4;&a4;&a4;&a4;">' +
+    '<!ENTITY a6 "&a5;&a5;&a5;&a5;&a5;&a5;&a5;&a5;&a5;&a5;">' +
+    '<!ENTITY a7 "&a6;&a6;&a6;&a6;&a6;&a6;&a6;&a6;&a6;&a6;">' +
+    '<!ENTITY a8 "&a7;&a7;&a7;&a7;&a7;&a7;&a7;&a7;&a7;&a7;">' +
+    '<!ENTITY a9 "&a8;&a8;&a8;&a8;&a8;&a8;&a8;&a8;&a8;&a8;">]>' +
+    '<CONFIG><ProjectOptions><General><Title Value="&a9;"/></General>' +
+    '</ProjectOptions></CONFIG>').Modes));
   { No modes listed: Lazarus's one. }
   AssertEquals('Default', ReadLazProject('<CONFIG><ProjectOptions/></CONFIG>').Modes[0].Name);
 end;

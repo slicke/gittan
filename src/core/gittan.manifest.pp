@@ -495,7 +495,7 @@ var
   Data: TJSONData;
 begin
   Result := nil;
-  if Trim(AJson) = '' then
+  if (Trim(AJson) = '') or JsonTooDeep(AJson) then
     Exit;
   try
     Data := GetJSON(AJson);

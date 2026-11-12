@@ -346,6 +346,11 @@ end;
 function ReadTomlText(const AText: string; out AError: string): TTOMLTable;
 begin
   AError := '';
+  if TomlTooDeep(AText) then
+  begin
+    AError := Format(rsNestedTooDeep, [MaxNesting]);
+    Exit(nil);
+  end;
   try
     Result := ParseTOMLString(AText);
   except
@@ -676,7 +681,7 @@ var
   i: integer;
 begin
   Result := nil;
-  if Trim(AJson) = '' then
+  if (Trim(AJson) = '') or JsonTooDeep(AJson) then
     Exit;
   try
     Data := GetJSON(AJson);

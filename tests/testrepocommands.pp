@@ -39,6 +39,7 @@ type
     procedure TestPackageScripts;
     procedure TestPackageNotJson;
     procedure TestScriptNamesQuoted;
+    procedure TestTooDeep;
     procedure TestMakefileTargets;
     procedure TestRunner;
     procedure TestDiscoverOrder;
@@ -453,6 +454,18 @@ begin
   {$ELSE}
   AssertEquals('npm run ''two words''', C[1].Command);
   {$ENDIF}
+end;
+
+{ 100 000 levels would end the process on a stack overflow in the
+  parser, which no except catches. }
+procedure TRepoCommandsTest.TestTooDeep;
+var
+  E: string;
+begin
+  AssertEquals(0, Length(ParsePackageScripts('{"scripts": {"a": "b"}, "x": ' +
+    StringOfChar('[', 100000) + '}')));
+  AssertEquals(0, Length(ParseCommandsToml('project = ' + StringOfChar('[', 100000), E)));
+  AssertTrue(E, Pos('Nested deeper', E) > 0);
 end;
 
 procedure TRepoCommandsTest.TestMakefileTargets;
