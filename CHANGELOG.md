@@ -28,6 +28,7 @@
 - An AI command line tool that does not answer `--version` no longer keeps Gittan from quitting after the settings were open; it is given ten seconds.
 - A Cargo.toml whose description is a multi-line string no longer has its lines read as keys and tables, where a line such as `[badge]` in it hid the version after it.
 - The files Gittan replaces in one step (settings, state) are on the disk before the old one goes, and the symbol index is replaced in one step too, where a crash while saving it left a cut file that took the last files for indexed with no symbols.
+- The project page shows the right locked version when a lock file has several of one package: Python's `==1.4` is 1.4 alone, not 1.4.5, an npm range such as `1.0 - 1.4` is read, and a pre-release such as 2.0.0-beta.1 counts below 2.0.0.
 - A promise of an extension that ends after Reload Extensions (a slow fetch or command) is no longer settled in the extension's freed context.
 - An extension can no longer exhaust Gittan's memory or stack by passing an argument that claims a huge length or contains itself, and an exception raised while Gittan reads an argument is thrown where the extension made the call, instead of breaking its next call.
 - An extension with the forge permission can no longer have gh read a local file through `--recover` or `release verify-asset`.

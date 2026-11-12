@@ -714,7 +714,20 @@ begin
   AssertEquals('0.x keeps its minor', '0.4.2', Resolved('0.4'));
   L := nil;
   AddLocked(L, 'syn', '1.0.0');
-  AssertEquals('one version locked: that one', '1.0.0', Resolved('^3'));
+  AssertEquals('one version locked: that one', '1.0.0', Resolved('^3'));  L := nil;
+  AddLocked(L, 'syn', '1.4');
+  AddLocked(L, 'syn', '1.4.5');
+  AssertEquals('Python''s == is that version alone', '1.4', Resolved('==1.4'));
+  AssertEquals('==1.4.* is 1.4.x', '1.4.5', Resolved('==1.4.*'));
+  AssertEquals('Cargo''s = is 1.4.x', '1.4.5', Resolved('=1.4'));
+  AssertEquals('npm''s hyphen range', '1.4.5', Resolved('1.0 - 1.4'));
+  AssertEquals('below the range', '', Resolved('1.5 - 2'));
+  L := nil;
+  AddLocked(L, 'syn', '2.0.0');
+  AddLocked(L, 'syn', '2.0.0-beta.1');
+  AssertEquals('a pre-release is below its release', '2.0.0', Resolved('>=1'));
+  AssertEquals('and does not meet it', '2.0.0', Resolved('<=2.0.0'));
+  AssertEquals('one asked for', '2.0.0-beta.1', Resolved('=2.0.0-beta.1'));
 end;
 
 procedure TProjectTest.TestPickedChecks;
