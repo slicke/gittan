@@ -727,10 +727,10 @@ end;
 function MeetsConstraint(const AVersion: TStringArray; const AText: string;
   APreRelease: boolean; const AConstraint: string): boolean;
 var
-  Op: string;
+  Op, Suffix: string;
   Want, Prefix: TStringArray;
   i, c: integer;
-  WantPre: boolean;
+  WantPre, WantPost: boolean;
 begin
   i := 1;
   while (i <= Length(AConstraint)) and (AConstraint[i] in ['<', '>', '=', '!', '~', '^']) do
@@ -748,6 +748,19 @@ begin
   WantPre := IsPreRelease(Copy(AConstraint, i, MaxInt));
   if (c = 0) and APreRelease and not WantPre then
     c := -1;
+  { Python's 1.4.post1 is above 1.4 (<=1.4 and !=1.4 see it so), but
+    not >1.4: > leaves out the post-releases of the version it names. }
+  WantPost := IsPostRelease(Copy(AConstraint, i, MaxInt));
+  if (c = 0) and not APreRelease and (IsPostRelease(AText) <> WantPost) then
+    if WantPost then
+      c := -1
+    else if Op <> '>' then
+      c := 1;
+  Suffix := VersionSuffix(AText);
+  { ==1.4 is 1.4+cu118 too: a local label counts only when the
+    constraint has one. }
+  if (Op = '==') and (Pos('+', AConstraint) = 0) and (Pos('+', Suffix) > 0) then
+    Suffix := Copy(Suffix, 1, Pos('+', Suffix) - 1);
   if Op = '>=' then
     Result := c >= 0
   else if Op = '>' then
@@ -761,7 +774,7 @@ begin
   else if (Op = '===') or ((Op = '==') and (Pos('*', AConstraint) = 0)) then
     { Python's ==1.4 is 1.4 alone; ==1.4.* is 1.4.x. }
     { 1.4.post1 is not ==1.4 either: what follows the numbers is the same. }
-    Result := (c = 0) and (VersionSuffix(AText) = VersionSuffix(Copy(AConstraint, i, MaxInt)))
+    Result := (c = 0) and (Suffix = VersionSuffix(Copy(AConstraint, i, MaxInt)))
   else if (Op = '=') or (Op = '==') then
     { Cargo's and npm's =1.2 is 1.2.x; =2.0.0-beta.1 a pre-release. }
     Result := HasVersionPrefix(AVersion, Want) and (APreRelease or not WantPre)
