@@ -756,6 +756,26 @@ begin
   AddLocked(L, 'syn', '2.0.0');
   AssertEquals('a pre-release ends a hyphen range whole', '1.5.0',
     Resolved('1.0.0 - 2.0.0-beta.1'));
+  AssertEquals('and its release is past it', '2.0.0', Resolved('>2.0.0-beta.1'));
+  L := nil;
+  AddLocked(L, 'syn', '2.0.0-beta.1');
+  AddLocked(L, 'syn', '2.0.0-beta.2');
+  AssertEquals('pre-releases by their suffixes', '2.0.0-beta.2', Resolved('>=2.0.0-beta.1'));
+  AssertEquals('beta.2 is past a range to beta.1', '2.0.0-beta.1',
+    Resolved('1.0.0 - 2.0.0-beta.1'));
+  AssertEquals('= of a pre-release is that one', '2.0.0-beta.1', Resolved('=2.0.0-beta.1'));
+  AssertEquals('below beta.2', '2.0.0-beta.1', Resolved('<2.0.0-beta.2'));
+  L := nil;
+  AddLocked(L, 'syn', '1.0.0-beta.10');
+  AddLocked(L, 'syn', '1.0.0-beta.2');
+  AssertEquals('numbers by value', '1.0.0-beta.10', Resolved('>=1.0.0-beta.1'));
+  L := nil;
+  AddLocked(L, 'syn', '1.4b2');
+  AddLocked(L, 'syn', '1.4rc1');
+  AddLocked(L, 'syn', '1.4.dev1');
+  AssertEquals('Python''s rc is past b', '1.4rc1', Resolved('>=1.4a1'));
+  AssertEquals('b is below rc', '1.4b2', Resolved('>1.4a1, <1.4rc1'));
+  AssertEquals('dev is below a', '1.4.dev1', Resolved('<1.4a1'));
 end;
 
 procedure TProjectTest.TestPickedChecks;

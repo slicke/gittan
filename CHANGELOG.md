@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Fixed
-- The project page shows the right locked version of a Python package with a local label or a post-release: `==2.1.0` is met by 2.1.0+cu118 again, and 1.4.post1 is above 1.4, so `<=1.4` leaves it out and `!=1.4` takes it.
+- The project page shows the right locked version of a Python package with a local label or a post-release: `==2.1.0` is met by 2.1.0+cu118 again, and 1.4.post1 is above 1.4, so `<=1.4` leaves it out and `!=1.4` takes it. Two pre-releases of one version are told apart (2.0.0-beta.2 is past 2.0.0-beta.1 and below 2.0.0-rc.1, Python's 1.4b2 below 1.4rc1, beta.10 past beta.2), `=2.0.0-beta.1` is that pre-release alone, and 2.0.0 meets `>2.0.0-beta.1`.
 
 ## 0.20 (build-145, 2026-11-12)
 

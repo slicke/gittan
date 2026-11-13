@@ -685,25 +685,136 @@ begin
   Result := 0;
 end;
 
-{ CompareVersionParts of two versions as written, a pre-release below
-  the release with the same numbers and a post-release above it. }
-function CompareVersions(const A, B: string): integer;
+{ -1 for a pre-release, 0 for the release, 1 for a post-release. }
+function VersionRank(const AVersion: string): integer;
+begin
+  if IsPreRelease(AVersion) then
+    Result := -1
+  else if IsPostRelease(AVersion) then
+    Result := 1
+  else
+    Result := 0;
+end;
 
-  { A pre-release, the release, a post-release. }
-  function Rank(const AVersion: string): integer;
+{ The parts of a suffix (VersionSuffix), without its local label or
+  build metadata: "beta", "2" of "beta.2", "rc", "1" of Python's "rc1". }
+function SuffixParts(const ASuffix: string): TStringArray;
+var
+  S, Part: string;
+  i: integer;
+
+  procedure Add;
   begin
-    if IsPreRelease(AVersion) then
-      Result := -1
-    else if IsPostRelease(AVersion) then
-      Result := 1
-    else
-      Result := 0;
+    if Part <> '' then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Part;
+    end;
+    Part := '';
   end;
 
 begin
+  Result := nil;
+  S := ASuffix;
+  if Pos('+', S) > 0 then
+    S := Copy(S, 1, Pos('+', S) - 1);
+  Part := '';
+  for i := 1 to Length(S) do
+    if S[i] in ['.', '-', '_'] then
+      Add
+    else
+    begin
+      { A number and a word written together are two parts. }
+      if (Part <> '') and ((S[i] in ['0'..'9']) <> (Part[1] in ['0'..'9'])) then
+        Add;
+      Part := Part + S[i];
+    end;
+  Add;
+end;
+
+{ -1, 0 or 1 as the suffix of a pre- or post-release A (VersionSuffix)
+  is below, equal to or above that of B, as SemVer and Python order
+  them: part by part, a number below a word, numbers by value, words
+  in the order dev, alpha (a), beta (b), rc (c, pre, preview), the
+  others by their letters; when one runs out first it is the lower. }
+function CompareSuffixes(const A, B: string): integer;
+var
+  X, Y: TStringArray;
+  i: integer;
+
+  function KnownWord(const APart: string): string;
+  begin
+    if APart = 'dev' then
+      Result := #1
+    else if (APart = 'a') or (APart = 'alpha') then
+      Result := 'alpha'
+    else if (APart = 'b') or (APart = 'beta') then
+      Result := 'beta'
+    else if (APart = 'c') or (APart = 'pre') or (APart = 'preview') then
+      Result := 'rc'
+    else
+      Result := APart;
+  end;
+
+  function Number(const APart: string): string;
+  begin
+    { By value without overflow: no leading zeros, then the longer is
+      the greater. }
+    Result := APart;
+    while (Length(Result) > 1) and (Result[1] = '0') do
+      Delete(Result, 1, 1);
+  end;
+
+  function ComparePart(const P, Q: string): integer;
+  var
+    PNum, QNum: boolean;
+  begin
+    PNum := P[1] in ['0'..'9'];
+    QNum := Q[1] in ['0'..'9'];
+    if PNum <> QNum then
+      Exit(Ord(QNum) - Ord(PNum));
+    if PNum then
+    begin
+      Result := Length(Number(P)) - Length(Number(Q));
+      if Result = 0 then
+        Result := CompareStr(Number(P), Number(Q));
+    end
+    else
+      Result := CompareStr(KnownWord(P), KnownWord(Q));
+    if Result < 0 then
+      Result := -1
+    else if Result > 0 then
+      Result := 1;
+  end;
+
+begin
+  X := SuffixParts(A);
+  Y := SuffixParts(B);
+  for i := 0 to High(X) do
+  begin
+    if i > High(Y) then
+      Exit(1);
+    Result := ComparePart(X[i], Y[i]);
+    if Result <> 0 then
+      Exit;
+  end;
+  if Length(Y) > Length(X) then
+    Result := -1
+  else
+    Result := 0;
+end;
+
+{ CompareVersionParts of two versions as written, a pre-release below
+  the release with the same numbers and a post-release above it; two
+  pre-releases (or post-releases) of it by their suffixes, beta.1 below
+  beta.2 and rc1. }
+function CompareVersions(const A, B: string): integer;
+begin
   Result := CompareVersionParts(VersionParts(A), VersionParts(B));
   if Result = 0 then
-    Result := Rank(A) - Rank(B);
+    Result := VersionRank(A) - VersionRank(B);
+  if (Result = 0) and (VersionRank(A) <> 0) then
+    Result := CompareSuffixes(VersionSuffix(A), VersionSuffix(B));
 end;
 
 { Whether AVersion starts with the numbers of APrefix. }
@@ -725,12 +836,12 @@ end;
   below 1), "!=1.3". One without a number ("*", "workspace", "latest")
   is met by every version. }
 function MeetsConstraint(const AVersion: TStringArray; const AText: string;
-  APreRelease: boolean; const AConstraint: string): boolean;
+  const AConstraint: string): boolean;
 var
-  Op, Suffix: string;
+  Op, Text, Suffix: string;
   Want, Prefix: TStringArray;
   i, c: integer;
-  WantPre, WantPost: boolean;
+  WantPre: boolean;
 begin
   i := 1;
   while (i <= Length(AConstraint)) and (AConstraint[i] in ['<', '>', '=', '!', '~', '^']) do
@@ -742,20 +853,16 @@ begin
   Want := VersionParts(Copy(AConstraint, i, MaxInt));
   if Length(Want) = 0 then
     Exit(True);
-  c := CompareVersionParts(AVersion, Want);
-  { 1.2.3-beta is below 1.2.3, unless the constraint names a pre-release
-    itself. }
-  WantPre := IsPreRelease(Copy(AConstraint, i, MaxInt));
-  if (c = 0) and APreRelease and not WantPre then
-    c := -1;
-  { Python's 1.4.post1 is above 1.4 (<=1.4 and !=1.4 see it so), but
-    not >1.4: > leaves out the post-releases of the version it names. }
-  WantPost := IsPostRelease(Copy(AConstraint, i, MaxInt));
-  if (c = 0) and not APreRelease and (IsPostRelease(AText) <> WantPost) then
-    if WantPost then
-      c := -1
-    else if Op <> '>' then
-      c := 1;
+  Text := Copy(AConstraint, i, MaxInt);
+  WantPre := IsPreRelease(Text);
+  { 1.2.3-beta is below 1.2.3 and beta.2, Python's 1.4.post1 above 1.4
+    (<=1.4 and !=1.4 see it so). }
+  c := CompareVersions(AText, Text);
+  { But 1.4.post1 is not >1.4: > leaves out the post-releases of the
+    version it names. }
+  if (Op = '>') and (VersionRank(AText) = 1) and (VersionRank(Text) = 0) and
+    (CompareVersionParts(AVersion, Want) = 0) then
+    c := 0;
   Suffix := VersionSuffix(AText);
   { ==1.4 is 1.4+cu118 too: a local label counts only when the
     constraint has one. }
@@ -774,10 +881,13 @@ begin
   else if (Op = '===') or ((Op = '==') and (Pos('*', AConstraint) = 0)) then
     { Python's ==1.4 is 1.4 alone; ==1.4.* is 1.4.x. }
     { 1.4.post1 is not ==1.4 either: what follows the numbers is the same. }
-    Result := (c = 0) and (Suffix = VersionSuffix(Copy(AConstraint, i, MaxInt)))
+    Result := (c = 0) and (Suffix = VersionSuffix(Text))
+  else if ((Op = '=') or (Op = '==')) and WantPre then
+    { Cargo's and npm's =2.0.0-beta.1 is that pre-release alone. }
+    Result := c = 0
   else if (Op = '=') or (Op = '==') then
-    { Cargo's and npm's =1.2 is 1.2.x; =2.0.0-beta.1 a pre-release. }
-    Result := HasVersionPrefix(AVersion, Want) and (APreRelease or not WantPre)
+    { Cargo's and npm's =1.2 is 1.2.x. }
+    Result := HasVersionPrefix(AVersion, Want)
   else if (Op = '~') or (Op = '~=') then
   begin
     { ~1.2 is 1.2.x, ~1 is 1.x; Python's ~=1.4.2 is 1.4.x. }
@@ -804,10 +914,9 @@ var
   Version, Alternatives, Constraints, Upper: TStringArray;
   Req, UpperText: string;
   i, k, p: integer;
-  All, Pre, InRange: boolean;
+  All, InRange: boolean;
 begin
   Version := VersionParts(AVersion);
-  Pre := IsPreRelease(AVersion);
   { An operator and its number are one constraint: ">= 1.2". }
   Req := '';
   for i := 1 to Length(ARequirement) do
@@ -832,14 +941,14 @@ begin
         InRange := (CompareVersionParts(Version, Upper) <= 0) or
           HasVersionPrefix(Version, Upper);
       if InRange and
-        MeetsConstraint(Version, AVersion, Pre, '>=' + Trim(Copy(Alternatives[i], 1, p - 1))) then
+        MeetsConstraint(Version, AVersion, '>=' + Trim(Copy(Alternatives[i], 1, p - 1))) then
         Exit(True);
       Continue;
     end;
     Constraints := Alternatives[i].Split([',', ' '], TStringSplitOptions.ExcludeEmpty);
     All := True;
     for k := 0 to High(Constraints) do
-      if not MeetsConstraint(Version, AVersion, Pre, Constraints[k]) then
+      if not MeetsConstraint(Version, AVersion, Constraints[k]) then
         All := False;
     if All then
       Exit(True);
