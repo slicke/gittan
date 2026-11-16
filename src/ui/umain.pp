@@ -31,7 +31,7 @@ uses
   gittan.forge, gittan.lfslocks, gittan.askdlg,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.absorb, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   fpjson, gittan.ext.engine, gittan.ext.registry, gittan.ext.api, gittan.ext.loader,
-  gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
+  gittan.app, gittan.smooth, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.worktrees, gittan.gitflow, gittan.repolist, gittan.rebasedlg, gittan.cleandlg, gittan.absorbdlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.coauthorsdlg, gittan.merge, gittan.mergeview,
   gittan.notedlg, gittan.issuelinks,
@@ -8900,7 +8900,8 @@ const
   Gap = 10;
 var
   C: TCanvas;
-  X, Y, CenterY, TextH: integer;
+  X, Y, TextH: integer;
+  DiscColor: TColor;
 begin
   DefaultDraw := True;
   if (Stage <> cdPostPaint) or not FTreeClean or (Sender.Items.Count > 0) then
@@ -8910,21 +8911,12 @@ begin
   TextH := C.TextHeight('Xg');
   X := (Sender.ClientWidth - Disc) div 2;
   Y := (Sender.ClientHeight - Disc - Gap - TextH) div 2;
-  C.Pen.Style := psClear;
-  C.Brush.Style := bsSolid;
   if FDark then
-    C.Brush.Color := RGBToColor(85, 85, 87)
+    DiscColor := RGBToColor(85, 85, 87)
   else
-    C.Brush.Color := RGBToColor(196, 196, 198);
-  C.Ellipse(X, Y, X + Disc, Y + Disc);
-  CenterY := Y + Disc div 2;
-  C.Pen.Style := psSolid;
-  C.Pen.Color := Sender.BackgroundColor;
-  C.Pen.Width := 4;
-  C.Polyline([Point(X + Disc * 27 div 100, CenterY),
-    Point(X + Disc * 44 div 100, CenterY + Disc * 17 div 100),
-    Point(X + Disc * 74 div 100, CenterY - Disc * 17 div 100)]);
-  C.Pen.Width := 1;
+    DiscColor := RGBToColor(196, 196, 198);
+  SmoothCheckDisc(C, X, Y, Disc, DiscColor, Sender.BackgroundColor, 4,
+    Sender.GetCanvasScaleFactor);
   C.Brush.Style := bsClear;
   if FDark then
     C.Font.Color := RGBToColor(150, 150, 150)

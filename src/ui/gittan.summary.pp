@@ -449,7 +449,7 @@ function ReviewPullLine(const APull: TGittanPullRequest): string;
 implementation
 
 uses
-  Math, DateUtils, LazUTF8, StrUtils, InkMarkdown, gittan.textfit, gittan.theme, Forms,
+  Math, DateUtils, LazUTF8, StrUtils, InkMarkdown, gittan.textfit, gittan.theme, gittan.smooth, Forms,
   gittan.signmark;
 
 resourcestring
@@ -2412,22 +2412,9 @@ end;
 
 { A green disc ASize across at X, Y with a check mark cut out of it. }
 procedure TGittanSummary.DrawCheck(X, Y, ASize: integer);
-var
-  CenterY: integer;
 begin
-  CenterY := Y + ASize div 2;
-  Canvas.Pen.Style := psClear;
-  Canvas.Brush.Style := bsSolid;
-  Canvas.Brush.Color := FAdded;
-  Canvas.Ellipse(X, Y, X + ASize, Y + ASize);
-  Canvas.Pen.Style := psSolid;
-  Canvas.Pen.Color := FBack;
-  Canvas.Pen.Width := Max(2, ASize div 10);
-  Canvas.Polyline([Point(X + ASize * 27 div 100, CenterY),
-    Point(X + ASize * 44 div 100, CenterY + ASize * 17 div 100),
-    Point(X + ASize * 74 div 100, CenterY - ASize * 17 div 100)]);
-  Canvas.Pen.Width := 1;
-  Canvas.Brush.Style := bsClear;
+  SmoothCheckDisc(Canvas, X, Y, ASize, FAdded, FBack, Max(2, ASize div 10),
+    GetCanvasScaleFactor);
 end;
 
 { The clean state in the header, in place of the totals: a large check,

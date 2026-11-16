@@ -284,7 +284,7 @@ procedure DrawBusyTrack(ACanvas: TCanvas; const ARect: TRect; APhase: integer;
 implementation
 
 uses
-  Math, gittan.textfit, gittan.theme;
+  Math, gittan.textfit, gittan.theme, gittan.smooth;
 
 const
   BarHeight = 56;
@@ -1214,11 +1214,7 @@ var
         else
           Ink := clWhite;
       end;
-      Canvas.Pen.Style := psClear;
-      Canvas.Brush.Style := bsSolid;
-      Canvas.Brush.Color := FillColor;
-      Canvas.RoundRect(R, Px(PrimaryHeight), Px(PrimaryHeight));
-      Canvas.Pen.Style := psSolid;
+      SmoothRoundRect(Canvas, R, Px(PrimaryHeight), FillColor, GetCanvasScaleFactor);
       Canvas.Brush.Style := bsClear;
       X := AX + Px(PrimaryPad);
       if B.Tone = stGood then
@@ -1235,14 +1231,10 @@ var
     begin
       if Hot then
       begin
-        Canvas.Pen.Style := psClear;
-        Canvas.Brush.Style := bsSolid;
-        Canvas.Brush.Color := FHover;
         if B.Text <> '' then
-          Canvas.RoundRect(R, Px(PrimaryHeight), Px(PrimaryHeight))
+          SmoothRoundRect(Canvas, R, Px(PrimaryHeight), FHover, GetCanvasScaleFactor)
         else
-          Canvas.Ellipse(R);
-        Canvas.Pen.Style := psSolid;
+          SmoothEllipse(Canvas, R, FHover, GetCanvasScaleFactor);
         Canvas.Brush.Style := bsClear;
         Ink := FText;
       end
