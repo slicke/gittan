@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Discard and Leave Out of a change at the end of a file keep the file's last newline as the version compared against has it, where a discarded line added without a newline left the line before it without one, and the commit got a newline change nobody chose.
+- An image or SVG that claims more than 64 megapixels (a 100-byte SVG can claim 40000 × 40000) is not drawn, where Gittan froze or ran out of memory.
+- The project page reads a package.json or requirements.txt that starts with a byte order mark, and lists a requirement given as `name @ https://…`.
+- The project page matches `1.2.*` and `1.2.x` as 1.2.x and `!=1.4.*` as leaving 1.4.x out, leaves a pre-release such as 2.0.0-rc.1 out of `<2` and `^1` unless the range names one, and puts Python's `.devN` below the release it comes before.
+- Two tabs committing at the same moment no longer share temporary files, where one could commit the other's text.
+- An extension's review card shows its age right, where it was off by the time zone.
 - Push sends a branch made from another one's upstream (`git switch -c fix origin/main`) to a branch of its own name, where it pushed the commits onto main; it also honours `pushRemote` and `remote.pushDefault`, so in a fork setup the push goes to the fork.
 - An extension's `alert`, `Gittan.confirm` and `Gittan.log` with an object whose text changes each time it is read no longer overwrite Gittan's memory.
 - Saving a file in the editor that fails (a locked or read-only file) before going to another file asks again, where the edits were dropped.

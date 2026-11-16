@@ -776,6 +776,28 @@ begin
   AssertEquals('Python''s rc is past b', '1.4rc1', Resolved('>=1.4a1'));
   AssertEquals('b is below rc', '1.4b2', Resolved('>1.4a1, <1.4rc1'));
   AssertEquals('dev is below a', '1.4.dev1', Resolved('<1.4a1'));
+  L := nil;
+  AddLocked(L, 'syn', '1.2.9');
+  AddLocked(L, 'syn', '1.3.0');
+  AssertEquals('1.2.* is 1.2.x, not ^1.2', '1.2.9', Resolved('1.2.*'));
+  AssertEquals('so is 1.2.x', '1.2.9', Resolved('1.2.x'));
+  AssertEquals('and ~1.2.x', '1.2.9', Resolved('~1.2.x'));
+  AssertEquals('!=1.3.* leaves 1.3.x out', '1.2.9', Resolved('!=1.3.*'));
+  L := nil;
+  AddLocked(L, 'syn', '1.9.0');
+  AddLocked(L, 'syn', '2.0.0-rc.1');
+  AssertEquals('<2 leaves out 2.0.0-rc.1', '1.9.0', Resolved('>=1.5, <2'));
+  AssertEquals('as ^1 does', '1.9.0', Resolved('^1'));
+  AssertEquals('one named lets it in', '2.0.0-rc.1', Resolved('>=2.0.0-rc.1'));
+  L := nil;
+  AddLocked(L, 'syn', '1.5.0');
+  AddLocked(L, 'syn', '1.6.0-beta');
+  AssertEquals('^1.2 leaves out a pre-release of 1.6.0', '1.5.0', Resolved('^1.2'));
+  L := nil;
+  AddLocked(L, 'syn', '1.0a1');
+  AddLocked(L, 'syn', '1.0a1.dev1');
+  AssertEquals('.dev1 is below what it follows', '1.0a1', Resolved('>=1.0a1.dev1'));
+  AssertEquals('so <1.0a1 is the dev one', '1.0a1.dev1', Resolved('<1.0a1'));
 end;
 
 procedure TProjectTest.TestPickedChecks;

@@ -92,6 +92,7 @@ type
     procedure TestNodeManagerBins;
     procedure TestPushFetchPull;
     procedure TestPushTarget;
+    procedure TestDiscardFinalNewline;
     procedure TestPushHook;
     procedure TestPullDiverged;
     procedure TestCommitTemplate;
@@ -2497,6 +2498,46 @@ begin
     RemoveTree(Remote);
     RemoveTree(Other);
   end;
+end;
+
+{ FileChanges marks a side's last line without a newline, so Discard
+  of a block at the end gives the file back as HEAD has it: git sees no
+  change left. }
+procedure TGitRepoTest.TestDiscardFinalNewline;
+
+  procedure Check(const AHead, AWork, AName: string);
+  var
+    Lines: TStringList;
+    Err: string;
+    i: integer;
+  begin
+    WriteFile('a.txt', AHead);
+    Commit(AName);
+    WriteFile('a.txt', AWork);
+    Lines := TStringList.Create;
+    try
+      AssertTrue(FRepo.Error, FRepo.FileChanges('a.txt', Lines));
+      i := 0;
+      while (i < Lines.Count) and (Lines[i][1] = ' ') do
+        Inc(i);
+      AssertTrue(AName + ': a block', i < Lines.Count);
+      AssertTrue(AName + ': ' + Err, DiscardBlock(DiffBlock(Lines, i,
+        IncludeTrailingPathDelimiter(FDir) + 'a.txt'), Err));
+    finally
+      Lines.Free;
+    end;
+    AssertEquals(AName, '', Git(['status', '--porcelain', '--', 'a.txt']));
+  end;
+
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Check('a'#10'b'#10, 'a'#10'b'#10'c', 'a line added without a newline');
+  Check('a'#10'b', 'a'#10'b'#10'c'#10, 'lines added after one without');
+  Check('a'#10'b'#10, 'a'#10'b', 'the newline taken away');
+  Check('a'#10'b', 'a'#10'b'#10, 'a newline added');
 end;
 
 { A branch made from origin/main tracks main but is pushed under its own

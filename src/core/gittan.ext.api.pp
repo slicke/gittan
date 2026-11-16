@@ -897,7 +897,7 @@ begin
     SetLength(Card.Comments, 1);
     Card.Comments[0].Author := Card.Agent;
     Card.Comments[0].Body := O.Get('text', '');
-    Card.Comments[0].Created := Now;
+    Card.Comments[0].Created := LocalTimeToUniversal(Now);
     if O.Get('title', '') <> '' then
       Card.Comments[0].Body := '**' + O.Get('title', '') + '**' + LineEnding +
         LineEnding + Card.Comments[0].Body;

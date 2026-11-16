@@ -56,6 +56,21 @@ function TomlTooDeep(const AToml: string): boolean;
   replaced by U+FFFD, so a JSON body built from it is valid UTF-8. }
 function Utf8Clean(const S: RawByteString): RawByteString;
 
+{** The object TGittanRepo.FileChanges gives the line of a diff that
+  ends its side without a newline (git's "\ No newline at end of file"
+  after it): a mark, never an object to use or free. }
+function NoNewlineMark: TObject;
+
+{** Whether ALines' line AIndex has NoNewlineMark. }
+function HasNoNewline(ALines: TStrings; AIndex: integer): boolean;
+
+{** A path in the temporary folder that no other call, in this process
+  or another, gets: APrefix, the process id and a count. Nothing is
+  there (a file an earlier run with the same id left is deleted); the
+  caller writes it, or git makes it. GetTempFileName only skips names
+  that exist, so two threads asking before either wrote got the same. }
+function TempFileName(const APrefix: string): string;
+
 {** Writes AText as the whole of AFileName, creating its folder: into a
   temporary file beside it first (AFileName, the process id, a count of
   the writes and .tmp, so two writers never share one), then renamed over
@@ -397,6 +412,23 @@ begin
     else
       Result := ExpandFileName(ExtractFilePath(ExpandFileName(Result)) + Target);
   end;
+end;
+
+function NoNewlineMark: TObject;
+begin
+  Result := TObject(PtrUInt(1));
+end;
+
+function HasNoNewline(ALines: TStrings; AIndex: integer): boolean;
+begin
+  Result := (AIndex >= 0) and (AIndex < ALines.Count) and (ALines.Objects[AIndex] = NoNewlineMark);
+end;
+
+function TempFileName(const APrefix: string): string;
+begin
+  Result := IncludeTrailingPathDelimiter(GetTempDir) + APrefix + IntToStr(GetProcessID) + '-' +
+    IntToStr(InterLockedIncrement(WriteCount)) + '.tmp';
+  DeleteFile(Result);
 end;
 
 function WriteFileReplacing(const AFileName: RawByteString; const AText: RawByteString;

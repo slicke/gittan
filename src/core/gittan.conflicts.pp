@@ -205,6 +205,9 @@ begin
   Result.OldLines := nil;
   Result.Before := '';
   Result.After := '';
+  Result.EndsKnown := False;
+  Result.OldEndsBare := False;
+  Result.NewEndsBare := False;
   Result.NewLines := nil;
   Result.Line := 1;
   Ours := nil;

@@ -1048,7 +1048,8 @@ type
     {** One changed file as the lines of a unified diff against HEAD with the
       whole file as context: every line starts with ' ', '+' or '-'. A file
       git does not know yet is returned as all added lines; a binary file
-      gives no lines. Returns false when git failed. }
+      gives no lines. The last line of a side that ends without a newline
+      has NoNewlineMark as its object. Returns false when git failed. }
     function FileChanges(const APath: string; ALines: TStrings): boolean;
     {** The two commits a diff of a file is between: ALeft is Base (HEAD
       by default), ARight the right commit of a range, or empty for the
@@ -3026,10 +3027,9 @@ begin
 end;
 
 { Copies the repository's index to ATarget; no index (nothing staged
-  since init) leaves ATarget absent, which git takes as empty. On
-  Windows GetTempFileName has made the file already, and git refuses
-  an empty one ("index file smaller than expected"), so it is
-  deleted. }
+  since init) leaves ATarget absent, which git takes as empty: a file
+  there, even an empty one, git refuses ("index file smaller than
+  expected"), so it is deleted. }
 function TGittanRepo.CopyIndex(const ATarget: string): boolean;
 var
   Source: string;
@@ -3092,7 +3092,7 @@ begin
     Exit;
   if FTempIndex = '' then
   begin
-    FTempIndex := GetTempFileName(GetTempDir, 'gittan-index-');
+    FTempIndex := TempFileName('gittan-index-');
     if not CopyIndex(FTempIndex) then
     begin
       DropTempIndex;
@@ -3479,7 +3479,7 @@ begin
   AId := '';
   if FRoot = '' then
     Exit(False);
-  Index := GetTempFileName(GetTempDir, 'gittan-snapshot-');
+  Index := TempFileName('gittan-snapshot-');
   try
     Result := CopyIndex(Index) and
       RunGit(FRoot, ['add', '-A'], Tree, Index) and
@@ -3728,7 +3728,7 @@ begin
   InHead := TStringList.Create;
   Restore := TStringList.Create;
   Remove := TStringList.Create;
-  ListFile := GetTempFileName(GetTempDir, 'gittan-revert-');
+  ListFile := TempFileName('gittan-revert-');
   try
     Chosen.CaseSensitive := True;
     Chosen.Sorted := True;
@@ -3907,7 +3907,7 @@ var
 begin
   if (FRoot = '') or (APaths.Count = 0) then
     Exit(False);
-  SpecFile := GetTempFileName(GetTempDir, 'gittan-rm-');
+  SpecFile := TempFileName('gittan-rm-');
   try
     WriteBytes(SpecFile, NulList(APaths));
     Args := ['--literal-pathspecs', 'rm', '-q'];
@@ -3951,7 +3951,7 @@ begin
       Nul := '';
       for i := 0 to APaths.Count - 1 do
         Nul := Nul + APaths[i] + #0;
-      SpecFile := GetTempFileName(GetTempDir, 'gittan-stash-');
+      SpecFile := TempFileName('gittan-stash-');
       WriteBytes(SpecFile, Nul);
       AddArg(Args, '--pathspec-from-file=' + SpecFile);
       AddArg(Args, '--pathspec-file-nul');
@@ -4163,7 +4163,7 @@ begin
   Empty := EmptyTree;
   if Trim(Third) = Empty then
     Exit;
-  Index := GetTempFileName(GetTempDir, 'gittan-stash-index-');
+  Index := TempFileName('gittan-stash-index-');
   try
     DeleteFile(Index);
     if RunGit(FRoot, ['read-tree', '-i', '-m', Empty, AId, AId + '^3'], Output, Index) and
@@ -4272,7 +4272,7 @@ var
   function CommitThroughIndex: boolean;
   begin
     Result := False;
-    Index := GetTempFileName(GetTempDir, 'gittan-commit-index-');
+    Index := TempFileName('gittan-commit-index-');
     DeleteFile(Index);
     if HasCommit('HEAD') then
       Result := RunGit(FRoot, ['read-tree', 'HEAD'], Output, Index)
@@ -4324,10 +4324,10 @@ begin
   Spec := TStringList.Create;
   Added := TStringList.Create;
   Untrack := TStringList.Create;
-  SpecFile := GetTempFileName(GetTempDir, 'gittan-paths-');
-  AddFile := GetTempFileName(GetTempDir, 'gittan-add-');
-  MsgFile := GetTempFileName(GetTempDir, 'gittan-message-');
-  PartFile := GetTempFileName(GetTempDir, 'gittan-part-');
+  SpecFile := TempFileName('gittan-paths-');
+  AddFile := TempFileName('gittan-add-');
+  MsgFile := TempFileName('gittan-message-');
+  PartFile := TempFileName('gittan-part-');
   Index := '';
   try
     Chosen.CaseSensitive := True;
@@ -8337,7 +8337,11 @@ begin
       if not InHunk then
         InHunk := Copy(Line, 1, 2) = '@@'
       else if (Line <> '') and (Line[1] in [' ', '+', '-']) then
-        ALines.Add(BareLine(Line));
+        ALines.Add(BareLine(Line))
+      else if (Line <> '') and (Line[1] = '\') and (ALines.Count > 0) then
+        { "\ No newline at end of file": the line before ends its side
+          without one, which Discard and Leave Out keep (NoNewlineMark). }
+        ALines.Objects[ALines.Count - 1] := NoNewlineMark;
   finally
     Raw.Free;
   end;

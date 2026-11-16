@@ -796,16 +796,27 @@ var
 begin
   X := SuffixParts(A);
   Y := SuffixParts(B);
+  { The longer is the higher (beta.1 past beta), but Python's .devN
+    goes before what it follows: 1.0a1.dev1 is below 1.0a1. }
   for i := 0 to High(X) do
   begin
     if i > High(Y) then
+    begin
+      if X[i] = 'dev' then
+        Exit(-1);
       Exit(1);
+    end;
     Result := ComparePart(X[i], Y[i]);
     if Result <> 0 then
       Exit;
   end;
   if Length(Y) > Length(X) then
-    Result := -1
+  begin
+    if Y[Length(X)] = 'dev' then
+      Result := 1
+    else
+      Result := -1;
+  end
   else
     Result := 0;
 end;
@@ -860,6 +871,15 @@ begin
   if Length(Want) = 0 then
     Exit(True);
   Text := Copy(AConstraint, i, MaxInt);
+  { A wildcard, 1.2.* or 1.2.x, is the versions that start so, whatever
+    the operator before it (npm's ~1.2.x, Python's !=1.4.*), where the
+    caret took 1.2.* for ^1.2. }
+  if (Pos('*', Text) > 0) or (Pos('.x', LowerCase(Text)) > 0) then
+    if Op = '!=' then
+      Exit(not HasVersionPrefix(AVersion, Want))
+    else if (Op = '') or (Op = '=') or (Op = '==') or (Op = '^') or (Op = '~') or
+      (Op = '~=') then
+      Exit(HasVersionPrefix(AVersion, Want));
   WantPre := IsPreRelease(Text);
   { 1.2.3-beta is below 1.2.3 and beta.2, Python's 1.4.post1 above 1.4
     (<=1.4 and !=1.4 see it so). }
@@ -915,6 +935,31 @@ end;
 { Whether AVersion meets a requirement as a manifest writes it: any of
   its "||" alternatives, each a list of constraints by commas or spaces
   (">=1.2, <2", ">=1.2 <2"). }
+{ Whether the pre-release AVersion may meet a range whose constraints
+  are AConstraints: only when one of them names a pre-release of the
+  same numbers, as npm, Cargo and pip have it, so <2 and ^1.2 leave out
+  2.0.0-rc.1 and 1.6.0-beta. Any other version may. }
+function PreReleaseAllowed(const AVersion: string; const AConstraints: array of string): boolean;
+var
+  k, i: integer;
+  Text: string;
+begin
+  if not IsPreRelease(AVersion) then
+    Exit(True);
+  for k := 0 to High(AConstraints) do
+  begin
+    Text := Trim(AConstraints[k]);
+    i := 1;
+    while (i <= Length(Text)) and (Text[i] in ['<', '>', '=', '!', '~', '^', 'v']) do
+      Inc(i);
+    Text := Copy(Text, i, MaxInt);
+    if (VersionParts(Text) <> nil) and IsPreRelease(Text) and
+      (CompareVersionParts(VersionParts(Text), VersionParts(AVersion)) = 0) then
+      Exit(True);
+  end;
+  Result := False;
+end;
+
 function MeetsRequirement(const AVersion, ARequirement: string): boolean;
 var
   Version, Alternatives, Constraints, Upper: TStringArray;
@@ -947,7 +992,8 @@ begin
         InRange := (CompareVersionParts(Version, Upper) <= 0) or
           HasVersionPrefix(Version, Upper);
       if InRange and
-        MeetsConstraint(Version, AVersion, '>=' + Trim(Copy(Alternatives[i], 1, p - 1))) then
+        MeetsConstraint(Version, AVersion, '>=' + Trim(Copy(Alternatives[i], 1, p - 1))) and
+        PreReleaseAllowed(AVersion, [Copy(Alternatives[i], 1, p - 1), UpperText]) then
         Exit(True);
       Continue;
     end;
@@ -956,7 +1002,7 @@ begin
     for k := 0 to High(Constraints) do
       if not MeetsConstraint(Version, AVersion, Constraints[k]) then
         All := False;
-    if All then
+    if All and PreReleaseAllowed(AVersion, Constraints) then
       Exit(True);
   end;
   Result := Length(Alternatives) = 0;
@@ -1240,6 +1286,8 @@ begin
   inherited Destroy;
 end;
 
+function WithoutBom(const AText: string): string; forward;
+
 function TGittanProjectContext.ReadAt(const APath: string): string;
 begin
   Result := '';
@@ -1317,7 +1365,9 @@ var
 begin
   if (Since = '') or (APath = '') or not RunGitIn(Root, ['cat-file', 'blob',
     Since + ':' + APath], Result, Err) then
-    Result := '';
+    Result := ''
+  else
+    Result := WithoutBom(Result);
 end;
 
 function TGittanGitProjectContext.GitlinkAt(const APath, ARef: string): string;
@@ -1512,12 +1562,23 @@ begin
   Result := DirectoryExists(RootFile(ARoot, AName));
 end;
 
+{ The text without a UTF-8 byte order mark in front, which Notepad
+  writes and npm and pip skip: fpjson refuses it, and it would stick to
+  a requirements file's first name. }
+function WithoutBom(const AText: string): string;
+begin
+  if Copy(AText, 1, 3) = #$EF#$BB#$BF then
+    Result := Copy(AText, 4, MaxInt)
+  else
+    Result := AText;
+end;
+
 function TextOf(const ARoot, AName: string): string;
 begin
   Result := '';
   if HasFile(ARoot, AName) then
     try
-      Result := ReadFileBytes(RootFile(ARoot, AName));
+      Result := WithoutBom(ReadFileBytes(RootFile(ARoot, AName)));
     except
       { Gone or locked since HasFile looked: as if it were not there. }
       Result := '';

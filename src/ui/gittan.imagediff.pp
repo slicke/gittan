@@ -130,7 +130,18 @@ type
   SVG is text and keeps the text diff. }
 function IsImagePath(const APath: string): boolean;
 
-{** AData, the bytes of an image file, decoded; nil when it cannot be.
+const
+  {** The most pixels an image is drawn with, 8192 × 8192: 256 MB a
+    side. A small file can claim far more (an SVG of 100 bytes, a PNG of
+    one color), which drawn on the main thread would hold Gittan or run
+    it out of memory. }
+  MaxImagePixels = 64 * 1024 * 1024;
+
+{** Whether an image of AWidth × AHeight is over MaxImagePixels. }
+function ImageTooLarge(AWidth, AHeight: double): boolean;
+
+{** AData, the bytes of an image file, decoded; nil when it cannot be,
+  or when its header gives a size over MaxImagePixels.
   The format is told from the bytes. A WebP goes through LazInk's
   decoder, which needs no library, the rest (and a WebP it cannot
   decode) through BGRABitmap. }
@@ -237,15 +248,66 @@ begin
   Result := (Ext = '.avif') and AvifReadable;
 end;
 
+function ImageTooLarge(AWidth, AHeight: double): boolean;
+begin
+  Result := AWidth * AHeight > MaxImagePixels;
+end;
+
+{ The size a WebP's header gives, from its first chunk: VP8X's canvas,
+  VP8L's or VP8's frame; 0 × 0 when it is none of them. }
+function WebPHeaderSize(const AData: RawByteString): TPoint;
+
+  function At(i: integer): integer;
+  begin
+    if i <= Length(AData) then
+      Result := Ord(AData[i])
+    else
+      Result := 0;
+  end;
+
+var
+  Chunk: string;
+  Bits: cardinal;
+begin
+  Result := Point(0, 0);
+  Chunk := Copy(AData, 13, 4);
+  if Chunk = 'VP8X' then
+    Result := Point(1 + At(25) + At(26) shl 8 + At(27) shl 16,
+      1 + At(28) + At(29) shl 8 + At(30) shl 16)
+  else if Chunk = 'VP8L' then
+  begin
+    Bits := cardinal(At(22)) or cardinal(At(23)) shl 8 or cardinal(At(24)) shl 16 or
+      cardinal(At(25)) shl 24;
+    Result := Point(1 + integer(Bits and $3FFF), 1 + integer((Bits shr 14) and $3FFF));
+  end
+  else if Chunk = 'VP8 ' then
+    Result := Point((At(27) + At(28) shl 8) and $3FFF, (At(29) + At(30) shl 8) and $3FFF);
+end;
+
 function DecodeImage(const AData: RawByteString): TBGRABitmap;
 var
   Stream: TStringStream;
   WebP: TInkWebP;
+  Size: TPoint;
 begin
   Result := nil;
   Stream := TStringStream.Create(AData);
   try
     try
+      { The size from the header, before anything is decoded. A format
+        whose reader cannot tell it gives 0 × 0 or raises, and is decoded
+        as before. }
+      if InkIsWebP(Copy(AData, 1, 12)) then
+        Size := WebPHeaderSize(AData)
+      else
+        try
+          Size := GetImageSizeInStream(Stream);
+        except
+          Size := Point(0, 0);
+        end;
+      if ImageTooLarge(Size.X, Size.Y) then
+        Exit;
+      Stream.Position := 0;
       if InkIsWebP(Copy(AData, 1, 12)) then
       begin
         WebP := TInkWebP.Create(Stream);

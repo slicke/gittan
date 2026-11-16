@@ -27,6 +27,7 @@ type
     procedure TestPairInsideBlock;
     procedure TestDeletedAndAddedOnly;
     procedure TestLineEnds;
+    procedure TestFinalNewline;
     procedure TestNotFound;
     procedure TestStale;
     procedure TestAllLeftOut;
@@ -35,7 +36,7 @@ type
 implementation
 
 uses
-  gittan.discard;
+  gittan.discard, gittan.textfile;
 
 procedure TLeaveOutTest.SetUp;
 begin
@@ -52,8 +53,12 @@ var
   s: string;
 begin
   FLines.Clear;
+  { "\" marks the line before as the last of its side without a newline. }
   for s in ADiff do
-    FLines.Add(s);
+    if s = '\' then
+      FLines.Objects[FLines.Count - 1] := NoNewlineMark
+    else
+      FLines.Add(s);
 end;
 
 { A pair from its texts, '' for a side that is not there. }
@@ -142,6 +147,26 @@ end;
 
 { A change left out that the diff does not hold any more is not found,
   and the file goes in as it is. }
+{ The end of the text as the last line in it has it: an old line put
+  back ends as the old side did, a line of the file as the file does. }
+procedure TLeaveOutTest.TestFinalNewline;
+begin
+  { c added without a newline after b, which had one: left out, b ends
+    the text with its newline. }
+  Lines([' a', ' b', '+c', '\']);
+  AssertEquals('a'#10'b'#10, Text('a'#10'b'#10'c', [Pair('', 'c', 3)]));
+  { The old last line had none: put back, it has none. }
+  Lines([' a', '-c', '\', '+b']);
+  AssertEquals('a'#10'c', Text('a'#10'b'#10, [Pair('c', 'b', 2)]));
+  { Only the newline changed, and the change is left out. }
+  Lines([' a', '-b', '\', '+b']);
+  AssertEquals('a'#10'b', Text('a'#10'b'#10, [Pair('b', 'b', 2)]));
+  { Nothing left out: the file as it is. }
+  AssertEquals('a'#10'b'#10, Text('a'#10'b'#10, []));
+  Lines([' a', '-b', '+b', '\']);
+  AssertEquals('a'#10'b', Text('a'#10'b', []));
+end;
+
 procedure TLeaveOutTest.TestNotFound;
 var
   Found: integer;

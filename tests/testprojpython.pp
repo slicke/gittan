@@ -147,6 +147,10 @@ begin
   AssertEquals('requests idna', Names(D));
   AssertEquals('==2.31.0', Find(D, 'requests').Version);
   AssertEquals('==3.6', Find(D, 'idna').Version);
+  { A direct reference has its name before the @; a bare URL has none. }
+  D := ParseRequirements('mypkg @ https://host/mypkg-1.0.whl' + LE +
+    'https://host/other-1.0.whl' + LE);
+  AssertEquals('mypkg', Names(D));
 end;
 
 procedure TProjPythonTest.TestPythonLock;

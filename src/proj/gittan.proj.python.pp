@@ -231,7 +231,10 @@ begin
       Line := Trim(Copy(Line, 1, P - 1));
     if (Line <> '') and (Line[Length(Line)] = '\') then
       Line := Trim(Copy(Line, 1, Length(Line) - 1));
-    if (Line = '') or (Line[1] = '-') or (Pos('://', Line) > 0) or (Line[1] in ['.', '/']) then
+    { A bare URL or path has no name; a direct reference (`name @ url`)
+      has one before the @. }
+    if (Line = '') or (Line[1] = '-') or (Line[1] in ['.', '/']) or
+      ((Pos('://', Line) > 0) and (Pos(' @ ', Line) = 0)) then
       Continue;
     SplitRequirement(Line, Name, Version);
     AddDependency(Result, Name, Version, '', '');

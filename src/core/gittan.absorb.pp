@@ -610,7 +610,7 @@ var
       Spec := '';
       for i := 0 to Committed.Count - 1 do
         Spec := Spec + Committed[i] + #0;
-      SpecFile := GetTempFileName(GetTempDir, 'gittan-absorb-');
+      SpecFile := TempFileName('gittan-absorb-');
       try
         Result := WriteFileReplacing(SpecFile, Spec);
         if not Result then

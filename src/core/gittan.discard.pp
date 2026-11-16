@@ -30,13 +30,18 @@ type
     file, '=' and the line, '^' for the start or '$' for the end of the
     file, '' for not known: a block that adds nothing (a deletion put
     back, or the undo of a discarded addition) has no line of its own
-    to check, so they are what tells that the file moved since. }
+    to check, so they are what tells that the file moved since.
+    EndsKnown is set by DiffBlock alone: then OldEndsBare and NewEndsBare
+    tell whether the last of OldLines, NewLines ends its side of the
+    diff without a newline, which a block at the end of the file writes
+    (else the file's own last newline is kept). }
   TGittanDiscard = record
     FileName: string;
     Line: integer;
     OldLines, NewLines: TStringArray;
     Resolved: boolean;
     Before, After: string;
+    EndsKnown, OldEndsBare, NewEndsBare: boolean;
   end;
 
 const
@@ -79,6 +84,9 @@ begin
   Result.NewLines := nil;
   Result.Line := 1;
   Result.Resolved := False;
+  Result.EndsKnown := True;
+  Result.OldEndsBare := False;
+  Result.NewEndsBare := False;
   for i := 0 to AStart - 1 do
     if ALines[i][1] <> '-' then
       Inc(Result.Line);
@@ -97,12 +105,14 @@ begin
     begin
       SetLength(Result.OldLines, Old + 1);
       Result.OldLines[Old] := Copy(ALines[i], 2, MaxInt);
+      Result.OldEndsBare := HasNoNewline(ALines, i);
       Inc(Old);
     end
     else
     begin
       SetLength(Result.NewLines, New + 1);
       Result.NewLines[New] := Copy(ALines[i], 2, MaxInt);
+      Result.NewEndsBare := HasNoNewline(ALines, i);
       Inc(New);
     end;
     Inc(i);
@@ -122,6 +132,9 @@ begin
   Result.Resolved := ABlock.Resolved;
   Result.Before := ABlock.Before;
   Result.After := ABlock.After;
+  Result.EndsKnown := ABlock.EndsKnown;
+  Result.OldEndsBare := ABlock.NewEndsBare;
+  Result.NewEndsBare := ABlock.OldEndsBare;
 end;
 
 function DiscardCount(const ABlock: TGittanDiscard): integer;
@@ -194,6 +207,12 @@ begin
     Out := TStringBuilder.Create;
     try
       FinalNewline := (Text = '') or (Text[Length(Text)] = #10);
+      { A block at the end of the file ends it as its old side did: git
+        marks a last line without a newline. A block with no old lines
+        leaves the line before it last, which had one, or it would have
+        been in the block. }
+      if ABlock.EndsKnown and (ABlock.After = '$') then
+        FinalNewline := (Length(ABlock.OldLines) = 0) or not ABlock.OldEndsBare;
       SplitLf(Text, Lines);
       Eol := #10;
       if (Lines.Count > 0) and (Lines[0] <> BareLine(Lines[0])) then
