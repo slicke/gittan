@@ -6,8 +6,10 @@ unit gittan.icons;
   image files: a folder, and badges per change kind carrying the letter
   git status uses for it. How full a badge is tells how much of the change
   is in the index: a tint for none, a tint in a ring for part, a solid
-  square for all. Every icon is drawn at 16 and 32 pixels so it stays
-  sharp on a HiDPI screen. }
+  square for all. Every icon is drawn at each of IconSizes, so it stays
+  sharp on a HiDPI screen and at 125 % and 150 %, which the LCL draws at
+  16 px (it scales nothing up to 120 dpi) and scales the 32 px set down
+  to 24 px for unless the list holds the size itself. }
 
 {$mode objfpc}{$H+}
 
@@ -212,37 +214,73 @@ begin
     BadgeLetter[AKind], Letter, taCenter);
 end;
 
-{ Adds one icon drawn at 16 and 32 pixels and frees the bitmaps. }
-procedure AddIcon(AImages: TCustomImageList; ASmall, ALarge: TBGRABitmap);
+const
+  {** The sizes each icon is drawn at: 100 %, 125 %, 150 % and 200 %. }
+  IconSizes: array[0..3] of integer = (16, 20, 24, 32);
+
+type
+  TIconSet = array[0..High(IconSizes)] of TBGRABitmap;
+
+{ Adds one icon drawn at each of IconSizes and frees the bitmaps. }
+procedure AddIcon(AImages: TCustomImageList; const ABitmaps: TIconSet);
+var
+  Pictures: array[0..High(IconSizes)] of TCustomBitmap;
+  i: integer;
 begin
   try
-    AImages.AddMultipleResolutions([TCustomBitmap(ASmall.Bitmap),
-      TCustomBitmap(ALarge.Bitmap)]);
+    for i := 0 to High(IconSizes) do
+      Pictures[i] := TCustomBitmap(ABitmaps[i].Bitmap);
+    AImages.AddMultipleResolutions(Pictures);
   finally
-    ALarge.Free;
-    ASmall.Free;
+    for i := 0 to High(IconSizes) do
+      ABitmaps[i].Free;
   end;
 end;
+
+{ The list ready for icons of 16 px at 100 %, with every size of
+  IconSizes, scaled by the PPI it is drawn at. }
+procedure PrepareList(AImages: TCustomImageList);
+begin
+  AImages.Width := IconSizes[0];
+  AImages.Height := IconSizes[0];
+  AImages.RegisterResolutions(IconSizes);
+  AImages.Scaled := True;
+end;
+
+type
+  TTreeShape = (tsFolder, tsBadge, tsDotted, tsFile);
 
 procedure FillTreeIcons(AImages: TCustomImageList);
 var
   Kind: TGittanChangeKind;
+
+  procedure Add(AShape: TTreeShape; AKind: TGittanChangeKind; AFill: TBadgeFill);
+  var
+    Set_: TIconSet;
+    i: integer;
+  begin
+    for i := 0 to High(IconSizes) do
+      case AShape of
+        tsFolder: Set_[i] := DrawFolder(IconSizes[i]);
+        tsBadge: Set_[i] := DrawBadge(IconSizes[i], AKind, AFill);
+        tsDotted: Set_[i] := DrawDottedFolder(IconSizes[i], AKind);
+        tsFile: Set_[i] := DrawFile(IconSizes[i]);
+      end;
+    AddIcon(AImages, Set_);
+  end;
+
 begin
-  AImages.Width := 16;
-  AImages.Height := 16;
-  AImages.RegisterResolutions([16, 32]);
-  { A tree draws the 32 px set, scaled, above 100 %. }
-  AImages.Scaled := True;
-  AddIcon(AImages, DrawFolder(16), DrawFolder(32));
+  PrepareList(AImages);
+  Add(tsFolder, ckModified, bfTint);
   for Kind := Low(TGittanChangeKind) to High(TGittanChangeKind) do
-    AddIcon(AImages, DrawBadge(16, Kind, bfTint), DrawBadge(32, Kind, bfTint));
+    Add(tsBadge, Kind, bfTint);
   for Kind := Low(TGittanChangeKind) to High(TGittanChangeKind) do
-    AddIcon(AImages, DrawDottedFolder(16, Kind), DrawDottedFolder(32, Kind));
+    Add(tsDotted, Kind, bfTint);
   for Kind := Low(TGittanChangeKind) to High(TGittanChangeKind) do
-    AddIcon(AImages, DrawBadge(16, Kind, bfSolid), DrawBadge(32, Kind, bfSolid));
+    Add(tsBadge, Kind, bfSolid);
   for Kind := Low(TGittanChangeKind) to High(TGittanChangeKind) do
-    AddIcon(AImages, DrawBadge(16, Kind, bfRing), DrawBadge(32, Kind, bfRing));
-  AddIcon(AImages, DrawFile(16), DrawFile(32));
+    Add(tsBadge, Kind, bfRing);
+  Add(tsFile, ckModified, bfTint);
 end;
 
 type
@@ -277,14 +315,16 @@ end;
 procedure FillCheckIcons(AImages: TCustomImageList);
 var
   Mark: TCheckMark;
+  Set_: TIconSet;
+  i: integer;
 begin
-  AImages.Width := 16;
-  AImages.Height := 16;
-  AImages.RegisterResolutions([16, 32]);
-  { A tree draws the 32 px set, scaled, above 100 %. }
-  AImages.Scaled := True;
+  PrepareList(AImages);
   for Mark := Low(TCheckMark) to High(TCheckMark) do
-    AddIcon(AImages, DrawCheck(16, Mark), DrawCheck(32, Mark));
+  begin
+    for i := 0 to High(IconSizes) do
+      Set_[i] := DrawCheck(IconSizes[i], Mark);
+    AddIcon(AImages, Set_);
+  end;
 end;
 
 end.

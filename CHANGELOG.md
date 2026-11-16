@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- At 125 % on Windows and Linux, the change badges, folders and check boxes are as large as the text around them, and sharp at 150 %.
 - On Windows, the file trees in the sidebar show their scroll bars only when there is something to scroll.
 - On Linux with GTK3, the empty band over the title bar (black on KDE's Wayland) is gone.
 - At a high DPI in a low window, the Changes and Commit headings and the tree of changed files no longer disappear under the Commit section: its tip goes and its message box shrinks first.
