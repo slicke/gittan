@@ -34,6 +34,7 @@ type
   TGittanRustKind = class(TGittanProjectKind)
   public
     class function Name: string; override;
+    class function SemverRanges: boolean; override;
     class function Identify(const ARoot: string; out AManifest: string): boolean; override;
     class function Commands(const ARoot: string): TGittanProjectCommands; override;
     class function DependencyFile(const ARoot: string): string; override;
@@ -267,6 +268,11 @@ end;
 class function TGittanRustKind.Name: string;
 begin
   Result := 'Rust';
+end;
+
+class function TGittanRustKind.SemverRanges: boolean;
+begin
+  Result := True;
 end;
 
 class function TGittanRustKind.Identify(const ARoot: string; out AManifest: string): boolean;

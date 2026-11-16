@@ -248,6 +248,7 @@ type
     procedure SetBaseHot(AValue: boolean);
     procedure SetBaseClickable(AValue: boolean);
     function RowAt(Y: integer): integer;
+    function ShownRows: integer;
     function CommitAt(Y: integer): integer;
     procedure SetCommitHot(AValue: integer);
     function ShowsCommits: boolean;
@@ -455,6 +456,7 @@ resourcestring
   rsCardNote = 'Note';
   rsOneFile = '1 changed file';
   rsManyFiles = '%d changed files';
+  rsMoreFiles = '%d more in the file tree';
   rsClean = 'Working tree clean';
   rsCleanVs = 'No changes %s';
   rsRecentCommits = 'Recent commits';
@@ -496,6 +498,10 @@ const
   Pad = 24;
   RowHeight = 30;
   IconSize = 16;
+  { The tallest the summary gets: the LCL sends a size in 16 bits, so a
+    control over 32767 px fails (on GTK the rows past it cannot be
+    scrolled to). The rows that do not fit are left to the file tree. }
+  MaxSummaryHeight = 32000;
   { The row bars take a share of the width, within these. }
   MinBarWidth = 96;
   MaxBarWidth = 200;
@@ -752,7 +758,17 @@ begin
   else if CentersClean then
     FContentHeight := FRowsTop + CenterBlockHeight(FMeasure.Canvas) + 2 * Px(Pad)
   else
-    FContentHeight := FRowsTop + Max(Length(FStats), 2) * Px(RowHeight) + Px(Pad);
+    FContentHeight := FRowsTop + Max(ShownRows + Ord(ShownRows < Length(FStats)), 2) *
+      Px(RowHeight) + Px(Pad);
+end;
+
+{ How many of the files get a row: all that fit under MaxSummaryHeight,
+  one row kept for the line that tells how many more there are. }
+function TGittanSummary.ShownRows: integer;
+begin
+  Result := Length(FStats);
+  if FRowsTop + (Result + 1) * Px(RowHeight) + Px(Pad) > MaxSummaryHeight then
+    Result := Max(0, (MaxSummaryHeight - FRowsTop - Px(Pad)) div Px(RowHeight) - 1);
 end;
 
 { A clean tree with nothing else to show: no commits, no conversation. }
@@ -1952,7 +1968,7 @@ begin
   if Y < FRowsTop then
     Exit;
   Result := (Y - FRowsTop) div Px(RowHeight);
-  if Result > High(FStats) then
+  if Result >= ShownRows then
     Result := -1;
 end;
 
@@ -2667,9 +2683,18 @@ begin
       MaxChange := Max(MaxChange, FStats[i].Added + FStats[i].Deleted);
   Clip := Canvas.ClipRect;
   First := Max(0, (Clip.Top - FRowsTop) div Px(RowHeight));
-  Last := Min(High(FStats), (Clip.Bottom - FRowsTop) div Px(RowHeight));
+  Last := Min(ShownRows - 1, (Clip.Bottom - FRowsTop) div Px(RowHeight));
   for i := First to Last do
     PaintRow(i, FRowsTop + i * Px(RowHeight), MaxChange);
+  if ShownRows < Length(FStats) then
+  begin
+    Canvas.Font := Font;
+    Canvas.Font.Color := FDim;
+    Canvas.Brush.Style := bsClear;
+    Canvas.TextOut(Px(Pad), FRowsTop + ShownRows * Px(RowHeight) +
+      (Px(RowHeight) - Canvas.TextHeight('Xg')) div 2,
+      Format(rsMoreFiles, [Length(FStats) - ShownRows]));
+  end;
 end;
 
 procedure TGittanSummary.MouseMove(Shift: TShiftState; X, Y: integer);

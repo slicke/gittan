@@ -195,6 +195,11 @@ type
       Python's normalized (PyYAML and pyyaml, typing_extensions and
       typing-extensions are one package). }
     class function NameKey(const AName: string): string; virtual;
+    {** Whether the manifest's ranges are SemVer's (npm, Cargo), where
+      a partial version with <= or > stands for all of its versions:
+      <=1.2 is below 1.3.0, >1.2 from 1.3.0. False: Python's, where 1.2
+      is 1.2.0. }
+    class function SemverRanges: boolean; virtual;
     {** The project's own version from the dependency file's text. }
     class function Version(const AText: string): string; virtual;
     {** The page of the package AName on the kind's registry; ''. }
@@ -853,7 +858,7 @@ end;
   below 1), "!=1.3". One without a number ("*", "workspace", "latest")
   is met by every version. }
 function MeetsConstraint(const AVersion: TStringArray; const AText: string;
-  const AConstraint: string): boolean;
+  const AConstraint: string; ASemver: boolean): boolean;
 var
   Op, Text, Suffix: string;
   Want, Prefix: TStringArray;
@@ -896,8 +901,14 @@ begin
     Suffix := Copy(Suffix, 1, Pos('+', Suffix) - 1);
   if Op = '>=' then
     Result := c >= 0
+  else if ASemver and (Op = '>') and (Length(Want) < 3) and not WantPre then
+    { npm's and Cargo's >1.2 is past every 1.2.x. }
+    Result := (c > 0) and not HasVersionPrefix(AVersion, Want)
   else if Op = '>' then
     Result := c > 0
+  else if ASemver and (Op = '<=') and (Length(Want) < 3) and not WantPre then
+    { And <=1.2 is every 1.2.x too. }
+    Result := (c <= 0) or HasVersionPrefix(AVersion, Want)
   else if Op = '<=' then
     Result := c <= 0
   else if Op = '<' then
@@ -960,7 +971,7 @@ begin
   Result := False;
 end;
 
-function MeetsRequirement(const AVersion, ARequirement: string): boolean;
+function MeetsRequirement(const AVersion, ARequirement: string; ASemver: boolean): boolean;
 var
   Version, Alternatives, Constraints, Upper: TStringArray;
   Req, UpperText: string;
@@ -992,7 +1003,7 @@ begin
         InRange := (CompareVersionParts(Version, Upper) <= 0) or
           HasVersionPrefix(Version, Upper);
       if InRange and
-        MeetsConstraint(Version, AVersion, '>=' + Trim(Copy(Alternatives[i], 1, p - 1))) and
+        MeetsConstraint(Version, AVersion, '>=' + Trim(Copy(Alternatives[i], 1, p - 1)), ASemver) and
         PreReleaseAllowed(AVersion, [Copy(Alternatives[i], 1, p - 1), UpperText]) then
         Exit(True);
       Continue;
@@ -1000,7 +1011,7 @@ begin
     Constraints := Alternatives[i].Split([',', ' '], TStringSplitOptions.ExcludeEmpty);
     All := True;
     for k := 0 to High(Constraints) do
-      if not MeetsConstraint(Version, AVersion, Constraints[k]) then
+      if not MeetsConstraint(Version, AVersion, Constraints[k], ASemver) then
         All := False;
     if All and PreReleaseAllowed(AVersion, Constraints) then
       Exit(True);
@@ -1049,7 +1060,8 @@ begin
       Best := -1;
       for j := 0 to High(ALocked) do
         if (Keys[j] = Want) and
-          MeetsRequirement(ALocked[j].Resolved, ADependencies[i].Version) then
+          MeetsRequirement(ALocked[j].Resolved, ADependencies[i].Version,
+          (AKind <> nil) and AKind.SemverRanges) then
         begin
           if ALocked[j].Resolved = ADependencies[i].Version then
           begin
@@ -1449,6 +1461,11 @@ end;
 class function TGittanProjectKind.NameKey(const AName: string): string;
 begin
   Result := AName;
+end;
+
+class function TGittanProjectKind.SemverRanges: boolean;
+begin
+  Result := False;
 end;
 
 class function TGittanProjectKind.Version(const AText: string): string;

@@ -28,6 +28,7 @@ type
   TGittanNodeKind = class(TGittanProjectKind)
   public
     class function Name: string; override;
+    class function SemverRanges: boolean; override;
     class function Identify(const ARoot: string; out AManifest: string): boolean; override;
     class function DependencyFile(const ARoot: string): string; override;
     class function LockFile(const ARoot: string): string; override;
@@ -415,6 +416,11 @@ const
 class function TGittanNodeKind.Name: string;
 begin
   Result := 'Node';
+end;
+
+class function TGittanNodeKind.SemverRanges: boolean;
+begin
+  Result := True;
 end;
 
 class function TGittanNodeKind.Identify(const ARoot: string; out AManifest: string): boolean;

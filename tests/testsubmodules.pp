@@ -400,7 +400,7 @@ end;
 
 procedure TSubmodulesTest.TestParseMoved;
 var
-  Moved: TStringList;
+  Moved, Known: TStringList;
 begin
   Moved := TStringList.Create;
   try
@@ -415,6 +415,17 @@ begin
     AssertEquals('no describe', Moved.Names[1]);
     ParseMovedSubmodules('', Moved);
     AssertEquals(0, Moved.Count);
+    { A path of its own in parentheses, with no description after it. }
+    Known := TStringList.Create;
+    try
+      Known.Add('lib (fork)');
+      ParseMovedSubmodules('+5555555555555555555555555555555555555555 lib (fork)'#10 +
+        '+6666666666666666666666666666666666666666 other (v2)'#10, Moved, Known);
+      AssertEquals('lib (fork)', Moved.Names[0]);
+      AssertEquals('other', Moved.Names[1]);
+    finally
+      Known.Free;
+    end;
   finally
     Moved.Free;
   end;

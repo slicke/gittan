@@ -693,6 +693,14 @@ var
     Result := D[0].Resolved;
   end;
 
+  function ResolvedIn(AKind: TGittanProjectKindClass; const AVersion: string): string;
+  begin
+    D := nil;
+    AddDependency(D, 'syn', AVersion, '', '');
+    ResolveDependencies(D, L, AKind);
+    Result := D[0].Resolved;
+  end;
+
 begin
   L := nil;
   AddLocked(L, 'syn', '1.0.109');
@@ -798,6 +806,16 @@ begin
   AddLocked(L, 'syn', '1.0a1.dev1');
   AssertEquals('.dev1 is below what it follows', '1.0a1', Resolved('>=1.0a1.dev1'));
   AssertEquals('so <1.0a1 is the dev one', '1.0a1.dev1', Resolved('<1.0a1'));
+  L := nil;
+  AddLocked(L, 'syn', '1.1.0');
+  AddLocked(L, 'syn', '1.2.5');
+  AddLocked(L, 'syn', '1.3.0');
+  AssertEquals('Python''s <=1.2 is up to 1.2.0', '1.1.0', Resolved('<=1.2'));
+  AssertEquals('npm''s is every 1.2.x', '1.2.5', ResolvedIn(TGittanNodeKind, '<=1.2'));
+  AssertEquals('Cargo''s too', '1.2.5', ResolvedIn(TGittanRustKind, '<=1.2'));
+  AssertEquals('npm''s >1.2 is past them', '1.3.0', ResolvedIn(TGittanNodeKind, '>1.2, <1.4'));
+  AssertEquals('Python''s >1.2 takes 1.2.5', '1.2.5', Resolved('>1.2, <1.3'));
+  AssertEquals('and npm''s does not', '', ResolvedIn(TGittanNodeKind, '>1.2, <1.3'));
 end;
 
 procedure TProjectTest.TestPickedChecks;

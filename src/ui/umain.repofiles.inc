@@ -697,7 +697,10 @@ begin
         mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave,
         mrCancel, rsCancelButton, 'IsCancel'], 0) of
       mrYes: CanClose := SaveEdit(False);
-      mrNo: Edit.Modified := False;
+      { Don't Save leaves the edits marked: another tab may still cancel
+        the quit, and they must be asked for again then. Nothing reads
+        the mark once the window closes. }
+      mrNo: ;
       else
         CanClose := False;
     end;

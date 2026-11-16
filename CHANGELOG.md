@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- The project page reads npm's and Cargo's `<=1.2` as every 1.2.x and `>1.2` as from 1.3.0, as they mean it.
+- The summary of more changed files than fit in it (about a thousand) ends with how many more there are, where on Linux the rows past them could not be scrolled to.
+- Quitting with Don't Save in one tab and Cancel in another keeps the first tab's edits marked as unsaved.
+- A deleted file with a folder of its name in its place shows in the file tree as the file, so it can be shown and reverted.
+- A submodule whose path ends in parentheses, `lib (fork)`, is found when it is checked out at another commit.
 - Apply Patches no longer applies a patch picked twice twice.
 - A Code History or Time-lapse still loading is no longer dropped when a file saved meanwhile refreshes the view.
 - Code History from a file being edited counts its lines in the version compared against, where lines added in the work tree shifted the range.

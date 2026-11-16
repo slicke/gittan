@@ -159,8 +159,13 @@ function CompareSubmodule(const ARoot: string; const ASub: TGittanSubmodule;
 
 {** Reads what `git submodule status` prints into the paths of the
   submodules checked out at another commit than the one recorded for
-  them (the lines marked "+"), each followed by "=" and that commit. }
-procedure ParseMovedSubmodules(const AOutput: string; AMoved: TStrings);
+  them (the lines marked "+"), each followed by "=" and that commit.
+  git puts the commit's description in parentheses after the path, and
+  nothing when it has none, so a path that ends in parentheses itself,
+  "lib (fork)", is kept whole when AKnown, the submodules' paths, has
+  it. }
+procedure ParseMovedSubmodules(const AOutput: string; AMoved: TStrings;
+  AKnown: TStrings = nil);
 
 {** The submodules of the repository at ARoot (APath alone, unless it is
   empty) checked out at another commit than the one recorded, as
@@ -443,7 +448,8 @@ end;
 { Each line is a mark (" ", "-" not initialized, "+" moved, "U" in
   conflict), the commit checked out, the path as it is, and after it
   " (<describe>)" when git could name the commit. }
-procedure ParseMovedSubmodules(const AOutput: string; AMoved: TStrings);
+procedure ParseMovedSubmodules(const AOutput: string; AMoved: TStrings;
+  AKnown: TStrings);
 var
   Lines: TStringList;
   Line, Hash, Path: string;
@@ -463,7 +469,8 @@ begin
         Continue;
       Hash := Copy(Line, 2, Space - 2);
       Path := Copy(Line, Space + 1, MaxInt);
-      if (Path <> '') and (Path[Length(Path)] = ')') and (RPos(' (', Path) > 0) then
+      if (Path <> '') and (Path[Length(Path)] = ')') and (RPos(' (', Path) > 0) and
+        not ((AKnown <> nil) and (AKnown.IndexOf(Path) >= 0)) then
         SetLength(Path, RPos(' (', Path) - 1);
       if Path <> '' then
         AMoved.Add(Path + '=' + Hash);
@@ -475,15 +482,35 @@ end;
 
 function MovedSubmodules(const ARoot, APath: string; AMoved: TStrings): boolean;
 var
-  Output, Err: string;
+  Output, Err, Staged: string;
+  Known, Fields: TStringList;
+  Field: string;
 begin
   AMoved.Clear;
   if APath = '' then
     Result := RunGitIn(ARoot, ['submodule', 'status'], Output, Err)
   else
     Result := RunGitIn(ARoot, ['submodule', 'status', '--', APath], Output, Err);
-  if Result then
-    ParseMovedSubmodules(Output, AMoved);
+  if not Result then
+    Exit;
+  { The gitlinks of the index (mode 160000): the paths git may print
+    with parentheses of their own. }
+  Known := TStringList.Create;
+  Fields := TStringList.Create;
+  try
+    Known.CaseSensitive := True;
+    if RunGitIn(ARoot, ['ls-files', '--stage', '-z'], Staged, Err) then
+    begin
+      SplitNul(Staged, Fields);
+      for Field in Fields do
+        if (Copy(Field, 1, 7) = '160000 ') and (Pos(#9, Field) > 0) then
+          Known.Add(Copy(Field, Pos(#9, Field) + 1, MaxInt));
+    end;
+    ParseMovedSubmodules(Output, AMoved, Known);
+  finally
+    Fields.Free;
+    Known.Free;
+  end;
 end;
 
 function SubmoduleFolder(const AList: TGittanSubmodules): string;

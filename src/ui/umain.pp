@@ -8812,7 +8812,9 @@ begin
         LastDirPath := Dir;
       end;
       Node := FileTree.Items.AddChild(DirNode, ExtractFileName(Path));
-      if DirectoryExists(IncludeTrailingPathDelimiter(FRepo.Root) +
+      { A submodule is a folder on disk; a deleted file is not one, even
+        when a folder of its name came in its place. }
+      if (AStats[i].Kind <> ckDeleted) and DirectoryExists(IncludeTrailingPathDelimiter(FRepo.Root) +
         SetDirSeparators(Path)) then
         Node.ImageIndex := iconFolder
       else
