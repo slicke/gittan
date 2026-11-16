@@ -46,7 +46,8 @@ implementation
 
 uses
   {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}BaseUnix,{$ENDIF}
-  gittan.ext.functions, gittan.ext.perm, gittan.ext.host, gittan.ext.registry,
+  { DateUtils for LocalTimeToUniversal: FPC 3.2.2 has it only there. }
+  DateUtils, gittan.ext.functions, gittan.ext.perm, gittan.ext.host, gittan.ext.registry,
   gittan.ext.promise, gittan.ext.modules, gittan.http, gittan.textfile, gittan.reviews,
   gittan.forge;
 
