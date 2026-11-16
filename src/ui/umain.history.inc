@@ -270,8 +270,8 @@ end;
 { Puts the changes of the lines not committed yet first, as a commit of
   their own, when the history is counted from HEAD and the work tree
   changed any of the lines: the file's diff against HEAD, cut to the
-  lines of the range (an added line between two of them included), as
-  a hunk. Read afresh, since the view may be rebuilt on a refresh. }
+  lines of the range (an added line between two of them or right after
+  the last included), as a hunk. Read afresh, since the view may be rebuilt on a refresh. }
 procedure TRepoFrame.AddUncommittedHistory;
 var
   Lines: TStringList;
@@ -299,6 +299,10 @@ begin
       end;
     if First < 0 then
       Exit;
+    { The lines added right after the range's last line go with it: the
+      new text of a changed last line, or lines added at the end. }
+    while (Last + 1 < Lines.Count) and (Lines[Last + 1][1] = '+') do
+      Inc(Last);
     for i := First to Last do
       if Lines[i][1] <> ' ' then
         AnyChange := True;
@@ -400,6 +404,7 @@ var
 
 begin
   FChangeLines.Clear;
+  FKeptOldNum := nil;
   FExpanded := nil;
   FWordSpans := nil;
   FHistoryUser := FRepo.UserName;

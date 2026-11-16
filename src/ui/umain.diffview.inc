@@ -81,6 +81,10 @@ var
 begin
   n := FChangeLines.Count;
   NumberLines(FChangeLines, OldNum, NewNum);
+  { The old side by the old file's lines, not the rewritten diff's, where
+    keeps rewrote it: blame, history and review threads go by them. }
+  if (FView = gvChanges) and (Length(FKeptOldNum) = n) then
+    OldNum := Copy(FKeptOldNum);
   FOldNum := OldNum;
   FNewNum := NewNum;
   PlaceThreads;

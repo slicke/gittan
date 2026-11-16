@@ -176,6 +176,7 @@ begin
     Shown := ACommit;
   Ids := FTimelapse.Lines(Shown);
   FChangeLines.Clear;
+  FKeptOldNum := nil;
   FExpanded := nil;
   FWordSpans := nil;
   FHistoryUser := '';

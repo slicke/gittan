@@ -21,6 +21,11 @@
 - The project page reads more of what lock and manifest files hold: Python packages whose names a lock spells otherwise (PyYAML as pyyaml, typing_extensions as typing-extensions), Cargo's dotted keys (`tokio.workspace = true`, which showed as a dependency named tokio.workspace) and renamed dependencies (`package = "bar"`), yarn berry's keys with several ranges, pnpm lockfile 5's peers, a pnpm-lock.yaml with Windows line ends (where a line of blanks also crashed Gittan), pip-compile's continued lines with hashes, a Lazarus package's minimum version with a release number or a 0 left out, and a go.mod `module` or `go` line with a comment after it.
 - Add to .gitignore on a file whose name holds `[`, `*` or `?` ignores that file, where `pages/[id].tsx` ignored `pages/d.tsx` instead.
 - A Makefile's `::=` assignments and the text of a `define` are no longer listed as commands.
+- Blame, Code History, review threads and AI Why on the old side of the change view find the right lines after a reviewed (kept) line that was only added or only deleted, where every old line after it was one off.
+- A reviewed deleted line in the middle of a block no longer splits the block, where Leave Out and the line selection then went to the wrong rows.
+- Code History shows the uncommitted lines added at the end of the range, such as the new text of a changed last line or lines added at the end of the file.
+- An SSH key a forge gives for a commit's author is added to the allowed signers only when it is one, and never read as a file of that name on this computer.
+- Settings an extension no longer defines leave its settings page after Reload Extensions.
 - The project page shows the right locked version of a Python package with a local label or a post-release: `==2.1.0` is met by 2.1.0+cu118 again, and 1.4.post1 is above 1.4, so `<=1.4` leaves it out and `!=1.4` takes it. Two pre-releases of one version are told apart (2.0.0-beta.2 is past 2.0.0-beta.1 and below 2.0.0-rc.1, Python's 1.4b2 below 1.4rc1, beta.10 past beta.2), `=2.0.0-beta.1` is that pre-release alone, and 2.0.0 meets `>2.0.0-beta.1`.
 
 ## 0.20 (build-145, 2026-11-12)

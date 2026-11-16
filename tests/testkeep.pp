@@ -28,6 +28,8 @@ type
     procedure TestKeepDeletedOnly;
     procedure TestKeepAddedOnly;
     procedure TestKeepWholeBlock;
+    procedure TestOldNumbers;
+    procedure TestKeptDeletionInMiddle;
     procedure TestNearestWins;
     procedure TestUnmatched;
     procedure TestNoBlocks;
@@ -127,6 +129,37 @@ begin
   ApplyKeeps(FLines, [Keep('', 'y', 3)], FKeptOf);
   AssertEquals(' a|+x| y| d|', Joined);
   AssertEquals(0, FKeptOf[2]);
+end;
+
+{ The old file's lines: a kept added line has none and moves nothing
+  after it, a kept deleted line is still counted. }
+procedure TKeepTest.TestOldNumbers;
+var
+  OldNum: TIntegerDynArray;
+begin
+  Lines([' a', '+x', ' b', '-c', ' d']);
+  ApplyKeeps(FLines, [Keep('', 'x', 2), Keep('c', '', 4)], FKeptOf, OldNum);
+  AssertEquals(' a| x| b| d|', Joined);
+  AssertEquals(1, OldNum[0]);
+  AssertEquals('kept, not the old file''s', 0, OldNum[1]);
+  AssertEquals(2, OldNum[2]);
+  AssertEquals('after the kept deletion', 4, OldNum[3]);
+  { No keeps: git's numbers. }
+  Lines([' a', '-b', '+B', ' c']);
+  ApplyKeeps(FLines, [], FKeptOf, OldNum);
+  AssertEquals(' a|-b|+B| c|', Joined);
+  AssertEquals(2, OldNum[1]);
+  AssertEquals(0, OldNum[2]);
+  AssertEquals(3, OldNum[3]);
+end;
+
+{ A kept deletion in the middle of a block leaves the block whole, its
+  deleted lines before its added ones. }
+procedure TKeepTest.TestKeptDeletionInMiddle;
+begin
+  Lines([' x', '-a', '-b', '-c', '+A', ' y']);
+  ApplyKeeps(FLines, [Keep('b', '', 3)], FKeptOf);
+  AssertEquals(' x|-a|-c|+A| y|', Joined);
 end;
 
 { Every pair kept: the block is plain code of the new file. }

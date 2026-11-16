@@ -567,7 +567,7 @@ end;
 procedure TRepoFrame.RebuildKeeps;
 begin
   FChangeLines.Assign(FRawChangeLines);
-  FKeeps.Apply(FCurrentPath, FChangeLines, FKeptOf);
+  FKeeps.Apply(FCurrentPath, FChangeLines, FKeptOf, FKeptOldNum);
   ApplyLeftOut;
   FHeadings := nil;
   SetChangeActions;

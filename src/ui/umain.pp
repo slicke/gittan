@@ -731,6 +731,10 @@ type
     FKeeps: TGittanKeeps;
     FRawChangeLines: TStringList;
     FKeptOf: TIntegerDynArray;
+    { The old file's line of each line of FChangeLines once the keeps
+      are applied (0 for none), which counting the rewritten diff would
+      get wrong after a kept added or deleted line. }
+    FKeptOldNum: TIntegerDynArray;
     FHotKeep: integer;
     FHeaderUnkeep: integer;
     { Leaving changes out of the commit (umain.leaveout.inc): the
@@ -8664,7 +8668,7 @@ begin
   end;
   { The changes kept as code this session are plain lines from here on
     (see umain.discard.inc). }
-  FKeeps.Apply(APath, FChangeLines, FKeptOf);
+  FKeeps.Apply(APath, FChangeLines, FKeptOf, FKeptOldNum);
   if APath <> FCurrentPath then
     FExpanded := nil;
   { The file may have changed since the head was mapped onto it. }

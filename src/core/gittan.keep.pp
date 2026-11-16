@@ -63,6 +63,10 @@ type
     {** ApplyKeeps with the file's keeps; AKeptOf gives, for every line
       of the rewritten diff, the keep it comes from, or -1. }
     procedure Apply(const APath: string; ALines: TStrings; out AKeptOf: TIntegerDynArray);
+      overload;
+    {** As Apply, with the old file's line of each line (see ApplyKeeps). }
+    procedure Apply(const APath: string; ALines: TStrings;
+      out AKeptOf, AOldNum: TIntegerDynArray); overload;
   end;
 
 {** The pairs of the block that starts at diff line AStart, in order. }
@@ -82,6 +86,13 @@ function MatchKeeps(ALines: TStrings; const AKeeps: array of TGittanKeep): TInte
   were found in the diff. }
 function ApplyKeeps(ALines: TStrings; const AKeeps: array of TGittanKeep;
   out AKeptOf: TIntegerDynArray): integer;
+{** As above, with AOldNum: for every line of the result, its line in the
+  old file, as git's diff numbers it (1-based), or 0 for none (an added
+  line, a kept one too). A kept line is not the old file's, and a kept
+  deleted line still is, so blame and history find the old lines where
+  they are. }
+function ApplyKeeps(ALines: TStrings; const AKeeps: array of TGittanKeep;
+  out AKeptOf, AOldNum: TIntegerDynArray): integer;
 
 implementation
 
@@ -195,17 +206,30 @@ end;
 function ApplyKeeps(ALines: TStrings; const AKeeps: array of TGittanKeep;
   out AKeptOf: TIntegerDynArray): integer;
 var
-  Match: TIntegerDynArray;
+  OldNum: TIntegerDynArray;
+begin
+  Result := ApplyKeeps(ALines, AKeeps, AKeptOf, OldNum);
+end;
+
+function ApplyKeeps(ALines: TStrings; const AKeeps: array of TGittanKeep;
+  out AKeptOf, AOldNum: TIntegerDynArray): integer;
+var
+  Match, OldNos: TIntegerDynArray;
   Pairs: TGittanKeepArray;
-  i, k, Keep, Old: integer;
+  i, k, Keep, Old, OldLine: integer;
   Out: TStringList;
   Olds, News: TStringList;
 
-  procedure Emit(const ALine: string; AKeep: integer);
+  procedure Emit(const ALine: string; AKeep, AOld: integer);
   begin
     Out.Add(ALine);
-    SetLength(AKeptOf, Out.Count);
+    if Out.Count > Length(AKeptOf) then
+    begin
+      SetLength(AKeptOf, 2 * Out.Count);
+      SetLength(AOldNum, 2 * Out.Count);
+    end;
     AKeptOf[Out.Count - 1] := AKeep;
+    AOldNum[Out.Count - 1] := AOld;
   end;
 
   procedure Flush;
@@ -213,9 +237,9 @@ var
     n: integer;
   begin
     for n := 0 to Olds.Count - 1 do
-      Emit('-' + Olds[n], -1);
+      Emit('-' + Olds[n], -1, OldNos[n]);
     for n := 0 to News.Count - 1 do
-      Emit('+' + News[n], -1);
+      Emit('+' + News[n], -1, 0);
     Olds.Clear;
     News.Clear;
   end;
@@ -223,6 +247,9 @@ var
 begin
   Result := 0;
   AKeptOf := nil;
+  AOldNum := nil;
+  OldNos := nil;
+  OldLine := 0;
   Match := MatchKeeps(ALines, AKeeps);
   Out := TStringList.Create;
   Olds := TStringList.Create;
@@ -233,7 +260,8 @@ begin
     begin
       if ALines[i][1] = ' ' then
       begin
-        Emit(ALines[i], -1);
+        Inc(OldLine);
+        Emit(ALines[i], -1, OldLine);
         Inc(i);
         Continue;
       end;
@@ -241,6 +269,7 @@ begin
       Old := 0;
       while (i + Old < ALines.Count) and (ALines[i + Old][1] = '-') do
         Inc(Old);
+      SetLength(OldNos, Old);
       for k := 0 to High(Pairs) do
       begin
         if Pairs[k].HasOld then
@@ -250,24 +279,33 @@ begin
         if Keep < 0 then
         begin
           if Pairs[k].HasOld then
+          begin
+            OldNos[Olds.Count] := OldLine + k + 1;
             Olds.Add(Pairs[k].Old);
+          end;
           if Pairs[k].HasNew then
             News.Add(Pairs[k].New);
         end
         else
         begin
           Inc(Result);
-          Flush;
+          { A kept deletion alone leaves nothing in the text, so the
+            block goes on round it: -a +A -c stays -a -c +A. }
           if Pairs[k].HasNew then
-            Emit(' ' + Pairs[k].New, Keep);
+          begin
+            Flush;
+            Emit(' ' + Pairs[k].New, Keep, 0);
+          end;
         end;
       end;
       Flush;
+      Inc(OldLine, Old);
       while (i < ALines.Count) and (ALines[i][1] <> ' ') do
         Inc(i);
     end;
     ALines.Assign(Out);
     SetLength(AKeptOf, ALines.Count);
+    SetLength(AOldNum, ALines.Count);
   finally
     News.Free;
     Olds.Free;
@@ -387,18 +425,21 @@ end;
 procedure TGittanKeeps.Apply(const APath: string; ALines: TStrings;
   out AKeptOf: TIntegerDynArray);
 var
+  OldNum: TIntegerDynArray;
+begin
+  Apply(APath, ALines, AKeptOf, OldNum);
+end;
+
+procedure TGittanKeeps.Apply(const APath: string; ALines: TStrings;
+  out AKeptOf, AOldNum: TIntegerDynArray);
+var
   i: integer;
 begin
-  AKeptOf := nil;
   i := IndexOf(APath);
-  if (i < 0) or (Length(FLists[i]) = 0) then
-  begin
-    SetLength(AKeptOf, ALines.Count);
-    for i := 0 to High(AKeptOf) do
-      AKeptOf[i] := -1;
-    Exit;
-  end;
-  ApplyKeeps(ALines, FLists[i], AKeptOf);
+  if i < 0 then
+    ApplyKeeps(ALines, [], AKeptOf, AOldNum)
+  else
+    ApplyKeeps(ALines, FLists[i], AKeptOf, AOldNum);
 end;
 
 end.

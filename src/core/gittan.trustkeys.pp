@@ -461,7 +461,9 @@ begin
         { With no e-mail to bind it to, the key is not added. }
         KeyOk := Length(Emails) > 0;
         for Email in Emails do
-          if not AddAllowedSigner(FAllowedFile, Email, Key, Reason) then
+          { "key::": the forge's text is the key, never a file here that
+            it happens to name. }
+          if not AddAllowedSigner(FAllowedFile, Email, 'key::' + Key, Reason) then
           begin
             FError := Reason;
             KeyOk := False;

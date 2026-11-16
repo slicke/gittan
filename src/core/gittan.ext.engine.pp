@@ -2459,6 +2459,7 @@ begin
     Exit;
   ctx := Ext^.Ctx;
   FRegistry.RemoveContext(ctx);
+  FRegistry.RemoveSettingsOf(Ext^.ExtId);
   { Its timers hold values of the context, so they go before it. }
   if Assigned(FJSTimers) then
     for i := FJSTimers.Count - 1 downto 0 do
@@ -2545,6 +2546,9 @@ begin
           if FExtContexts[i]^.Ctx <> nil then
           try
             FRegistry.RemoveContext(FExtContexts[i]^.Ctx);
+            { What the script defines on its next load is what it has: a
+              key it no longer defines goes. }
+            FRegistry.RemoveSettingsOf(FExtContexts[i]^.ExtId);
             JS_FreeContext(FExtContexts[i]^.Ctx);
           except
           end;

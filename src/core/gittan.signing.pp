@@ -845,6 +845,16 @@ begin
     Result := ExpandFileName(IncludeTrailingPathDelimiter(ARoot) + SetDirSeparators(Result));
 end;
 
+function OnlyChars(const S: string; const AChars: TSysCharSet): boolean;
+var
+  i: integer;
+begin
+  for i := 1 to Length(S) do
+    if not (S[i] in AChars) then
+      Exit(False);
+  Result := True;
+end;
+
 function PublicKeyOf(const AKey: string): string;
 var
   Lines: TStringList;
@@ -881,9 +891,13 @@ begin
     end;
   end;
   { The type and the key, without the comment; a line of a key file
-    that is no key (-----BEGIN ...) is none. }
-  Parts := Result.Split([' '], TStringSplitOptions.ExcludeEmpty);
-  if (Length(Parts) < 2) or (Pos('-', Parts[0]) = 1) then
+    that is no key (-----BEGIN ...) is none, nor is one with a character
+    neither a type nor base64 has: a key from a forge with a line break
+    in it would write a line of its own into the file. }
+  Parts := Result.Split([' ', #9, #10, #13], TStringSplitOptions.ExcludeEmpty);
+  if (Length(Parts) < 2) or (Pos('-', Parts[0]) = 1) or
+    not OnlyChars(Parts[0], ['A'..'Z', 'a'..'z', '0'..'9', '-', '.', '@']) or
+    not OnlyChars(Parts[1], ['A'..'Z', 'a'..'z', '0'..'9', '+', '/', '=']) then
     Exit('');
   Result := Parts[0] + ' ' + Parts[1];
 end;
