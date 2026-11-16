@@ -1333,9 +1333,11 @@ function RunCli(const AExe, ADir: string; const AArgs, AEnv: array of string;
   exited with 0, with its standard output in AOutput, kept on failure
   too (claude -p --output-format json says why there), and its standard
   error in AError. ACancel is asked as it runs; when it
-  answers True claude is ended and the result is False. }
+  answers True claude is ended and the result is False. The variables
+  ASkip's prefixes name are left out of its environment. }
 function RunAgentCli(const AExe, ADir: string; const AArgs: array of string;
-  const AInput: string; ACancel: TGittanCancelEvent; out AOutput, AError: string): boolean;
+  const AInput: string; ACancel: TGittanCancelEvent; out AOutput, AError: string;
+  const ASkip: array of string): boolean;
 
 {** The files a refused switch or checkout names in AError, git's
   message, as those it "would overwrite" (local changes, or untracked
@@ -2719,11 +2721,12 @@ begin
 end;
 
 function RunAgentCli(const AExe, ADir: string; const AArgs: array of string;
-  const AInput: string; ACancel: TGittanCancelEvent; out AOutput, AError: string): boolean;
+  const AInput: string; ACancel: TGittanCancelEvent; out AOutput, AError: string;
+  const ASkip: array of string): boolean;
 var
   Status: integer;
 begin
-  if not RunTool(AExe, ADir, AArgs, [], [], AOutput, AError, Status, nil, AInput,
+  if not RunTool(AExe, ADir, AArgs, ASkip, [], AOutput, AError, Status, nil, AInput,
     ACancel) then
   begin
     if (AError = '') and not (Assigned(ACancel) and ACancel()) then

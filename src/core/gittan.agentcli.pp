@@ -64,6 +64,9 @@ type
     class function Find(const ASetting: string): string; override;
     {** The arguments the command runs with for ATask. }
     function Args(ATask: TGittanAITask): TStringArray; virtual; abstract;
+    {** The prefixes ("NAME=") of the variables left out of the command's
+      environment; none by default. }
+    function SkipEnvironment: TStringArray; virtual;
     {** What the command gets on its input for ATask and AInput (the
       changes, the question). }
     function Input(ATask: TGittanAITask; const AInput: string): string; virtual; abstract;
@@ -103,11 +106,18 @@ type
     without a terminal needs --allow-all-tools, which the three make
     safe), --model= when one is set. It ignores its input when -p is
     given, so the prompt goes on the input before the changes. Its
-    answer is its whole output, which counts when it exited with 0. }
+    answer is its whole output, which counts when it exited with 0.
+    Run on its input, not in a terminal, it loads none of the
+    repository's hooks, MCP servers and extensions unless the folder is
+    trusted, COPILOT_ALLOW_ALL is true or a GITHUB_COPILOT_PROMPT_MODE_
+    variable asks for them, so those variables are left out of its
+    environment: a cloned repository's hooks must not run when a commit
+    message is asked for. }
   TGittanCopilot = class(TGittanAgentCli)
   public
     class function Kind: TGittanAgent; override;
     function Args(ATask: TGittanAITask): TStringArray; override;
+    function SkipEnvironment: TStringArray; override;
     function Input(ATask: TGittanAITask; const AInput: string): string; override;
     function ReadAnswer(AExited: boolean; const AOutput, AErrors: string;
       out AText, AError: string): boolean; override;
@@ -230,6 +240,11 @@ begin
     AError := Format(rsAgentNoAnswer, [Name]);
 end;
 
+function TGittanAgentCli.SkipEnvironment: TStringArray;
+begin
+  Result := nil;
+end;
+
 function TGittanAgentCli.Ask(const ARoot: string; ATask: TGittanAITask;
   const AInput: string; ACancel: TGittanCancelEvent; out AText, AError: string): boolean;
 var
@@ -237,7 +252,7 @@ var
   Exited: boolean;
 begin
   Exited := RunAgentCli(Path, ARoot, Args(ATask), Input(ATask, AInput), ACancel,
-    Output, Errors);
+    Output, Errors, SkipEnvironment);
   Result := ReadAnswer(Exited, Output, Errors, AText, AError);
 end;
 
@@ -255,7 +270,7 @@ begin
   Deadline := TGittanDeadline.Create(10);
   try
     Ran := RunAgentCli(Path, GetUserDir, ['--version'], '', @Deadline.Passed, Output,
-      Error);
+      Error, SkipEnvironment);
   finally
     Deadline.Free;
   end;
@@ -330,6 +345,11 @@ begin
     '--available-tools=view,grep,glob', '--allow-all-tools'];
   if Model <> '' then
     Result := Concat(Result, ['--model=' + Model]);
+end;
+
+function TGittanCopilot.SkipEnvironment: TStringArray;
+begin
+  Result := ['COPILOT_ALLOW_ALL=', 'GITHUB_COPILOT_PROMPT_MODE_'];
 end;
 
 function TGittanCopilot.Input(ATask: TGittanAITask; const AInput: string): string;

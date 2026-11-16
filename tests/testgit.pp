@@ -5182,7 +5182,7 @@ begin
   try
     Start := GetTickCount64;
     AssertFalse(RunAgentCli('/bin/sh', FDir, ['-c', 'sleep 30'], '', @Deadline.Passed,
-      Output, Err));
+      Output, Err, []));
     AssertTrue('ended at the deadline', GetTickCount64 - Start < 10000);
   finally
     Deadline.Free;
@@ -5193,8 +5193,18 @@ begin
   try
     Start := GetTickCount64;
     AssertFalse(RunAgentCli('/bin/sh', FDir, ['-c', 'exec >&- 2>&-; sleep 30'], '',
-      @Deadline.Passed, Output, Err));
+      @Deadline.Passed, Output, Err, []));
     AssertTrue('ended at the deadline, its output closed', GetTickCount64 - Start < 10000);
+  finally
+    Deadline.Free;
+  end;
+  { A variable a skip prefix names is not in the tool's environment
+    (Copilot's COPILOT_ALLOW_ALL and GITHUB_COPILOT_PROMPT_MODE_*). }
+  Deadline := TGittanDeadline.Create(10);
+  try
+    AssertTrue(Err, RunAgentCli('/bin/sh', FDir, ['-c', 'printf "[%s]" "$HOME"'], '',
+      @Deadline.Passed, Output, Err, ['HOM']));
+    AssertEquals('[]', Output);
   finally
     Deadline.Free;
   end;
