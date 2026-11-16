@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- On Linux with GTK3, Gittan no longer stops at startup with "Division by zero" when no AI agent is installed.
 - A pull request with more review comments than Gittan reads (over 100 replies in a thread, or 2000 threads) says so, where the rest were left out unsaid.
 - At a display scale above 100 % on Windows and Linux, the rounded corners, check marks, close crosses and lines of the summary, banners, notices, popup lists and image view scale with the rest.
 - The Pull Requests page lists up to 200 open pull requests, where it stopped at 50 and could offer a second pull request for a branch that had one past them.

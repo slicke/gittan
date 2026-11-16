@@ -573,6 +573,10 @@ begin
     Exit;
   for i := 0 to Menu.Items.Count - 1 do
   begin
+    { A hidden item, such as the AI menu without an agent, has no widget,
+      and the LCL refuses to make one for it. }
+    if not Menu.Items[i].Visible then
+      Continue;
     Menu.Items[i].HandleNeeded;
     if Menu.Items[i].HandleAllocated then
     begin
