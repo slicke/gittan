@@ -328,6 +328,7 @@ type
     function EmptyTree: string;
     procedure SplitRange(out ALeft, ARight: string);
     function RunDiff(const AArgs: array of string; out AOutput: string): boolean;
+    function StashClashed: boolean;
     function FullPath(const APath: string): string;
     function RefGroup(const AGroup: string; AList: TStrings): boolean;
   public
@@ -1225,6 +1226,10 @@ const
     'then run "git lfs install" once.';
   MinGitMajor = 2;
   MinGitMinor = 30;
+  {** Why a rebase or pull that went through is reported as failed:
+    --autostash could not put the work tree's changes back cleanly. }
+  StashClashMessage = 'Done, but putting back the changes the work tree had ' +
+    'gave conflicts; git keeps them in the stash too.';
 
 {** Reads what `git --version` prints ("git version 2.39.5 (Apple
   Git-154)", "git version 2.30.1.windows.1") into AVersion (2.39.5),
@@ -3496,19 +3501,21 @@ var
   Sep, i: integer;
 
   { "diff", -w when whitespace is ignored, then AArgs with ABase put
-    before its "--" (or last, without one). A file in Git LFS (its
+    before its "--" (or last, without one). A path after "--" is a file
+    name, not a pattern: [ab].txt is that file alone. A file in Git LFS (its
     attribute diff=lfs) is binary, as what it holds is, not the pointer
     text git would compare. }
   procedure Build(const ABase: string);
   var
     i, n: integer;
   begin
-    SetLength(Args, Length(AArgs) + 5);
+    SetLength(Args, Length(AArgs) + 6);
     n := 0;
-    Args[n] := '-c';
-    Args[n + 1] := 'diff.lfs.binary=true';
-    Args[n + 2] := 'diff';
-    Inc(n, 3);
+    Args[n] := '--literal-pathspecs';
+    Args[n + 1] := '-c';
+    Args[n + 2] := 'diff.lfs.binary=true';
+    Args[n + 3] := 'diff';
+    Inc(n, 4);
     if FIgnoreWhitespace then
     begin
       Args[n] := '-w';
@@ -4762,7 +4769,9 @@ begin
   end;
   if not Result then
     ADiverged := (Pos('Not possible to fast-forward', FError) > 0) or
-      (Pos('divergent branches', FError) > 0);
+      (Pos('divergent branches', FError) > 0)
+  else if (AMode <> pmMerge) and StashClashed then
+    Result := False;
 end;
 
 function TGittanRepo.Push(out ARejected: boolean): boolean;
@@ -5784,6 +5793,19 @@ begin
     AFastForward := IsAncestor('HEAD', ARef);
 end;
 
+{ --autostash puts the work tree's changes back after the rebase or pull,
+  and a clash there leaves files in conflict with git's exit code still 0
+  and git in the middle of nothing. }
+function TGittanRepo.StashClashed: boolean;
+var
+  Output, Ignored: string;
+begin
+  Result := (Operation = '') and RunGitIn(FRoot, ['ls-files', '-u'], Output, Ignored) and
+    (Trim(Output) <> '');
+  if Result then
+    FError := StashClashMessage;
+end;
+
 function TGittanRepo.RebaseOnto(const AOnto: string; out AConflicts: boolean): boolean;
 var
   Err: string;
@@ -5793,7 +5815,12 @@ begin
     Exit(False);
   Result := RunCommitting(Self, FRoot, ['rebase', '--autostash', AOnto], AConflicts, Err);
   if not Result then
-    FError := Err;
+    FError := Err
+  else if StashClashed then
+  begin
+    AConflicts := True;
+    Result := False;
+  end;
 end;
 
 { ---------------------------------------------------------------------------
@@ -5938,7 +5965,12 @@ begin
   end;
   CleanRebaseFiles;
   if not Result then
-    FError := Err;
+    FError := Err
+  else if StashClashed then
+  begin
+    AConflicts := True;
+    Result := False;
+  end;
 end;
 
 { git appends each todo line it has done to "done" in the rebase's
@@ -8202,7 +8234,8 @@ begin
       FileName := FullPath(APath);
       if FileExists(FileName) then
       begin
-        if RunGit(FRoot, ['ls-files', '--', APath], Tracked, CompareIndex) and
+        if RunGit(FRoot, ['--literal-pathspecs', 'ls-files', '--', APath], Tracked,
+          CompareIndex) and
           (Tracked <> '') then
           Marker := ' '
         else

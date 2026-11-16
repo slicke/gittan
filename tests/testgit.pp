@@ -113,6 +113,8 @@ type
     procedure TestRevertFiles;
     procedure TestRevertLinks;
     procedure TestFileChangesLoneCR;
+    procedure TestFileChangesLiteral;
+    procedure TestRebaseStashClash;
     procedure TestMoveAndRemove;
     procedure TestRebaseOnto;
     procedure TestBehindDefault;
@@ -4078,6 +4080,61 @@ end;
 { A lone CR is part of its line: TStrings.Text broke the line there, so
   the rows below it were counted one line too far down and Discard put a
   deleted line back one line low. }
+{ A path is a file name, not a pattern: [ab].txt is not also a.txt, and
+  an untracked n*.txt is new beside a tracked nx.txt. }
+procedure TGitRepoTest.TestFileChangesLiteral;
+var
+  Lines: TStringList;
+begin
+  MakeHistory;
+  WriteFile('[ab].txt', 'y'#10);
+  WriteFile('nx.txt', 'x'#10);
+  Commit('glob names');
+  WriteFile('a.txt', 'changed'#10);
+  WriteFile('[ab].txt', 'y2'#10);
+  {$IFNDEF WINDOWS}
+  WriteFile('n*.txt', 'n'#10);
+  {$ENDIF}
+  AssertTrue(FRepo.Open(FDir));
+  Lines := TStringList.Create;
+  try
+    AssertTrue(FRepo.FileChanges('[ab].txt', Lines));
+    AssertEquals('-y|+y2|', Joined(Lines));
+    { Windows takes no * in a file name. }
+    {$IFNDEF WINDOWS}
+    AssertTrue(FRepo.FileChanges('n*.txt', Lines));
+    AssertEquals('untracked, so new', '+n|', Joined(Lines));
+    {$ENDIF}
+  finally
+    Lines.Free;
+  end;
+end;
+
+{ --autostash puts the local change back after the rebase; a clash there
+  exits 0 with the file in conflict, which is no success. }
+procedure TGitRepoTest.TestRebaseStashClash;
+var
+  Main: string;
+  Conflicts: boolean;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Main := FRepo.Branch;
+  Git(['checkout', '-q', '-b', 'side']);
+  WriteFile('b.txt', 'b'#10);
+  Commit('side');
+  Git(['checkout', '-q', Main]);
+  WriteFile('a.txt', 'main'#10);
+  Commit('main');
+  Git(['checkout', '-q', 'side']);
+  WriteFile('a.txt', 'local'#10);
+  AssertFalse('reported as done', FRepo.RebaseOnto(Main, Conflicts));
+  AssertTrue(Conflicts);
+  AssertEquals(StashClashMessage, FRepo.Error);
+  AssertEquals('the rebase itself went through', '', FRepo.Operation);
+  AssertEquals('side', Trim(Git(['log', '-1', '--format=%s'])));
+end;
+
 procedure TGitRepoTest.TestFileChangesLoneCR;
 var
   Lines: TStringList;

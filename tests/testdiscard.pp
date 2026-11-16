@@ -32,6 +32,8 @@ type
     procedure TestKeepsNoFinalNewline;
     procedure TestStale;
     procedure TestUndo;
+    procedure TestStaleBeside;
+    procedure TestBesideLoose;
     procedure TestMakesDeletedFile;
     procedure TestCount;
   end;
@@ -232,6 +234,47 @@ begin
   AssertEquals('a'#10'b'#10'b2'#10'c'#10, ReadRaw);
   AssertTrue(Err, DiscardBlock(Swapped(B), Err));
   AssertEquals('a'#10'B'#10'c'#10, ReadRaw);
+end;
+
+{ A block that adds nothing has no line of its own to check: the lines
+  beside it tell that the file moved since. Undoing a discarded added line
+  after lines were added above it is refused, not put in the wrong place. }
+procedure TDiscardTest.TestStaleBeside;
+var
+  B: TGittanDiscard;
+  Err: string;
+begin
+  WriteRaw('a'#10'DEBUG'#10'b'#10);
+  B := Block([' a', '+DEBUG', ' b'], 1);
+  AssertTrue(Err, DiscardBlock(B, Err));
+  AssertEquals('a'#10'b'#10, ReadRaw);
+  WriteRaw('new1'#10'new2'#10'a'#10'b'#10);
+  AssertFalse(DiscardBlock(Swapped(B), Err));
+  AssertEquals(rsDiscardStale, Err);
+  AssertEquals('new1'#10'new2'#10'a'#10'b'#10, ReadRaw);
+  { A deleted line put back where the file has moved. }
+  WriteRaw('x'#10'a'#10'c'#10);
+  B := Block([' a', '-b', ' c'], 1);
+  AssertFalse(DiscardBlock(B, Err));
+  AssertEquals(rsDiscardStale, Err);
+  { At the end of the file, with a line added after since. }
+  WriteRaw('a'#10'z'#10);
+  B := Block([' a', '-b'], 1);
+  AssertFalse(DiscardBlock(B, Err));
+  AssertEquals(rsDiscardStale, Err);
+end;
+
+{ A diff taken with whitespace ignored shows a line beside the block as the
+  version compared against has it, which may differ in blanks alone. }
+procedure TDiscardTest.TestBesideLoose;
+var
+  B: TGittanDiscard;
+  Err: string;
+begin
+  WriteRaw('  a'#13#10'c'#13#10);
+  B := Block([' a', '-b', ' c'], 1);
+  AssertTrue(Err, DiscardBlock(B, Err));
+  AssertEquals('  a'#13#10'b'#13#10'c'#13#10, ReadRaw);
 end;
 
 { A deleted file is one block of deleted lines at line 1; discarding it

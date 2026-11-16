@@ -2224,8 +2224,11 @@ begin
     ExtError('Cannot locate the Gittan class while initializing extensions');
     Exit;
   end;
-
-  ctx^.SetFunction(this, pchar(id), func, argc);
+  try
+    ctx^.SetFunction(this, pchar(id), func, argc);
+  finally
+    JS_FreeValue(ctx, this);
+  end;
 end;
 
 {** Gated variant: only register if the permission group is granted. }
@@ -2576,10 +2579,10 @@ begin
   // Wire the engine pointer so native callbacks can locate us from a ctx.
   JS_SetContextOpaque(ctx, Self);
 
-  // Standard intrinsics so Promises/RegExp/Date work as in the legacy engine.
-  JS_AddIntrinsicPromise(ctx);
-  JS_AddIntrinsicRegExp(ctx);
-  JS_AddIntrinsicDate(ctx);
+  // JS_NewContext has every intrinsic (Promise, RegExp, Date and the rest).
+  // Adding one again replaced its prototypes without freeing them, and their
+  // functions keep the context, so JS_FreeContext never freed it: each
+  // reload kept every extension's heap.
 
   // Expose 'Gittan' constructor in this context's global scope so addClassFunction
   // calls during provisioning can attach methods to Gittan.*

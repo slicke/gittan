@@ -530,6 +530,8 @@ begin
   Result.NewLines := Copy(FFileLines);
   Result.OldLines := Copy(AResult);
   Result.Resolved := False;
+  Result.Before := '';
+  Result.After := '';
 end;
 
 end.

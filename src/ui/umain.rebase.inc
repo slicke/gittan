@@ -78,6 +78,8 @@ begin
     if AFromGraph then
       ShowCommitGraph;
   end
+  else if Conflicts and (FRepo.Error = StashClashMessage) then
+    BannerError(Format(rsRiDone, [FBranch]), FRepo.Error)
   else if Conflicts then
     StatusNote(rsCaConflicts, True)
   else if Stopped then

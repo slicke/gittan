@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Fixed
+- Git Flow's Finish merges the branch when a tag has the same name, where git merged the tag's older commit and Finish then deleted the branch with the commits after it.
+- Discard is no longer offered on a renamed file, where it emptied the file, nor on a file taken out of the index with `git rm --cached` but still on disk, where it wrote the file's content in front of itself.
+- A file whose name holds `[`, `*` or `?` shows its own changes, where `[ab].txt` also showed those of `a.txt`, and Leave Out and Put into Its Commit wrote them into it.
+- Undo Discard, and a discard of deleted lines, refuse a file that changed around the block since, where they put the lines back at the old line number.
+- A rebase or pull whose local changes could not be put back cleanly says so, where it said it was done and left the files in conflict.
+- `Gittan.ui.openFile` opens only files inside the repository, where an extension without the data permission could show any file on disk.
+- Reload Extensions no longer keeps the memory of every extension it unloads, which after a few hundred reloads kept extensions from loading at all.
+- An extension that failed to load or was turned off can no longer register commands, forge tabs or Batch operations, or start git, exec or fetch, from a promise it left queued.
 - The project page shows the right locked version of a Python package with a local label or a post-release: `==2.1.0` is met by 2.1.0+cu118 again, and 1.4.post1 is above 1.4, so `<=1.4` leaves it out and `!=1.4` takes it. Two pre-releases of one version are told apart (2.0.0-beta.2 is past 2.0.0-beta.1 and below 2.0.0-rc.1, Python's 1.4b2 below 1.4rc1, beta.10 past beta.2), `=2.0.0-beta.1` is that pre-release alone, and 2.0.0 meets `>2.0.0-beta.1`.
 
 ## 0.20 (build-145, 2026-11-12)

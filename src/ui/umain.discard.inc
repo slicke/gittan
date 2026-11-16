@@ -36,9 +36,16 @@ begin
   Result := False;
   if (FRepo = nil) or (FView <> gvChanges) or (FCurrentPath = '') or FRepo.IsRange then
     Exit;
+  { A rename is a new file to the diff (--no-renames), whose one block
+    would empty it. A deletion with the file still on disk (taken out of
+    the index by rm --cached, or untracked where the base has it) has
+    every line deleted, which a discard would write in front of what is
+    there. }
   i := StatIndexOf(FCurrentPath);
   Result := (i >= 0) and not FStats[i].Binary and
-    (FStats[i].Kind in [ckModified, ckRenamed, ckDeleted]);
+    ((FStats[i].Kind = ckModified) or ((FStats[i].Kind = ckDeleted) and
+    not FileExists(IncludeTrailingPathDelimiter(FRepo.Root) +
+    SetDirSeparators(FCurrentPath))));
 end;
 
 { The diff line on row ARow: the new side's, or the old side's where

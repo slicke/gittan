@@ -545,6 +545,8 @@ begin
   end;
   if Ok then
     StatusNote(Format(rsBmRebased, [Branch, ARef]))
+  else if Conflicts and (FRepo.Error = StashClashMessage) then
+    BannerError(Format(rsBmRebased, [Branch, ARef]), FRepo.Error)
   else if Conflicts then
     StatusNote(rsCaConflicts, True)
   else

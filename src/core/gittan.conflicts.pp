@@ -200,6 +200,8 @@ begin
   Result.FileName := AFileName;
   Result.Resolved := False;
   Result.OldLines := nil;
+  Result.Before := '';
+  Result.After := '';
   Result.NewLines := nil;
   Result.Line := 1;
   Ours := nil;

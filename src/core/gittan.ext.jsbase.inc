@@ -390,6 +390,17 @@ begin
   end;
 end;
 
+{** Whether ctx may still set things up: the engine's own context, or an
+  extension's that is loaded. A dropped one (its script threw as it
+  loaded) can still run a promise reaction it queued, since a queued job
+  keeps its context alive; what that reaction registers would outlive
+  the drop, and a failed load must run nothing. }
+function ContextAccepts(Engine: TGittanExtEngine; ctx: JSContext): boolean;
+begin
+  Result := (Engine <> nil) and ((ctx = Engine.FContext) or
+    (Engine.GenerationForContext(ctx) > 0));
+end;
+
 {**
   Async entry-point wrapper exposed to JavaScript as a function that returns a Promise.
 
@@ -438,6 +449,13 @@ begin
   func := string(NativeName(magic));
   if func = '' then
     raise Exception.Create('Missing function to run!');
+  { A dropped or unloaded extension's queued reaction starts nothing more:
+    a git or exec run, a fetch, settled in a context that is gone. }
+  if not ContextAccepts(TGittanExtEngine.Instance, ctx) then
+  begin
+    res^ := JS_ThrowError(ctx, RawUtf8(func + ': this extension is not loaded'));
+    Exit;
+  end;
 
   // 2) Resolve the callback metadata by name; ensure it exists and is valid.
   try
@@ -531,17 +549,6 @@ end;
                        required so clearTimeout's JS_ToInt32 can parse it —
                        BigInt IDs made clearing timers fail)
 }
-{** Whether ctx may still set things up: the engine's own context, or an
-  extension's that is loaded. A dropped one (its script threw as it
-  loaded) can still run a promise reaction it queued, since a queued job
-  keeps its context alive; what that reaction registers would outlive
-  the drop, and a failed load must run nothing. }
-function ContextAccepts(Engine: TGittanExtEngine; ctx: JSContext): boolean;
-begin
-  Result := (Engine <> nil) and ((ctx = Engine.FContext) or
-    (Engine.GenerationForContext(ctx) > 0));
-end;
-
 function JSSetTimerImpl(ctx: JSContext; argc: integer; argv: PJSValues;
 IsInterval: boolean): JSValueRaw;
 var
@@ -828,6 +835,11 @@ begin
   end;
   if eng = nil then
     Exit;
+  if not ContextAccepts(eng, ctx) then
+  begin
+    res^ := JS_ThrowError(ctx, 'Gittan.commands.register: this extension is not loaded');
+    Exit;
+  end;
   eng.Registry.AddCommand(eng.ExtensionIdForContext(ctx), string(ctx^.ToUtf8(argv^[0])),
     string(ctx^.ToUtf8(argv^[1])), ParseCommandWheres(string(ctx^.ToUtf8(argv^[2]))),
     ctx, JS_DupValue(ctx, argv^[3]));
@@ -871,6 +883,11 @@ begin
   end;
   if eng = nil then
     Exit;
+  if not ContextAccepts(eng, ctx) then
+  begin
+    res^ := JS_ThrowError(ctx, RawUtf8(AWho + ': this extension is not loaded'));
+    Exit;
+  end;
   eng.Registry.AddCommand(eng.ExtensionIdForContext(ctx), string(ctx^.ToUtf8(argv^[0])),
     string(ctx^.ToUtf8(argv^[1])), [AWhere], ctx, JS_DupValue(ctx, argv^[3]),
     string(ctx^.ToUtf8(argv^[2])));
