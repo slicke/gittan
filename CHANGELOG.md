@@ -12,6 +12,7 @@
 - Reload Extensions no longer keeps the memory of every extension it unloads, which after a few hundred reloads kept extensions from loading at all.
 - An extension that failed to load or was turned off can no longer register commands, forge tabs or Batch operations, or start git, exec or fetch, from a promise it left queued.
 - A branch with a tag of the same name is listed and switched to by its name, where the branch menu showed `heads/foo` and switching to it failed.
+- The check for branches whose upstream is gone reads a branch whose name holds a quote, and one with a tag of the same name, by its name.
 - On an orphan branch with no commit yet the commit graph, a file's history and the `change:` search show the other branches' history, where the graph was empty.
 - A commit that leaves out some lines of a deleted script keeps its executable bit.
 - Quitting with an unsaved file in another tab opens the tab that was shown at the next start.
