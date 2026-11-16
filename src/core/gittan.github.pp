@@ -1292,7 +1292,10 @@ var
   Output: string;
 begin
   APulls := nil;
-  Result := RunGh(FExe, Root, ['pr', 'list', '--state', 'open', '--limit', '50', '--json',
+  { 200, gh asking a page at a time: with 50 a busy repository's list
+    lost the rest unsaid, and a branch with a pull request past them was
+    offered a second one. }
+  Result := RunGh(FExe, Root, ['pr', 'list', '--state', 'open', '--limit', '200', '--json',
     PullRequestFields], Output, AError);
   if not Result then
     Exit;

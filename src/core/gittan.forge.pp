@@ -2290,7 +2290,7 @@ begin
     Exit;
   { Also with no requests: the menu leaves Approve and Request Changes
     off the user's own pull requests by it (PullActionFits). }
-  if (FLogin = '') and ((Length(FReviewPulls) > 0) or (Length(FPulls) > 0)) and
+  if (FLogin = '') and ((Length(FReviewPulls) > 0) or (Length(FPulls) > 0) or FHasPull) and
     AskLogin(Asked) then
     FLogin := Asked;
   FReviewPulls := WithoutReviewed(FReviewPulls, FLogin);

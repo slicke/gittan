@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- The Pull Requests page lists up to 200 open pull requests, where it stopped at 50 and could offer a second pull request for a branch that had one past them.
+- Approve and Request Changes are left off your own pull request when it is the only one, where they were offered until another came.
 - The project page reads npm's and Cargo's `<=1.2` as every 1.2.x and `>1.2` as from 1.3.0, as they mean it.
 - The summary of more changed files than fit in it (about a thousand) ends with how many more there are, where on Linux the rows past them could not be scrolled to.
 - Quitting with Don't Save in one tab and Cancel in another keeps the first tab's edits marked as unsaved.
