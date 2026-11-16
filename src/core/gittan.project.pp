@@ -191,6 +191,10 @@ type
     class function Dependencies(const AText: string): TGittanDependencies; virtual;
     {** The packages the text of the lock file AName resolved. }
     class function Locked(const AName, AText: string): TGittanDependencies; virtual;
+    {** What two names of a package are compared by: the name as it is,
+      Python's normalized (PyYAML and pyyaml, typing_extensions and
+      typing-extensions are one package). }
+    class function NameKey(const AName: string): string; virtual;
     {** The project's own version from the dependency file's text. }
     class function Version(const AText: string): string; virtual;
     {** The page of the package AName on the kind's registry; ''. }
@@ -289,13 +293,15 @@ function ChecksBlock(const AChecks: TGittanProjectChecks): TGittanProjectBlock;
 function DependencyShown(const ADependency: TGittanDependency): string;
 
 {** Fills each dependency's Resolved from the locked packages of the
-  same name. }
+  same name (its Package when it has one), as AKind's NameKey compares
+  them (as they are without a kind). }
 procedure ResolveDependencies(var ADependencies: TGittanDependencies;
-  const ALocked: TGittanDependencies);
+  const ALocked: TGittanDependencies; AKind: TGittanProjectKindClass = nil);
 
 {** How ANew's dependencies differ from AOld's, by name and group: the
   ones added and changed in ANew's order, then the ones removed. }
-function DependencyChanges(const AOld, ANew: TGittanDependencies): TGittanDependencyChanges;
+function DependencyChanges(const AOld, ANew: TGittanDependencies;
+  AKind: TGittanProjectKindClass = nil): TGittanDependencyChanges;
 
 {** The dependencies of AKind at the context's root, resolved by the
   lock file, and how they differ from those at Since (none without a
@@ -956,17 +962,35 @@ begin
   Result := Length(Alternatives) = 0;
 end;
 
+function KeyOf(AKind: TGittanProjectKindClass; const AName: string): string;
+begin
+  if AKind = nil then
+    Result := AName
+  else
+    Result := AKind.NameKey(AName);
+end;
+
 procedure ResolveDependencies(var ADependencies: TGittanDependencies;
-  const ALocked: TGittanDependencies);
+  const ALocked: TGittanDependencies; AKind: TGittanProjectKindClass);
 var
   i, j, Count, Best: integer;
+  Keys: TStringArray;
+  Want: string;
 begin
+  Keys := nil;
+  SetLength(Keys, Length(ALocked));
+  for j := 0 to High(ALocked) do
+    Keys[j] := KeyOf(AKind, ALocked[j].Name);
   for i := 0 to High(ADependencies) do
   begin
     Count := 0;
     Best := -1;
+    if ADependencies[i].Package <> '' then
+      Want := KeyOf(AKind, ADependencies[i].Package)
+    else
+      Want := KeyOf(AKind, ADependencies[i].Name);
     for j := 0 to High(ALocked) do
-      if ALocked[j].Name = ADependencies[i].Name then
+      if Keys[j] = Want then
       begin
         Inc(Count);
         Best := j;
@@ -978,7 +1002,7 @@ begin
         when none meets it, rather than one that is wrong. }
       Best := -1;
       for j := 0 to High(ALocked) do
-        if (ALocked[j].Name = ADependencies[i].Name) and
+        if (Keys[j] = Want) and
           MeetsRequirement(ALocked[j].Resolved, ADependencies[i].Version) then
         begin
           if ALocked[j].Resolved = ADependencies[i].Version then
@@ -996,10 +1020,16 @@ begin
   end;
 end;
 
-function DependencyChanges(const AOld, ANew: TGittanDependencies): TGittanDependencyChanges;
+function DependencyChanges(const AOld, ANew: TGittanDependencies;
+  AKind: TGittanProjectKindClass): TGittanDependencyChanges;
 var
   i, j: integer;
   Found: boolean;
+
+  function Same(const A, B: TGittanDependency): boolean;
+  begin
+    Result := (A.Group = B.Group) and (KeyOf(AKind, A.Name) = KeyOf(AKind, B.Name));
+  end;
 
   procedure Add(const AName, AGroup, AOldVersion, ANewVersion: string;
     AKind: TGittanDependencyChangeKind);
@@ -1018,7 +1048,7 @@ begin
   begin
     Found := False;
     for j := 0 to High(AOld) do
-      if (AOld[j].Name = ANew[i].Name) and (AOld[j].Group = ANew[i].Group) then
+      if Same(AOld[j], ANew[i]) then
       begin
         Found := True;
         if DependencyShown(AOld[j]) <> DependencyShown(ANew[i]) then
@@ -1033,7 +1063,7 @@ begin
   begin
     Found := False;
     for i := 0 to High(ANew) do
-      if (AOld[j].Name = ANew[i].Name) and (AOld[j].Group = ANew[i].Group) then
+      if Same(AOld[j], ANew[i]) then
       begin
         Found := True;
         Break;
@@ -1082,7 +1112,8 @@ begin
   ADependencies := AKind.Dependencies(TextOf(AContext.Root, DepFile));
   LockName := AKind.LockFile(AContext.Root);
   if LockName <> '' then
-    ResolveDependencies(ADependencies, AKind.Locked(LockName, TextOf(AContext.Root, LockName)));
+    ResolveDependencies(ADependencies, AKind.Locked(LockName, TextOf(AContext.Root, LockName)),
+      AKind);
   if AContext.Since = '' then
     Exit;
   { The tag's files under the names they had there: a project that
@@ -1092,8 +1123,8 @@ begin
   Old := AKind.Dependencies(OldText);
   OldLockName := FileAtSince(AContext, LockName, AKind.LockFileNames, OldLock);
   if OldLockName <> '' then
-    ResolveDependencies(Old, AKind.Locked(OldLockName, OldLock));
-  AChanges := DependencyChanges(Old, ADependencies);
+    ResolveDependencies(Old, AKind.Locked(OldLockName, OldLock), AKind);
+  AChanges := DependencyChanges(Old, ADependencies, AKind);
 end;
 
 function GroupTitle(const AGroup: string): string;
@@ -1363,6 +1394,11 @@ end;
 class function TGittanProjectKind.Locked(const AName, AText: string): TGittanDependencies;
 begin
   Result := nil;
+end;
+
+class function TGittanProjectKind.NameKey(const AName: string): string;
+begin
+  Result := AName;
 end;
 
 class function TGittanProjectKind.Version(const AText: string): string;

@@ -26,6 +26,7 @@ type
     procedure TestPoetry;
     procedure TestRequirements;
     procedure TestPythonLock;
+    procedure TestNormalizedNames;
     procedure TestSplitRequirement;
     procedure TestPythonInfo;
     procedure TestPythonTool;
@@ -140,6 +141,12 @@ begin
   AssertEquals('==2.31.0', Find(D, 'requests').Version);
   AssertEquals('>=8', Find(D, 'click').Version);
   AssertEquals('', Find(D, 'rich').Version);
+  { pip-compile's continued lines and hashes. }
+  D := ParseRequirements('requests==2.31.0 \' + LE + '    --hash=sha256:aa \' + LE +
+    '    --hash=sha256:bb' + LE + 'idna==3.6 --hash=sha256:cc' + LE);
+  AssertEquals('requests idna', Names(D));
+  AssertEquals('==2.31.0', Find(D, 'requests').Version);
+  AssertEquals('==3.6', Find(D, 'idna').Version);
 end;
 
 procedure TProjPythonTest.TestPythonLock;
@@ -153,6 +160,24 @@ begin
     LE + 'version = "2024.8.30"' + LE + LE + '[package.metadata]' + LE + 'x = 1' + LE);
   AssertEquals('requests certifi', Names(D));
   AssertEquals('2.32.3', Find(D, 'requests').Resolved);
+end;
+
+{ A lock lists the normalized name: PyYAML is pyyaml there,
+  typing_extensions typing-extensions. }
+procedure TProjPythonTest.TestNormalizedNames;
+var
+  D, Locked: TGittanDependencies;
+  Changes: TGittanDependencyChanges;
+begin
+  D := ParseRequirements('PyYAML>=6' + LE + 'typing_extensions>=4' + LE);
+  Locked := ParsePythonLock('[[package]]' + LE + 'name = "pyyaml"' + LE + 'version = "6.0.1"' +
+    LE + '[[package]]' + LE + 'name = "typing-extensions"' + LE + 'version = "4.9.0"' + LE);
+  ResolveDependencies(D, Locked, TGittanPythonKind);
+  AssertEquals('6.0.1', Find(D, 'PyYAML').Resolved);
+  AssertEquals('4.9.0', Find(D, 'typing_extensions').Resolved);
+  Changes := DependencyChanges(ParseRequirements('pyyaml>=6' + LE), ParseRequirements('PyYAML>=6' + LE),
+    TGittanPythonKind);
+  AssertEquals('spelled otherwise, not changed', 0, Length(Changes));
 end;
 
 procedure TProjPythonTest.TestSplitRequirement;

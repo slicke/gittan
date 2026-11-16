@@ -727,9 +727,10 @@ end;
 function ParseMakefileTargets(const AText: string): TStringArray;
 var
   Start, P, i: integer;
-  Line, Head, Name: string;
+  Line, Head, Name, Word, Prefix: string;
   Names: TStringArray;
   Seen: TStringList;
+  InDefine: boolean;
 
   procedure AddTarget(const ATarget: string);
   begin
@@ -746,15 +747,33 @@ begin
   try
     Seen.CaseSensitive := True;
     Start := 1;
+    InDefine := False;
     while NextLine(AText, Start, Line) do
     begin
+      { A define's body is text, not rules ("usage: make all" in a help
+        text), up to its endef. }
+      Word := Trim(Line);
+      if InDefine then
+      begin
+        if (Word = 'endef') or (Pos('endef ', Word) = 1) or (Pos('endef'#9, Word) = 1) then
+          InDefine := False;
+        Continue;
+      end;
+      for Prefix in TStringArray.Create('', 'override ', 'export ', 'private ') do
+        if (Pos(Prefix + 'define ', Word) = 1) or (Pos(Prefix + 'define'#9, Word) = 1) or
+          (Word = Prefix + 'define') then
+          InDefine := True;
+      if InDefine then
+        Continue;
       if (Line = '') or (Line[1] in [#9, ' ', '#']) then
         Continue;
       P := Pos(':', Line);
       if P < 2 then
         Continue;
-      { "::" is a double-colon rule; ":=" an assignment. }
+      { "::" is a double-colon rule; ":=", "::=" and ":::=" assignments. }
       if (P < Length(Line)) and (Line[P + 1] = '=') then
+        Continue;
+      if (Copy(Line, P, 3) = '::=') or (Copy(Line, P, 4) = ':::=') then
         Continue;
       Head := Trim(Copy(Line, 1, P - 1));
       if Head = '' then

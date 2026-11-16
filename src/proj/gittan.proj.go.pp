@@ -164,6 +164,10 @@ begin
     P := Pos('//', Line);
     if P = 1 then
       Continue;
+    { A comment after the line ("module x // Deprecated: use y") is no
+      part of it. }
+    if (P > 1) and (Line[P - 1] in [' ', #9]) then
+      Line := TrimRight(Copy(Line, 1, P - 1));
     if Pos('module ', Line) = 1 then
       Result.Module := Trim(Copy(Line, 8, MaxInt))
     else if Pos('go ', Line) = 1 then

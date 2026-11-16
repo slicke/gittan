@@ -489,7 +489,15 @@ begin
     'all:' + #10 +
     'make-lexlib: ; echo' + #10 +
     'ifeq ($(OS),Windows_NT)' + #10 +
-    'endif' + #10);
+    'endif' + #10 +
+    'FOO ::= bar' + #10 +
+    'BAR :::= baz' + #10 +
+    'define HELP' + #10 +
+    'usage: make all' + #10 +
+    'endef' + #10 +
+    'override define X' + #10 +
+    'inner: x' + #10 +
+    'endef' + #10);
   AssertEquals('a prerequisite alone is no target', 5, Length(T));
   AssertEquals('all', T[0]);
   AssertEquals('a rule with two targets gives both', 'debug', T[1]);

@@ -43,6 +43,7 @@ type
     class function LockFileNames: TStringArray; override;
     class function Dependencies(const AText: string): TGittanDependencies; override;
     class function Locked(const AName, AText: string): TGittanDependencies; override;
+    class function NameKey(const AName: string): string; override;
     class function Version(const AText: string): string; override;
     class function PackageUrl(const AName: string): string; override;
     class function Checks(AContext: TGittanProjectContext): TGittanProjectChecks; override;
@@ -202,10 +203,13 @@ begin
     end;
 end;
 
+{ A line ending with a backslash goes on in the next (pip-compile's
+  "requests==2.31.0 \" with its --hash lines), and the options after a
+  requirement (--hash=...) are no part of its version. }
 function ParseRequirements(const AText: string): TGittanDependencies;
 var
   Start, P: integer;
-  Line, Name, Version: string;
+  Line, Next, Name, Version: string;
 begin
   Result := nil;
   Start := 1;
@@ -215,6 +219,18 @@ begin
     if P > 0 then
       Line := Copy(Line, 1, P - 1);
     Line := Trim(Line);
+    while (Line <> '') and (Line[Length(Line)] = '\') and NextLine(AText, Start, Next) do
+    begin
+      P := Pos('#', Next);
+      if P > 0 then
+        Next := Copy(Next, 1, P - 1);
+      Line := Trim(Copy(Line, 1, Length(Line) - 1)) + ' ' + Trim(Next);
+    end;
+    P := Pos(' --', Line);
+    if P > 0 then
+      Line := Trim(Copy(Line, 1, P - 1));
+    if (Line <> '') and (Line[Length(Line)] = '\') then
+      Line := Trim(Copy(Line, 1, Length(Line) - 1));
     if (Line = '') or (Line[1] = '-') or (Pos('://', Line) > 0) or (Line[1] in ['.', '/']) then
       Continue;
     SplitRequirement(Line, Name, Version);
@@ -396,6 +412,22 @@ end;
 class function TGittanPythonKind.Locked(const AName, AText: string): TGittanDependencies;
 begin
   Result := ParsePythonLock(AText);
+end;
+
+{ PEP 503: lower case, with each run of "-", "_" and "." one "-". }
+class function TGittanPythonKind.NameKey(const AName: string): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 1 to Length(AName) do
+    if AName[i] in ['-', '_', '.'] then
+    begin
+      if (Result = '') or (Result[Length(Result)] <> '-') then
+        Result := Result + '-';
+    end
+    else
+      Result := Result + LowerCase(AName[i]);
 end;
 
 class function TGittanPythonKind.Version(const AText: string): string;

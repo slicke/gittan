@@ -11,6 +11,16 @@
 - `Gittan.ui.openFile` opens only files inside the repository, where an extension without the data permission could show any file on disk.
 - Reload Extensions no longer keeps the memory of every extension it unloads, which after a few hundred reloads kept extensions from loading at all.
 - An extension that failed to load or was turned off can no longer register commands, forge tabs or Batch operations, or start git, exec or fetch, from a promise it left queued.
+- A branch with a tag of the same name is listed and switched to by its name, where the branch menu showed `heads/foo` and switching to it failed.
+- On an orphan branch with no commit yet the commit graph, a file's history and the `change:` search show the other branches' history, where the graph was empty.
+- A commit that leaves out some lines of a deleted script keeps its executable bit.
+- Quitting with an unsaved file in another tab opens the tab that was shown at the next start.
+- A pull request comment or review sent after the repository's remote changed while it was being written no longer crashes Gittan.
+- Open on GitHub opens a file whose name starts with "-", where `-s` opened the repository's settings.
+- An AI fix whose answer numbered the lines it replaces no longer writes the numbers into the file.
+- The project page reads more of what lock and manifest files hold: Python packages whose names a lock spells otherwise (PyYAML as pyyaml, typing_extensions as typing-extensions), Cargo's dotted keys (`tokio.workspace = true`, which showed as a dependency named tokio.workspace) and renamed dependencies (`package = "bar"`), yarn berry's keys with several ranges, pnpm lockfile 5's peers, a pnpm-lock.yaml with Windows line ends (where a line of blanks also crashed Gittan), pip-compile's continued lines with hashes, a Lazarus package's minimum version with a release number or a 0 left out, and a go.mod `module` or `go` line with a comment after it.
+- Add to .gitignore on a file whose name holds `[`, `*` or `?` ignores that file, where `pages/[id].tsx` ignored `pages/d.tsx` instead.
+- A Makefile's `::=` assignments and the text of a `define` are no longer listed as commands.
 - The project page shows the right locked version of a Python package with a local label or a post-release: `==2.1.0` is met by 2.1.0+cu118 again, and 1.4.post1 is above 1.4, so `<=1.4` leaves it out and `!=1.4` takes it. Two pre-releases of one version are told apart (2.0.0-beta.2 is past 2.0.0-beta.1 and below 2.0.0-rc.1, Python's 1.4b2 below 1.4rc1, beta.10 past beta.2), `=2.0.0-beta.1` is that pre-release alone, and 2.0.0 meets `>2.0.0-beta.1`.
 
 ## 0.20 (build-145, 2026-11-12)

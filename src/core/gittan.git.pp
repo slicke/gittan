@@ -330,7 +330,8 @@ type
     function RunDiff(const AArgs: array of string; out AOutput: string): boolean;
     function StashClashed: boolean;
     function FullPath(const APath: string): string;
-    function RefGroup(const AGroup: string; AList: TStrings): boolean;
+    function RefGroup(const AGroup: string; AList: TStrings;
+      AFullName: boolean = False): boolean;
   public
     {** Opens the repository that contains ADir. Returns false, with the git
       message in Error, when ADir is not inside a work tree. }
@@ -2626,31 +2627,30 @@ end;
 
 { Each line of for-each-ref is "branch<TAB>remote<TAB>refs/heads/x",
   the last two empty without an upstream; each of ls-remote's is
-  "<id><TAB>refs/heads/x". }
+  "<id><TAB>refs/heads/x". Split at tabs alone: DelimitedText reads a
+  quote, which a branch name may hold. }
 procedure GoneUpstreamsIn(const ADir: string; AList: TStrings);
 var
   Output, Err, Line, Remote: string;
-  Tracks, Fields, Heads, Asked: TStringList;
+  Fields: TStringArray;
+  Tracks, Heads, Asked: TStringList;
   i: integer;
 begin
   AList.Clear;
   if not RunGitIn(ADir, ['for-each-ref',
-    '--format=%(refname:short)%09%(upstream:remotename)%09%(upstream:remoteref)',
+    '--format=%(refname:lstrip=2)%09%(upstream:remotename)%09%(upstream:remoteref)',
     'refs/heads'], Output, Err) then
     Exit;
   Tracks := TStringList.Create;
-  Fields := TStringList.Create;
   Heads := TStringList.Create;
   Asked := TStringList.Create;
   try
     Tracks.Text := Output;
-    Fields.Delimiter := #9;
-    Fields.StrictDelimiter := True;
     Heads.Sorted := True;
     for i := 0 to Tracks.Count - 1 do
     begin
-      Fields.DelimitedText := Tracks[i];
-      if (Fields.Count < 3) or (Fields[1] = '') or (Fields[2] = '') then
+      Fields := Tracks[i].Split([#9]);
+      if (Length(Fields) < 3) or (Fields[1] = '') or (Fields[2] = '') then
         Continue;
       Remote := Fields[1];
       if Asked.IndexOf(Remote) < 0 then
@@ -2673,7 +2673,6 @@ begin
     end;
   finally
     Tracks.Free;
-    Fields.Free;
     Heads.Free;
     Asked.Free;
   end;
@@ -3576,14 +3575,21 @@ end;
   no committerdate and sorted last. A symbolic ref such as
   origin/HEAD (short name "origin") is skipped: it only points at
   another one in the list. }
-function TGittanRepo.RefGroup(const AGroup: string; AList: TStrings): boolean;
+{ refname:short gives heads/foo for a branch foo beside a tag foo, which
+  git switch does not take, so AFullName gives the name under the group
+  whole (lstrip=2: foo, origin/foo). }
+function TGittanRepo.RefGroup(const AGroup: string; AList: TStrings;
+  AFullName: boolean): boolean;
 var
-  Output, Line, Name: string;
+  Output, Line, Name, Fmt: string;
   Raw: TStringList;
   Tab: integer;
 begin
-  Result := RunGit(FRoot, ['for-each-ref', '--format=%(refname:short)%09%(symref)',
-    '--sort=-creatordate', AGroup], Output);
+  if AFullName then
+    Fmt := '--format=%(refname:lstrip=2)%09%(symref)'
+  else
+    Fmt := '--format=%(refname:short)%09%(symref)';
+  Result := RunGit(FRoot, ['for-each-ref', Fmt, '--sort=-creatordate', AGroup], Output);
   if not Result then
     Exit;
   Raw := TStringList.Create;
@@ -3620,7 +3626,7 @@ begin
   ARemote.Clear;
   if FRoot = '' then
     Exit(False);
-  Result := RefGroup('refs/heads', ALocal) and RefGroup('refs/remotes', ARemote);
+  Result := RefGroup('refs/heads', ALocal, True) and RefGroup('refs/remotes', ARemote, True);
 end;
 
 function TGittanRepo.GoneBranches(AList: TStrings): boolean;
@@ -4220,7 +4226,7 @@ var
   { Writes AParts over their paths in the index AIndex ('' for the
     repository's): each text goes in as a blob, through the filters of
     its path, with the mode the index has for the path, which git add
-    gave it from the work tree. }
+    gave it from the work tree, or HEAD's for a file deleted there. }
   function WriteParts(const AIndex: string): boolean;
   var
     j: integer;
@@ -4236,6 +4242,11 @@ var
         Exit(False);
       Blob := Trim(Blob);
       Mode := Copy(Mode, 1, Pos(' ', Mode) - 1);
+      { A deleted file is gone from the index after add -A: the mode
+        HEAD has, so a script keeps its executable bit. }
+      if (Mode = '') and RunGit(FRoot, ['--literal-pathspecs', 'ls-tree', 'HEAD', '--',
+        AParts[j].Path], Mode) then
+        Mode := Copy(Mode, 1, Pos(' ', Mode) - 1);
       if Mode = '' then
         Mode := '100644';
       if not RunGit(FRoot, ['update-index', '--add', '--cacheinfo',
@@ -7683,6 +7694,7 @@ var
   Output, Ahead, Behind: string;
   Args: array of string;
   i: integer;
+  Born: boolean;
 begin
   ACommits := nil;
   SetLength(Args, Length(GraphLogArgs));
@@ -7693,8 +7705,13 @@ begin
     Args := Concat(Args, ['--first-parent']);
   if ANoMerges then
     Args := Concat(Args, ['--no-merges']);
-  Args := Concat(Args, ['--branches', '--remotes', '--tags', 'HEAD']);
-  Result := (FRoot <> '') and RunGit(FRoot, Args, Output);
+  Args := Concat(Args, ['--branches', '--remotes', '--tags']);
+  { An unborn HEAD (an orphan branch beside others) is no revision; with
+    no other branch either there is no history, as git log says. }
+  Born := CommitId('HEAD') <> '';
+  if Born then
+    Args := Concat(Args, ['HEAD']);
+  Result := (FRoot <> '') and RunGit(FRoot, Args, Output) and (Born or (Output <> ''));
   if not Result then
     Exit;
   if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), '@{upstream}..HEAD'], Ahead) then
@@ -7797,9 +7814,10 @@ end;
 function TGittanRepo.PathCommits(const APath: string; AHashes: TStrings;
   AMax: integer): boolean;
 var
-  Output: string;
+  Output, RefList: string;
   Args: array of string;
   n: integer;
+  Born: boolean;
 begin
   AHashes.Clear;
   if (FRoot = '') or (APath = '') then
@@ -7819,11 +7837,20 @@ begin
   Args[n] := '--branches';
   Args[n + 1] := '--remotes';
   Args[n + 2] := '--tags';
-  Args[n + 3] := 'HEAD';
-  Args[n + 4] := '--';
-  Args[n + 5] := APath;
-  SetLength(Args, n + 6);
-  Result := RunGit(FRoot, Args, Output);
+  Inc(n, 3);
+  { An unborn HEAD (an orphan branch beside others) is no revision; with
+    no other branch either there is no history, as git log says. }
+  Born := CommitId('HEAD') <> '';
+  if Born then
+  begin
+    Args[n] := 'HEAD';
+    Inc(n);
+  end;
+  Args[n] := '--';
+  Args[n + 1] := APath;
+  SetLength(Args, n + 2);
+  Result := RunGit(FRoot, Args, Output) and (Born or
+    (RunGit(FRoot, ['for-each-ref', '--count=1'], RefList) and (Trim(RefList) <> '')));
   if Result then
     AHashes.Text := Output;
 end;

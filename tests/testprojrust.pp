@@ -25,6 +25,7 @@ type
     procedure TestCargo;
     procedure TestCargoTables;
     procedure TestCargoLock;
+    procedure TestCargoRenamed;
     procedure TestCargoInfo;
     procedure TestRustSection;
     procedure TestRustNoLock;
@@ -129,6 +130,28 @@ begin
   AssertEquals('0.3', Find(D, 'both').Version);
   AssertEquals('1.2', Find(D, 'g').Version);
   AssertEquals('dev', Find(D, 'g').Group);
+  { Dotted keys are the dependency's own table. }
+  D := ParseCargoDependencies('[dependencies]' + LE + 'tokio.workspace = true' + LE +
+    'serde.version = "1.0"' + LE + 'serde.features = ["derive"]' + LE);
+  AssertEquals('tokio serde', Names(D));
+  AssertEquals('workspace', Find(D, 'tokio').Version);
+  AssertEquals('1.0', Find(D, 'serde').Version);
+end;
+
+{ A dependency renamed with package = "bar" is bar in the lock. }
+procedure TProjRustTest.TestCargoRenamed;
+var
+  D: TGittanDependencies;
+begin
+  D := ParseCargoDependencies('[dependencies]' + LE +
+    'foo = { package = "bar", version = "1" }' + LE + '[dependencies.baz]' + LE +
+    'package = "qux"' + LE + 'version = "2"' + LE);
+  AssertEquals('foo baz', Names(D));
+  AssertEquals('bar', Find(D, 'foo').Package);
+  ResolveDependencies(D, ParseCargoLock('[[package]]' + LE + 'name = "bar"' + LE +
+    'version = "1.4.0"' + LE + '[[package]]' + LE + 'name = "qux"' + LE + 'version = "2.1.0"' + LE));
+  AssertEquals('1.4.0', Find(D, 'foo').Resolved);
+  AssertEquals('2.1.0', Find(D, 'baz').Resolved);
 end;
 
 procedure TProjRustTest.TestCargoLock;

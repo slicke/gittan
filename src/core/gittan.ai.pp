@@ -2193,29 +2193,45 @@ begin
   Result := (AEdits <> nil) or (AWhy <> '');
 end;
 
+{ ALines without the "12: " FixInput puts before each line, which the
+  agent copies at times ("12:" alone for an empty line); false, with
+  ALines as they are in ABare, when one of them has none. }
+function Unnumbered(const ALines: TStringArray; out ABare: TStringArray): boolean;
+var
+  j, k: integer;
+begin
+  ABare := Copy(ALines);
+  Result := ALines <> nil;
+  for j := 0 to High(ALines) do
+  begin
+    k := 1;
+    while (k <= Length(ALines[j])) and (ALines[j][k] in ['0'..'9']) do
+      Inc(k);
+    if (k = 1) or (k > Length(ALines[j])) or (ALines[j][k] <> ':') or
+      ((k < Length(ALines[j])) and (ALines[j][k + 1] <> ' ')) then
+    begin
+      ABare := Copy(ALines);
+      Exit(False);
+    end;
+    ABare[j] := Copy(ALines[j], k + 2, MaxInt);
+  end;
+end;
+
 { Where AFind is in ALines, compared as AMode says: 0 as they are, 1
   with the spaces at the ends ignored, 2 without a line number before
   each of AFind's; -1 for nowhere, and ACount how many places. }
 function FindLines(const ALines, AFind: TStringArray; AMode: integer;
   out ACount: integer): integer;
 var
-  i, j, k: integer;
+  i, j: integer;
   Want: TStringArray;
   Same: boolean;
 begin
   Result := -1;
   ACount := 0;
   Want := Copy(AFind);
-  if AMode = 2 then
-    for j := 0 to High(Want) do
-    begin
-      k := 1;
-      while (k <= Length(Want[j])) and (Want[j][k] in ['0'..'9']) do
-        Inc(k);
-      if (k = 1) or (Copy(Want[j], k, 2) <> ': ') then
-        Exit;
-      Want[j] := Copy(Want[j], k + 2, MaxInt);
-    end;
+  if (AMode = 2) and not Unnumbered(AFind, Want) then
+    Exit;
   for i := 0 to Length(ALines) - Length(Want) do
   begin
     Same := True;
@@ -2241,6 +2257,7 @@ function ApplyFixEdits(const ALines: TStringArray; const AEdits: TGittanFixEdits
   out ANew: TStringArray; out AError: string): boolean;
 var
   e, Mode, At, Count: integer;
+  Replace: TStringArray;
 begin
   AError := '';
   ANew := Copy(ALines);
@@ -2263,7 +2280,12 @@ begin
       ANew := nil;
       Exit(False);
     end;
-    ANew := Concat(Copy(ANew, 0, At), AEdits[e].Replace,
+    { Found by its numbers: the replacement has them too, which are not
+      the file's. }
+    Replace := AEdits[e].Replace;
+    if Mode = 2 then
+      Unnumbered(AEdits[e].Replace, Replace);
+    ANew := Concat(Copy(ANew, 0, At), Replace,
       Copy(ANew, At + Length(AEdits[e].Find), MaxInt));
   end;
   Result := True;

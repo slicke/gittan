@@ -116,6 +116,10 @@ begin
   AssertEquals('github.com/a/a v1.0.0', I.Replaces[0].Old);
   AssertEquals('../a', I.Replaces[0].New);
   AssertEquals('github.com/fork/b v1.2.0', I.Replaces[1].New);
+  { A comment after the module or go line. }
+  I := ParseGoModInfo('module example.com/x // Deprecated: use y' + LE + 'go 1.21 // c' + LE);
+  AssertEquals('example.com/x', I.Module);
+  AssertEquals('1.21', I.Go);
 end;
 
 procedure TProjGoTest.TestGoSection;

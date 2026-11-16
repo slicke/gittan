@@ -86,6 +86,7 @@ type
     procedure TestHeadPaths;
     procedure TestCommitUnborn;
     procedure TestCommitParts;
+    procedure TestCommitPartOfDeletedScript;
     procedure TestCommitMerge;
     procedure TestToolSearchPath;
     procedure TestNodeManagerBins;
@@ -114,6 +115,8 @@ type
     procedure TestRevertLinks;
     procedure TestFileChangesLoneCR;
     procedure TestFileChangesLiteral;
+    procedure TestBranchBesideTag;
+    procedure TestGraphOnOrphanBranch;
     procedure TestRebaseStashClash;
     procedure TestMoveAndRemove;
     procedure TestRebaseOnto;
@@ -2150,6 +2153,36 @@ end;
   what was left out shows as not staged, and a staged file not chosen
   stays staged. A hook that fails leaves the index as it was; an amend
   takes parts too. }
+{ A deleted file with lines left out of the commit is gone from the
+  temporary index after add -A; its part keeps the mode HEAD has. }
+procedure TGitRepoTest.TestCommitPartOfDeletedScript;
+var
+  Paths: TStringList;
+  Parts: TGittanCommitParts;
+  Id: string;
+begin
+  MakeHistory;
+  WriteFile('run.sh', 'one'#10'two'#10);
+  Git(['add', 'run.sh']);
+  Git(['update-index', '--chmod=+x', 'run.sh']);
+  Git(['commit', '-q', '-m', 'script']);
+  DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'run.sh');
+  AssertTrue(FRepo.Open(FDir));
+  Parts := nil;
+  SetLength(Parts, 1);
+  Parts[0].Path := 'run.sh';
+  Parts[0].Text := 'one'#10;
+  Paths := TStringList.Create;
+  try
+    Paths.Add('run.sh');
+    AssertTrue(FRepo.Error, FRepo.Commit('part', Paths, False, Id, Parts));
+    AssertEquals('one'#10, HeadFile(FDir, 'run.sh'));
+    AssertEquals('100755', Copy(Git(['ls-tree', 'HEAD', 'run.sh']), 1, 6));
+  finally
+    Paths.Free;
+  end;
+end;
+
 procedure TGitRepoTest.TestCommitParts;
 var
   Paths: TStringList;
@@ -4107,6 +4140,49 @@ begin
     {$ENDIF}
   finally
     Lines.Free;
+  end;
+end;
+
+{ A branch with a tag of the same name is listed by its name, which git
+  switch takes, not as heads/foo. }
+procedure TGitRepoTest.TestBranchBesideTag;
+var
+  Local, Remote: TStringList;
+begin
+  MakeHistory;
+  Git(['branch', 'foo']);
+  Git(['tag', 'foo']);
+  AssertTrue(FRepo.Open(FDir));
+  Local := TStringList.Create;
+  Remote := TStringList.Create;
+  try
+    AssertTrue(FRepo.Branches(Local, Remote));
+    AssertTrue(Local.Text, Local.IndexOf('foo') >= 0);
+    AssertEquals(-1, Local.IndexOf('heads/foo'));
+  finally
+    Local.Free;
+    Remote.Free;
+  end;
+end;
+
+{ On an orphan branch with no commit yet the other branches' history is
+  still there to show. }
+procedure TGitRepoTest.TestGraphOnOrphanBranch;
+var
+  Commits: TGittanGraphCommits;
+  Hashes: TStringList;
+begin
+  MakeHistory;
+  Git(['checkout', '-q', '--orphan', 'pages']);
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.GraphCommits(Commits));
+  AssertTrue(Length(Commits) > 0);
+  Hashes := TStringList.Create;
+  try
+    AssertTrue(FRepo.Error, FRepo.PathCommits('a.txt', Hashes));
+    AssertTrue(Hashes.Count > 0);
+  finally
+    Hashes.Free;
   end;
 end;
 

@@ -1178,12 +1178,14 @@ begin
       Target := ATarget.Path;
       if ATarget.Line > 0 then
         Target := Target + ':' + IntToStr(ATarget.Line);
+      { The path after "--", so one that starts with "-" (-s, the
+        settings) is not taken for a flag. }
       if ATarget.Commit <> '' then
-        Result := [Target, '--commit=' + ATarget.Commit]
+        Result := ['--commit=' + ATarget.Commit, '--', Target]
       else if ATarget.Branch <> '' then
-        Result := [Target, '--branch', ATarget.Branch]
+        Result := ['--branch=' + ATarget.Branch, '--', Target]
       else
-        Result := [Target];
+        Result := ['--', Target];
     end;
     wtCommit:
       Result := [ATarget.Commit];
