@@ -40,13 +40,15 @@ begin
     Result := Format(rsAskPathTaken, [ANew]);
 end;
 
-{ The path itself is no move: OK does nothing then, and says nothing. }
+{ The path itself is no move: OK does nothing then, and says nothing.
+  Nor is a change of case taken: on macOS and Windows the file is there
+  under the new name too, and git mv renames it. }
 function TRepoFrame.CheckMovePath(const AValues: array of string): string;
 var
   New: string;
 begin
   Result := MoveTarget(FRepo.Root, AValues[0], New);
-  if New = FContextPath then
+  if (Result <> rsMoveBadPath) and SameText(New, FContextPath) then
     Result := '';
 end;
 

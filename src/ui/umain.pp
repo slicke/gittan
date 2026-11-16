@@ -1517,6 +1517,7 @@ type
     procedure LfsPullClick(Sender: TObject);
     procedure AutoFetchTimerTimer(Sender: TObject);
     procedure AutoFetchDone(Sender: TObject);
+    procedure RunPendingRemote;
     procedure ShowBinaryFile(const AFileName: string);
     function SidesShown: boolean;
     function ShowsChangedFile: boolean;
@@ -2502,7 +2503,7 @@ type
     {** The window shows this frame now: its menu, its caption, the
       shade and band of the title bar. }
     procedure Activated;
-    {** Nothing shown: no repository, none opening and no file; the
+    {** Nothing shown: no repository, none opening or cloning and no file; the
       window opens a repository in such a frame rather than in a new
       one. }
     function IsBlank: boolean;
@@ -4839,7 +4840,10 @@ end;
 
 function TRepoFrame.IsBlank: boolean;
 begin
-  Result := (FRepo.Root = '') and (FOpenJob = nil) and (FView = gvSummary);
+  { A clone runs with no repository open yet: the frame is taken, or
+    opening another one in it would stop the clone's job unseen. }
+  Result := (FRepo.Root = '') and (FOpenJob = nil) and (FRemoteJob = nil) and
+    (FView = gvSummary);
 end;
 
 procedure TRepoFrame.ClearOpenError;

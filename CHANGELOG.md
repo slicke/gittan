@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- A clone keeps running in its tab when another repository is opened, which now gets a tab of its own, where the clone never opened and a failure went unreported.
+- Rename or Move takes a change of case alone (`README.MD` to `README.md`) on macOS and Windows, where it said the name was taken.
+- A fetch, pull or push that waits for the background fetch runs after a commit started meanwhile, where it was dropped.
+- A tag made or a fetch run in a terminal shows in Gittan at once, where it waited for something else to change.
+- Branches whose names differ only in case are told apart in the branch lists and in the check for gone upstreams.
+- A font size, zoom or tab width edited by hand in settings.json past what the settings allow falls back to the default.
 - Discard and Leave Out of a change at the end of a file keep the file's last newline as the version compared against has it, where a discarded line added without a newline left the line before it without one, and the commit got a newline change nobody chose.
 - An image or SVG that claims more than 64 megapixels (a 100-byte SVG can claim 40000 × 40000) is not drawn, where Gittan froze or ran out of memory.
 - The project page reads a package.json or requirements.txt that starts with a byte order mark, and lists a requirement given as `name @ https://…`.

@@ -545,6 +545,27 @@ begin
   finally
     S.Free;
   end;
+  { Sizes past what the dialog and the zoom give are the defaults. }
+  Put('settings.json', '{"editor": {"fontSize": 5000, "zoom": 100000, "tabSize": -3}}');
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertEquals('font size', 0, S.FontSize);
+    AssertEquals('zoom', 0, S.Zoom);
+    AssertEquals('tab size', 0, S.TabSize);
+  finally
+    S.Free;
+  end;
+  Put('settings.json', '{"editor": {"fontSize": 14, "zoom": 120, "tabSize": 4}}');
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertEquals(14, S.FontSize);
+    AssertEquals(120, S.Zoom);
+    AssertEquals(4, S.TabSize);
+  finally
+    S.Free;
+  end;
 end;
 
 { A member of another type is written back as the field has it, and the

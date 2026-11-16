@@ -1309,6 +1309,10 @@ begin
   end
   else
     StatusNote(Format(rsCommitted, [Copy(Job.Id, 1, 7), Subject]));
+  { A fetch, pull or push that waited for the background fetch and then
+    for this commit; last, so its busy note is not written over. }
+  if FPendingRemote and (FAutoFetchJob = nil) then
+    RunPendingRemote;
 end;
 
 procedure TRepoFrame.ShowCommitFailure(const AError: string);

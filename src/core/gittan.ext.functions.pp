@@ -303,6 +303,21 @@ JS_PARAM_OK = -1;
 
 implementation
 
+const
+  { The most console lines kept until console.pop shows them: a script
+    logging in a loop would otherwise grow the list outside the JS heap's
+    limit until the watchdog stops it. The oldest go first. }
+  MaxConsoleLines = 1000;
+
+procedure AddConsoleLine(const ALine: string);
+begin
+  if ConsoleBuffer = nil then
+    ConsoleBuffer := TStringList.Create;
+  while ConsoleBuffer.Count >= MaxConsoleLines do
+    ConsoleBuffer.Delete(0);
+  ConsoleBuffer.Add(ALine);
+end;
+
 {------------------------------------------------------------------------------
   ExtError
   Extension-flavoured error reports. Thin wrappers that supply the extension
@@ -1100,10 +1115,7 @@ begin
   if fullMsg = '' then
     fullMsg := RS_LOG_EMPTY_MSG;
   
-  if ConsoleBuffer = nil then
-    ConsoleBuffer := TStringList.Create;
-
-  ConsoleBuffer.Add(ConsoleAttribution(ctx) + fullMsg);
+  AddConsoleLine(ConsoleAttribution(ctx) + fullMsg);
 
   // Return undefined
   res^ := JS_UNDEFINED;
@@ -1140,9 +1152,7 @@ begin
   if fullMsg = '' then
     fullMsg := RS_LOG_EMPTY_MSG;
 
-  if ConsoleBuffer = nil then
-    ConsoleBuffer := TStringList.Create;
-  ConsoleBuffer.Add(ConsoleAttribution(ctx) + '[' + level + '] ' + fullMsg);
+  AddConsoleLine(ConsoleAttribution(ctx) + '[' + level + '] ' + fullMsg);
 
   Result := JS_UNDEFINED;
 end;

@@ -2652,6 +2652,10 @@ begin
   Asked := TStringList.Create;
   try
     Tracks.Text := Output;
+    { Branch and remote names are case-sensitive: Feature gone while
+      feature is still there is gone. }
+    Heads.CaseSensitive := True;
+    Asked.CaseSensitive := True;
     Heads.Sorted := True;
     for i := 0 to Tracks.Count - 1 do
     begin
@@ -3588,7 +3592,7 @@ function TGittanRepo.RefGroup(const AGroup: string; AList: TStrings;
   AFullName: boolean): boolean;
 var
   Output, Line, Name, Fmt: string;
-  Raw: TStringList;
+  Raw, Seen: TStringList;
   Tab: integer;
 begin
   if AFullName then
@@ -3599,7 +3603,13 @@ begin
   if not Result then
     Exit;
   Raw := TStringList.Create;
+  Seen := TStringList.Create;
   try
+    { Fix and fix are two branches (on a file system that tells them
+      apart): the names are compared as they are, whatever AList does. }
+    Seen.CaseSensitive := True;
+    Seen.Sorted := True;
+    Seen.AddStrings(AList);
     Raw.Text := Output;
     for Line in Raw do
     begin
@@ -3607,10 +3617,14 @@ begin
       if (Tab = 0) or (Tab < Length(Line)) then
         Continue;
       Name := Copy(Line, 1, Tab - 1);
-      if (Name <> '') and (AList.IndexOf(Name) < 0) then
+      if (Name <> '') and (Seen.IndexOf(Name) < 0) then
+      begin
+        Seen.Add(Name);
         AList.Add(Name);
+      end;
     end;
   finally
+    Seen.Free;
     Raw.Free;
   end;
 end;
@@ -8215,6 +8229,12 @@ begin
       touching HEAD changes alone, and Undo follows. }
     if RunGit(FRoot, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads'], Id) then
       Result := Result + Trim(Id) + #10;
+    { The tags and the remote branches, which the snapshot lists as well:
+      a tag made or a fetch run in a terminal changes them alone. A hash,
+      as a repository may have thousands. }
+    if RunGit(FRoot, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/tags',
+      'refs/remotes'], Id) then
+      Result := Result + 'refs ' + MD5Print(MD5String(Id)) + #10;
     { The stashes, which the status bar counts and lists. }
     if RunGit(FRoot, ['stash', 'list', '--format=%H'], Id) then
       Result := Result + 'stash ' + StringReplace(Trim(Id), #10, ' ', [rfReplaceAll]) + #10;
