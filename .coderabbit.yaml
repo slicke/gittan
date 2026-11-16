@@ -1,0 +1,7 @@
+# CodeRabbit reviews at most 100 files of a pull request. The changelog
+# is release notes, not code, and vendor/ holds submodule pointers to
+# other projects' repositories, so neither counts toward the limit.
+reviews:
+  path_filters:
+    - "!CHANGELOG.md"
+    - "!vendor/**"
