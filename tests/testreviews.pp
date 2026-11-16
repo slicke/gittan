@@ -60,7 +60,7 @@ procedure TReviewsTest.TestParseThreads;
 var
   T: TGittanReviewThreads;
   Head, Cursor: string;
-  HasNext: boolean;
+  HasNext, Cut: boolean;
 begin
   T := nil;
   AssertTrue(ParseReviewThreads(Answer, T, Head, HasNext, Cursor));
@@ -88,6 +88,16 @@ begin
   AssertTrue(T[2].OnFile);
   AssertEquals(0.0, T[2].Comments[0].Created);
   AssertEquals(2, OpenThreads(T));
+  { totalCount past the replies read marks the answer cut. }
+  T := nil;
+  Cut := False;
+  AssertTrue(ParseReviewThreads(Answer, T, Head, HasNext, Cursor, Cut));
+  AssertFalse('no totalCount, not cut', Cut);
+  T := nil;
+  AssertTrue(ParseReviewThreads(StringReplace(Answer, '"comments":{"nodes":[{"author":{"login":"bob"}',
+    '"comments":{"totalCount":150,"nodes":[{"author":{"login":"bob"}', []), T, Head, HasNext,
+    Cursor, Cut));
+  AssertTrue('more replies than read', Cut);
 end;
 
 procedure TReviewsTest.TestParsePages;

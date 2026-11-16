@@ -1177,10 +1177,10 @@ begin
     Canvas.Pen.Color := FLine;
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := FSelectedBack;
-    Canvas.RoundRect(Card, 8, 8);
+    Canvas.RoundRect(Card, Px(8), Px(8));
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Color := Tone;
-    Canvas.RoundRect(Card.Left, Card.Top, Card.Left + 2 * Px(NoteStripe), Card.Bottom, 4, 4);
+    Canvas.RoundRect(Card.Left, Card.Top, Card.Left + 2 * Px(NoteStripe), Card.Bottom, Px(4), Px(4));
     Canvas.Brush.Color := FSelectedBack;
     Canvas.FillRect(Card.Left + Px(NoteStripe), Card.Top + 1, Card.Left + 2 * Px(NoteStripe),
       Card.Bottom - 1);
@@ -1367,7 +1367,7 @@ begin
       X + IconW + Canvas.TextWidth(Line) + Px(ChevronWidth) + Px(ChipPadX),
       TextY + BodyHeight + Px(ChipPadY));
     if FReviewHot then
-      FillHover(Canvas, FReviewRect, 8, FHover);
+      FillHover(Canvas, FReviewRect, Px(8), FHover);
   end;
   DrawStatusIcon(Canvas, HintPull, X, TextY, BodyHeight, FDim);
   Canvas.Pen.Width := 1;
@@ -1567,10 +1567,10 @@ begin
   Canvas.Pen.Color := FLine;
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FSelectedBack;
-  Canvas.RoundRect(Card, 8, 8);
+  Canvas.RoundRect(Card, Px(8), Px(8));
   Canvas.Pen.Style := psClear;
   Canvas.Brush.Color := FLink;
-  Canvas.RoundRect(Card.Left, Card.Top, Card.Left + 2 * Px(NoteStripe), Card.Bottom, 4, 4);
+  Canvas.RoundRect(Card.Left, Card.Top, Card.Left + 2 * Px(NoteStripe), Card.Bottom, Px(4), Px(4));
   Canvas.Brush.Color := FSelectedBack;
   Canvas.FillRect(Card.Left + Px(NoteStripe), Card.Top + 1, Card.Left + 2 * Px(NoteStripe),
     Card.Bottom - 1);
@@ -2050,7 +2050,7 @@ begin
         X + IconW + Canvas.TextWidth(FBranch) + Px(ChevronWidth) + Px(ChipPadX),
         TextY + BodyHeight + Px(ChipPadY));
       if FBranchHot then
-        FillHover(Canvas, FBranchRect, 8, FHover);
+        FillHover(Canvas, FBranchRect, Px(8), FHover);
     end;
     DrawStatusIcon(Canvas, HintBranch, X, TextY, BodyHeight, FDim);
     Canvas.Pen.Width := 1;
@@ -2078,7 +2078,7 @@ begin
       FBaseRect := Rect(X - Px(ChipPadX), TextY - Px(ChipPadY),
         X + Canvas.TextWidth(FBase) + Px(ChevronWidth) + Px(ChipPadX), TextY + BodyHeight + Px(ChipPadY));
       if FBaseHot then
-        FillHover(Canvas, FBaseRect, 8, FHover);
+        FillHover(Canvas, FBaseRect, Px(8), FHover);
     end;
     Canvas.Font.Color := FText;
     Canvas.TextOut(X, TextY, FBase);
@@ -2128,7 +2128,7 @@ begin
         Canvas.TextWidth('−' + IntToStr(Deleted)) + Px(ChevronWidth) + Px(ChipPadX),
         Y + BodyHeight + Px(ChipPadY));
       if FTotalsHot then
-        FillHover(Canvas, FTotalsRect, 8, FHover);
+        FillHover(Canvas, FTotalsRect, Px(8), FHover);
       Canvas.Brush.Style := bsClear;
     end;
     Canvas.Font.Color := FDim;
@@ -2312,7 +2312,7 @@ begin
       Canvas.Brush.Color := FHover
     else
       Canvas.Brush.Color := FSelectedBack;
-    Canvas.RoundRect(Px(Pad) div 2, ATop, Width - Px(Pad) div 2, ATop + Px(RowHeight), 8, 8);
+    Canvas.RoundRect(Px(Pad) div 2, ATop, Width - Px(Pad) div 2, ATop + Px(RowHeight), Px(8), Px(8));
     Canvas.Pen.Style := psSolid;
   end;
   X := Px(Pad);
@@ -2514,7 +2514,7 @@ begin
     FSyncRect := Rect(X - Px(ChipPadX), Y - Px(ChipPadY), X + PaintSync(0, 0, False) + Px(ChipPadX),
       Y + Canvas.TextHeight('Xg') + Px(ChipPadY));
     if FSyncHot then
-      FillHover(Canvas, FSyncRect, 8, FHover);
+      FillHover(Canvas, FSyncRect, Px(8), FHover);
   end;
   if FHasUpstream and FUpstreamGone then
     Part(rsUpstreamGone, FDeleted)
@@ -2568,7 +2568,7 @@ begin
   begin
     LineX := Px(Pad) + Px(IconSize) div 2;
     Canvas.Pen.Color := FLine;
-    Canvas.Pen.Width := 2;
+    Canvas.Pen.Width := Px(2);
     Canvas.Line(LineX, FCommitsTop + Px(RowHeight) div 2, LineX,
       FCommitsTop + High(FCommits) * Px(RowHeight) + Px(RowHeight) div 2);
     Canvas.Pen.Width := 1;
@@ -2606,7 +2606,7 @@ begin
     else
       Canvas.Brush.Color := FBack;
   end;
-  Canvas.Pen.Width := 2;
+  Canvas.Pen.Width := Px(2);
   Canvas.Ellipse(CenterX - Px(DotSize) div 2 - 1, CenterY - Px(DotSize) div 2 - 1,
     CenterX + Px(DotSize) div 2 + 1, CenterY + Px(DotSize) div 2 + 1);
   Canvas.Pen.Width := 1;

@@ -4025,6 +4025,7 @@ resourcestring
   rsReviewOpenOne = '1 open review thread';
   rsReviewFailed = 'Could not fetch the review comments';
   rsConversation = 'Conversation of pull request #%d';
+  rsReviewsCut = 'Pull request #%d has more review comments than Gittan reads; the rest are on the forge';
   rsTreeThreadOpen = ' · 1 open review thread';
   rsTreeThreadsOpen = ' · %d open review threads';
   rsTreeThreadsDone = ' · review comments, all resolved';

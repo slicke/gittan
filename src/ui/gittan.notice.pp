@@ -677,7 +677,7 @@ begin
         Canvas.Pen.Color := FLine;
         Canvas.Font.Color := FText;
       end;
-      Canvas.RoundRect(Left, Top, Right, Bottom, 8, 8);
+      Canvas.RoundRect(Left, Top, Right, Bottom, Px(8), Px(8));
       Canvas.Brush.Style := bsClear;
       Canvas.TextOut(Left + Px(ButtonPadX), Top + Px(ButtonPadY), FButtons[i]);
     end;
@@ -688,16 +688,16 @@ begin
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := FHover;
-    Canvas.RoundRect(FCloseRect, 6, 6);
+    Canvas.RoundRect(FCloseRect, Px(6), Px(6));
     Canvas.Pen.Style := psSolid;
     Canvas.Brush.Style := bsClear;
   end;
   Canvas.Pen.Color := FDim;
-  Canvas.Pen.Width := 2;
+  Canvas.Pen.Width := Px(2);
   with FCloseRect do
   begin
-    Canvas.Line(Left + 8, Top + 8, Right - 8, Bottom - 8);
-    Canvas.Line(Right - 8, Top + 8, Left + 8, Bottom - 8);
+    Canvas.Line(Left + Px(8), Top + Px(8), Right - Px(8), Bottom - Px(8));
+    Canvas.Line(Right - Px(8), Top + Px(8), Left + Px(8), Bottom - Px(8));
   end;
   Canvas.Pen.Width := 1;
 end;

@@ -680,17 +680,17 @@ begin
       ACanvas.Pen.Style := psClear;
       ACanvas.Brush.Style := bsSolid;
       ACanvas.Brush.Color := FHover;
-      ACanvas.RoundRect(Px(Pad) div 2, Y + 1, FRows.Width - Px(Pad) div 2, Y + Px(RowHeight) - 1, 8, 8);
+      ACanvas.RoundRect(Px(Pad) div 2, Y + 1, FRows.Width - Px(Pad) div 2, Y + Px(RowHeight) - 1, Px(8), Px(8));
       ACanvas.Pen.Style := psSolid;
       ACanvas.Brush.Style := bsClear;
     end;
     if Item.Checked and not Item.Header then
     begin
       ACanvas.Pen.Color := FAccent;
-      ACanvas.Pen.Width := 2;
-      X := Px(Pad) + 2;
-      ACanvas.Polyline([Point(X, CenterY), Point(X + 4, CenterY + 4),
-        Point(X + 11, CenterY - 4)]);
+      ACanvas.Pen.Width := Px(2);
+      X := Px(Pad) + Px(2);
+      ACanvas.Polyline([Point(X, CenterY), Point(X + Px(4), CenterY + Px(4)),
+        Point(X + Px(11), CenterY - Px(4))]);
       ACanvas.Pen.Width := 1;
     end;
     if Item.Header and (Item.Caption = '') then

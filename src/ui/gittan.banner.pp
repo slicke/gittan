@@ -358,7 +358,7 @@ var
       Canvas.Pen.Style := psClear;
       Canvas.Brush.Style := bsSolid;
       Canvas.Brush.Color := FHover;
-      Canvas.RoundRect(Result, 6, 6);
+      Canvas.RoundRect(Result, Px(6), Px(6));
       Canvas.Pen.Style := psSolid;
     end;
     Canvas.Brush.Style := bsClear;
@@ -400,15 +400,15 @@ begin
   begin
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Color := FHover;
-    Canvas.RoundRect(FCloseRect, 6, 6);
+    Canvas.RoundRect(FCloseRect, Px(6), Px(6));
     Canvas.Pen.Style := psSolid;
   end;
   Canvas.Pen.Color := FDim;
-  Canvas.Pen.Width := 2;
+  Canvas.Pen.Width := Px(2);
   with FCloseRect do
   begin
-    Canvas.Line(Left + 7, Top + 7, Right - 7, Bottom - 7);
-    Canvas.Line(Right - 7, Top + 7, Left + 7, Bottom - 7);
+    Canvas.Line(Left + Px(7), Top + Px(7), Right - Px(7), Bottom - Px(7));
+    Canvas.Line(Right - Px(7), Top + Px(7), Left + Px(7), Bottom - Px(7));
   end;
   Canvas.Pen.Width := 1;
   Right := FCloseRect.Left - Px(Gap);

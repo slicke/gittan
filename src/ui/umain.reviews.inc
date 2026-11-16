@@ -317,6 +317,9 @@ begin
   if Key = FThreadsKey then
     Exit;
   FThreadsKey := Key;
+  { Said once for what was read, not at every poll. }
+  if Job.Cut then
+    StatusNote(Format(rsReviewsCut, [Job.Number]));
   { The bodies of the threads gone are dropped with the rest. }
   FReviewSegments.Clear;
   CollectShownThreads;

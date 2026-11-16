@@ -150,6 +150,7 @@ type
     FThreads: TGittanReviewThreads;
     FNotes: TGittanPullNotes;
     FHeadOid: string;
+    FCut: boolean;
     {** Reads the threads, the notes and the head commit; false with the
       reason in AError when they could not be read. May return early
       when Terminated. }
@@ -165,6 +166,10 @@ type
     property Notes: TGittanPullNotes read FNotes;
     {** The commit at the head of the pull request. }
     property HeadOid: string read FHeadOid;
+    {** Whether the forge had more threads or replies than were read:
+      the job stops at a number of pages, and a page at a number of
+      replies to a thread. }
+    property Cut: boolean read FCut;
     property Error: string read FError;
   end;
 

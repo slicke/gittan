@@ -1092,7 +1092,7 @@ var
   procedure DrawHot(APart: TGittanStatusPart);
   begin
     if (FHot = APart) and Clickable(APart) then
-      FillHover(Canvas, FRects[APart], 6, FHover);
+      FillHover(Canvas, FRects[APart], Px(6), FHover);
   end;
 
   function BadgeWidth(const S: string): integer;
