@@ -299,7 +299,7 @@ type
     function PaintSync(X, Y: integer; ADraw: boolean = True): integer;
     function HasSyncLine: boolean;
     procedure PaintHeader(var Y: integer);
-    procedure PaintRow(AIndex, ATop: integer);
+    procedure PaintRow(AIndex, ATop, AMaxChange: integer);
     procedure PaintBar(X, Y: integer; const AStat: TGittanFileStat; AMax: integer);
     procedure PaintKinds(Y, ALeft, ARight: integer);
     function BarWidth: integer;
@@ -2270,10 +2270,12 @@ end;
 { Badge, directory in dim and file name in full color, then the counts and
   the bar on the right. A path too long for the room loses its directory
   first, then its end. }
-procedure TGittanSummary.PaintRow(AIndex, ATop: integer);
+{ AMaxChange, the most lines a row with a bar changed, scales the bar:
+  Paint works it out once, not each row over all of them. }
+procedure TGittanSummary.PaintRow(AIndex, ATop, AMaxChange: integer);
 var
   Stat: TGittanFileStat;
-  X, CountsX, TextY, BodyHeight, Room, MaxChange, i, W: integer;
+  X, CountsX, TextY, BodyHeight, Room, W: integer;
   Dir, FileName, Count, RowText, RowAction: string;
   R: TRect;
 begin
@@ -2388,12 +2390,8 @@ begin
       TextY, Count);
   end;
 
-  MaxChange := 0;
-  for i := 0 to High(FStats) do
-    if (i > High(FRowTexts)) or (FRowTexts[i] = '') then
-      MaxChange := Max(MaxChange, FStats[i].Added + FStats[i].Deleted);
   PaintBar(Width - Px(Pad) - BarWidth, ATop + (Px(RowHeight) - Px(BarHeight)) div 2, Stat,
-    MaxChange);
+    AMaxChange);
 end;
 
 { A green disc ASize across at X, Y with a check mark cut out of it. }
@@ -2636,7 +2634,8 @@ end;
 
 procedure TGittanSummary.Paint;
 var
-  Y, i: integer;
+  Y, i, First, Last, MaxChange: integer;
+  Clip: TRect;
 begin
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FBack;
@@ -2660,8 +2659,17 @@ begin
     PaintCleanCentered;
   if ShowsCommits then
     PaintCommits;
+  { Only the rows in the part to paint: a hover repaints one row, and
+    thousands of untracked files made every move draw them all. }
+  MaxChange := 0;
   for i := 0 to High(FStats) do
-    PaintRow(i, FRowsTop + i * Px(RowHeight));
+    if (i > High(FRowTexts)) or (FRowTexts[i] = '') then
+      MaxChange := Max(MaxChange, FStats[i].Added + FStats[i].Deleted);
+  Clip := Canvas.ClipRect;
+  First := Max(0, (Clip.Top - FRowsTop) div Px(RowHeight));
+  Last := Min(High(FStats), (Clip.Bottom - FRowsTop) div Px(RowHeight));
+  for i := First to Last do
+    PaintRow(i, FRowsTop + i * Px(RowHeight), MaxChange);
 end;
 
 procedure TGittanSummary.MouseMove(Shift: TShiftState; X, Y: integer);

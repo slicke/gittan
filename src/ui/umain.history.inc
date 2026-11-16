@@ -138,7 +138,8 @@ begin
 end;
 
 { The lines of the file, as HistoryRef has it, that the editor rows
-  AFromRow..AToRow show: in the file view the rows themselves; in the
+  AFromRow..AToRow show: in the file view the rows mapped through the
+  file's diff (the rows themselves for one outside the repository); in the
   change view the numbers of the rows in the right commit of a range, or
   else in the base, so the lines added in the work tree, which the base
   does not have, do not shift the range. False when no row has a number
@@ -146,15 +147,62 @@ end;
 function TRepoFrame.ChunkLines(AFromRow, AToRow: integer; out AFrom, ATo: integer): boolean;
 var
   Nums: TIntegerDynArray;
-  r, Line, n: integer;
+  Lines: TStringList;
+  r, Line, n, Old, New: integer;
 begin
   AFrom := 0;
   ATo := 0;
   if FView = gvFile then
   begin
-    AFrom := AFromRow + 1;
-    ATo := AToRow + 1;
-    Exit(True);
+    { The file on disk, which may not be HistoryRef's: its rows go
+      through its diff to that, so lines added in the work tree do not
+      shift the range. Unsaved edits are not in the diff: their rows are
+      not counted. }
+    if (ShownRelPath = '') or FRepo.IsRange then
+    begin
+      AFrom := AFromRow + 1;
+      ATo := AToRow + 1;
+      Exit(True);
+    end;
+    if Edit.Modified then
+      Exit(False);
+    Lines := TStringList.Create;
+    try
+      if not FRepo.FileChanges(ShownRelPath, Lines) then
+        Exit(False);
+      Nums := nil;
+      SetLength(Nums, Lines.Count);
+      Old := 0;
+      New := 0;
+      for r := 0 to Lines.Count - 1 do
+        case Lines[r][1] of
+          '-': Inc(Old);
+          '+':
+          begin
+            Nums[New] := 0;
+            Inc(New);
+          end;
+          else
+          begin
+            Inc(Old);
+            Nums[New] := Old;
+            Inc(New);
+          end;
+        end;
+    finally
+      Lines.Free;
+    end;
+    for r := AFromRow to Min(AToRow, New - 1) do
+    begin
+      n := Nums[r];
+      if n = 0 then
+        Continue;
+      if (AFrom = 0) or (n < AFrom) then
+        AFrom := n;
+      if n > ATo then
+        ATo := n;
+    end;
+    Exit(AFrom > 0);
   end;
   if FRepo.IsRange then
     Nums := FNewNum

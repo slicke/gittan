@@ -8336,8 +8336,11 @@ end;
 { FView is set before the call: the layout depends on it. }
 procedure TRepoFrame.ShowEditor;
 begin
-  { A history still being fetched is for a view that is no longer shown. }
-  if FView <> gvHistory then
+  { A history still being fetched is for a view that is no longer shown,
+    unless the same file is shown again, as a refresh does while git log
+    runs: that one would never come. }
+  if (FView <> gvHistory) and not (((FHistoryJob <> nil) or (FTimelapseJob <> nil)) and
+    (FHistoryPath <> '') and (ShownRelPath = FHistoryPath)) then
   begin
     AbandonHistoryJob;
     EndTimelapse;

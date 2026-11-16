@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- A Code History or Time-lapse still loading is no longer dropped when a file saved meanwhile refreshes the view.
+- Code History from a file being edited counts its lines in the version compared against, where lines added in the work tree shifted the range.
+- The summary with thousands of changed files no longer lags on every move of the mouse.
 - A clone keeps running in its tab when another repository is opened, which now gets a tab of its own, where the clone never opened and a failure went unreported.
 - Rename or Move takes a change of case alone (`README.MD` to `README.md`) on macOS and Windows, where it said the name was taken.
 - A fetch, pull or push that waits for the background fetch runs after a commit started meanwhile, where it was dropped.
