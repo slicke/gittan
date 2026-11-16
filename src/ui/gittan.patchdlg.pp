@@ -501,6 +501,7 @@ function PickPatchFiles(AFiles: TStrings; var AFolder: string): boolean;
 var
   D: TOpenDialog;
   Picked: TStringList;
+  i: integer;
 begin
   D := TOpenDialog.Create(nil);
   Picked := TStringList.Create;
@@ -516,7 +517,10 @@ begin
       { format-patch numbers its files, so by name is their order. }
       Picked.Assign(D.Files);
       Picked.Sort;
-      AFiles.AddStrings(Picked);
+      { A patch picked again is not applied twice. }
+      for i := 0 to Picked.Count - 1 do
+        if AFiles.IndexOf(Picked[i]) < 0 then
+          AFiles.Add(Picked[i]);
       AFolder := ExtractFileDir(Picked[Picked.Count - 1]);
     end;
   finally

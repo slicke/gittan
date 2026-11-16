@@ -194,24 +194,6 @@ implementation
 uses
   Math, StrUtils, gittan.git;
 
-{ The fields of output from a command run with -z; a trailing NUL ends
-  the last field and adds none. }
-procedure SplitNul(const AOutput: string; AFields: TStrings);
-var
-  Start, i: integer;
-begin
-  AFields.Clear;
-  Start := 1;
-  for i := 1 to Length(AOutput) do
-    if AOutput[i] = #0 then
-    begin
-      AFields.Add(Copy(AOutput, Start, i - Start));
-      Start := i + 1;
-    end;
-  if Start <= Length(AOutput) then
-    AFields.Add(Copy(AOutput, Start, MaxInt));
-end;
-
 { git config -z prints each entry as the key, a newline and the value.
   The name of a submodule may hold dots, so the key is cut at the first
   dot after "submodule." and at the last one. }

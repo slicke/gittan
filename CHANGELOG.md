@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Apply Patches no longer applies a patch picked twice twice.
 - A Code History or Time-lapse still loading is no longer dropped when a file saved meanwhile refreshes the view.
 - Code History from a file being edited counts its lines in the version compared against, where lines added in the work tree shifted the range.
 - The summary with thousands of changed files no longer lags on every move of the mouse.

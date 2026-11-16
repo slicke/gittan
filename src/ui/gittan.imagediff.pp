@@ -590,17 +590,17 @@ end;
   row of mode pills when the modes apply. }
 function TGittanImageDiff.AreaTop: integer;
 begin
-  Result := Pad + 2 * LineHeight + 2 * Gap;
+  Result := Px(Pad) + 2 * LineHeight + 2 * Px(Gap);
   if CanOverlay then
-    Result := Result + LineHeight + 2 * Px(PillRise) + 2 * Gap;
+    Result := Result + LineHeight + 2 * Px(PillRise) + 2 * Px(Gap);
   if SliderShown and SliderWraps then
-    Result := Result + LineHeight + 2 * Px(PillRise) + Gap;
+    Result := Result + LineHeight + 2 * Px(PillRise) + Px(Gap);
 end;
 
 { The left edge of a side's column, where its caption starts. }
 function TGittanImageDiff.ColumnLeft(ASide: integer): integer;
 begin
-  Result := Pad + ASide * (Max(0, (ClientWidth - 3 * Pad) div 2) + Pad);
+  Result := Px(Pad) + ASide * (Max(0, (ClientWidth - 3 * Px(Pad)) div 2) + Px(Pad));
 end;
 
 { The space of side ASide (0 the old, 1 the new) under its caption: its
@@ -612,16 +612,16 @@ begin
   AT := AreaTop;
   if Overlay then
   begin
-    Result.Left := Pad;
-    Result.Right := Max(Pad, ClientWidth - Pad);
+    Result.Left := Px(Pad);
+    Result.Right := Max(Px(Pad), ClientWidth - Px(Pad));
   end
   else
   begin
     Result.Left := ColumnLeft(ASide);
-    Result.Right := Result.Left + Max(0, (ClientWidth - 3 * Pad) div 2);
+    Result.Right := Result.Left + Max(0, (ClientWidth - 3 * Px(Pad)) div 2);
   end;
   Result.Top := AT;
-  Result.Bottom := Max(AT, ClientHeight - Pad);
+  Result.Bottom := Max(AT, ClientHeight - Px(Pad));
 end;
 
 { Where the scaled image of ASide is drawn: centred in its area. Empty
@@ -662,8 +662,8 @@ var
 begin
   Canvas.Font := Font;
   Canvas.Font.Style := [];
-  RowTop := Pad + 2 * LineHeight + 2 * Gap;
-  X := Pad;
+  RowTop := Px(Pad) + 2 * LineHeight + 2 * Px(Gap);
+  X := Px(Pad);
   for m := Low(TGittanImageMode) to High(TGittanImageMode) do
   begin
     Result := Rect(X, RowTop, X + Canvas.TextWidth(ImageModeCaption(m)) + 2 * Px(PillPad),
@@ -697,7 +697,7 @@ end;
 function TGittanImageDiff.SliderWraps: boolean;
 begin
   Result := ModeRect(High(TGittanImageMode)).Right + Px(SliderGap) + Px(SliderWidth) >
-    ClientWidth - Pad;
+    ClientWidth - Px(Pad);
 end;
 
 { The slider's track, right of the pills on their row, or on a row of
@@ -709,10 +709,10 @@ begin
   Last := ModeRect(High(TGittanImageMode));
   if SliderWraps then
   begin
-    Result.Left := Pad + Px(KnobRadius);
+    Result.Left := Px(Pad) + Px(KnobRadius);
     Result.Right := Max(Result.Left + Px(20), Min(Result.Left + Px(SliderWidth),
-      ClientWidth - Pad - Px(KnobRadius)));
-    Result.Top := Last.Bottom + Gap;
+      ClientWidth - Px(Pad) - Px(KnobRadius)));
+    Result.Top := Last.Bottom + Px(Gap);
     Result.Bottom := Result.Top + Last.Height;
     Exit;
   end;
@@ -829,15 +829,15 @@ begin
     X := R.Left;
     while X < R.Right do
     begin
-      if Odd((X - R.Left) div CheckSize + (Y - R.Top) div CheckSize) then
-        ABuffer.FillRect(X, Y, Min(X + CheckSize, R.Right), Min(Y + CheckSize, R.Bottom),
+      if Odd((X - R.Left) div Px(CheckSize) + (Y - R.Top) div Px(CheckSize)) then
+        ABuffer.FillRect(X, Y, Min(X + Px(CheckSize), R.Right), Min(Y + Px(CheckSize), R.Bottom),
           ColorToBGRA(FCheckDark), dmSet)
       else
-        ABuffer.FillRect(X, Y, Min(X + CheckSize, R.Right), Min(Y + CheckSize, R.Bottom),
+        ABuffer.FillRect(X, Y, Min(X + Px(CheckSize), R.Right), Min(Y + Px(CheckSize), R.Bottom),
           ColorToBGRA(FCheckLight), dmSet);
-      Inc(X, CheckSize);
+      Inc(X, Px(CheckSize));
     end;
-    Inc(Y, CheckSize);
+    Inc(Y, Px(CheckSize));
   end;
 end;
 
@@ -926,7 +926,7 @@ begin
     { The divider, with a knob in the middle to take hold of. }
     X := DividerX;
     MidY := (U.Top + U.Bottom) div 2;
-    ABuffer.FillRect(X - 1, U.Top - Gap, X + 1, U.Bottom + Gap, Accent, dmSet);
+    ABuffer.FillRect(X - 1, U.Top - Px(Gap), X + 1, U.Bottom + Px(Gap), Accent, dmSet);
     ABuffer.FillEllipseAntialias(X, MidY, Px(KnobRadius) + 1.5, Px(KnobRadius) + 1.5,
       ColorToBGRA(FBack));
     ABuffer.FillEllipseAntialias(X, MidY, Px(KnobRadius), Px(KnobRadius), Accent);
@@ -1014,10 +1014,10 @@ begin
   Canvas.Brush.Style := bsClear;
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Color := FText;
-  Canvas.TextOut(ColLeft, Pad, Title);
+  Canvas.TextOut(ColLeft, Px(Pad), Title);
   Canvas.Font.Style := [];
   Canvas.Font.Color := FDim;
-  Canvas.TextOut(ColLeft, Pad + LineH + Gap div 2, Detail);
+  Canvas.TextOut(ColLeft, Px(Pad) + LineH + Px(Gap) div 2, Detail);
   if Note <> '' then
     Canvas.TextOut((Area.Left + Area.Right - Canvas.TextWidth(Note)) div 2,
       (Area.Top + Area.Bottom - LineH) div 2, Note);
@@ -1044,7 +1044,7 @@ begin
     DrawModes(Buffer);
     { The line under the captions. }
     AT := AreaTop;
-    Buffer.HorizLine(Pad, AT - Gap, ClientWidth - Pad - 1, ColorToBGRA(FLine), dmSet);
+    Buffer.HorizLine(Px(Pad), AT - Px(Gap), ClientWidth - Px(Pad) - 1, ColorToBGRA(FLine), dmSet);
     Buffer.Draw(Canvas, 0, 0, True);
   finally
     Buffer.Free;
@@ -1108,7 +1108,7 @@ begin
   if Overlay and (FMode = imSwipe) then
   begin
     R := OverlayRect;
-    InflateRect(R, Px(GrabWidth), Gap);
+    InflateRect(R, Px(GrabWidth), Px(Gap));
     if PtInRect(R, Point(X, Y)) then
     begin
       FDrag := dgDivider;
@@ -1148,7 +1148,7 @@ begin
       if (Hot >= 0) or KnobHot then
         Cursor := crHandPoint
       else if Overlay and (FMode = imSwipe) and (Abs(X - DividerX) <= Px(GrabWidth)) and
-        (Y >= OverlayRect.Top - Gap) and (Y <= OverlayRect.Bottom + Gap) then
+        (Y >= OverlayRect.Top - Px(Gap)) and (Y <= OverlayRect.Bottom + Px(Gap)) then
         Cursor := crSizeWE
       else
         Cursor := crDefault;

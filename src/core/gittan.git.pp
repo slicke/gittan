@@ -1442,6 +1442,10 @@ function ParseLfsPointer(const AData: RawByteString; out AOid: string;
 function RunGitIn(const ADir: string; const AArgs: array of string;
   out AOutput, AError: string; const AIndexFile: string = ''): boolean;
 
+{** The fields of output from a command run with -z, into AFields: a
+  trailing NUL ends the last field and adds none. }
+procedure SplitNul(const AOutput: string; AFields: TStrings);
+
 {** The branch HEAD is on in ADir, by its full ref with refs/heads/ taken
   off: symbolic-ref --short gives heads/main when a tag main exists too,
   which git switch and branch.<name> config do not take. False when HEAD
