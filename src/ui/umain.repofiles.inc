@@ -32,6 +32,7 @@ begin
   FRepoTree.Images := TreeImages;
   FRepoTree.ReadOnly := True;
   FRepoTree.Options := FileTree.Options;
+  FRepoTree.ScrollBars := FileTree.ScrollBars;
   FRepoTree.OnSelectionChanged := @RepoTreeSelectionChanged;
   FRepoTree.Align := alClient;
   FRepoTree.Parent := FRepoPanel;

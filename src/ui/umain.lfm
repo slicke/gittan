@@ -16,6 +16,7 @@ object RepoFrame: TRepoFrame
     BorderStyle = bsNone
     Images = TreeImages
     ReadOnly = True
+    ScrollBars = ssAutoBoth
     TabOrder = 2
     OnSelectionChanged = FileTreeSelectionChanged
     Options = [tvoAutoItemHeight, tvoHideSelection, tvoKeepCollapsedNodes, tvoReadOnly, tvoShowButtons, tvoToolTips, tvoThemedDraw]
