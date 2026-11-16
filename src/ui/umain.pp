@@ -23,7 +23,7 @@ uses
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.memohint,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
-  {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
+  {$IFDEF LCLWin32}gittan.wintitlebar, gittan.memoscroll,{$ENDIF}
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.signing, gittan.trustkeys, gittan.navhistory, gittan.undo, gittan.paletteside,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
@@ -128,6 +128,11 @@ type
   TCommitMemo = class(TMemo)
   protected
     procedure InitializeWnd; override;
+    {$IFDEF LCLWin32}
+    { The scroll bar only while the text overflows (gittan.memoscroll). }
+    procedure Change; override;
+    procedure Resize; override;
+    {$ENDIF}
   end;
 
   {** The colors the self-painted controls share in one appearance
@@ -4341,7 +4346,24 @@ begin
   {$IFDEF LCLCocoa}
   SetMemoPlaceholder(Handle, TextHint);
   {$ENDIF}
+  {$IFDEF LCLWin32}
+  FitMemoScrollBar(Self);
+  {$ENDIF}
 end;
+
+{$IFDEF LCLWin32}
+procedure TCommitMemo.Change;
+begin
+  inherited Change;
+  FitMemoScrollBar(Self);
+end;
+
+procedure TCommitMemo.Resize;
+begin
+  inherited Resize;
+  FitMemoScrollBar(Self);
+end;
+{$ENDIF}
 
 { TTreeView }
 

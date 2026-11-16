@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- On Windows, the commit message field shows its scroll bar only while the message is longer than the field.
 - At 125 % on Windows and Linux, the change badges, folders and check boxes are as large as the text around them, and sharp at 150 %.
 - On Windows, the file trees in the sidebar show their scroll bars only when there is something to scroll.
 - On Linux with GTK3, the empty band over the title bar (black on KDE's Wayland) is gone.
