@@ -27,6 +27,8 @@
 - Code History shows the uncommitted lines added at the end of the range, such as the new text of a changed last line or lines added at the end of the file.
 - An SSH key a forge gives for a commit's author is added to the allowed signers only when it is one, and never read as a file of that name on this computer.
 - Settings an extension no longer defines leave its settings page after Reload Extensions.
+- Put into Its Commit with whitespace ignored no longer takes a change of blanks alone into the old commit with the change it puts there; it stays in the work tree.
+- Undo Discard after a conflict was resolved with a side that had no lines refuses a file that changed round it, where it put the conflict back at the old line.
 - The AI features run GitHub Copilot without `COPILOT_ALLOW_ALL` and the `GITHUB_COPILOT_PROMPT_MODE_` variables, which would let a cloned repository's hooks, MCP servers and extensions run when you asked for a commit message, review or summary.
 - The project page shows the right locked version of a Python package with a local label or a post-release: `==2.1.0` is met by 2.1.0+cu118 again, and 1.4.post1 is above 1.4, so `<=1.4` leaves it out and `!=1.4` takes it. Two pre-releases of one version are told apart (2.0.0-beta.2 is past 2.0.0-beta.1 and below 2.0.0-rc.1, Python's 1.4b2 below 1.4rc1, beta.10 past beta.2), `=2.0.0-beta.1` is that pre-release alone, and 2.0.0 meets `>2.0.0-beta.1`.
 

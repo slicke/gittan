@@ -413,7 +413,7 @@ function TGittanAbsorbPlan.Build(ARepo: TGittanRepo; APaths: TStrings;
   out AError: string): boolean;
 var
   Lines: TStringList;
-  Merges: boolean;
+  Merges, Ignoring: boolean;
   i: integer;
 begin
   FHunks := nil;
@@ -445,18 +445,28 @@ begin
   for i := 0 to High(FSteps) do
     if FSteps[i].Pushed then
       Inc(FPushed);
-  for i := 0 to APaths.Count - 1 do
-  begin
-    Lines := TStringList.Create;
-    if not ARepo.FileChanges(APaths[i], Lines) then
+  { The diff as it is, whitespace and all, whatever the view ignores: a
+    change of blanks alone would be context to -w, which the fixup takes
+    from the work tree, so it went into the old commit with the change
+    put there. }
+  Ignoring := ARepo.IgnoreWhitespace;
+  ARepo.IgnoreWhitespace := False;
+  try
+    for i := 0 to APaths.Count - 1 do
     begin
-      Lines.Free;
-      AError := ARepo.Error;
-      Exit(False);
+      Lines := TStringList.Create;
+      if not ARepo.FileChanges(APaths[i], Lines) then
+      begin
+        Lines.Free;
+        AError := ARepo.Error;
+        Exit(False);
+      end;
+      FDiffs.AddObject(APaths[i], Lines);
+      { A binary file gives no lines and so no hunks. }
+      AddHunks(ARepo, APaths[i], Lines);
     end;
-    FDiffs.AddObject(APaths[i], Lines);
-    { A binary file gives no lines and so no hunks. }
-    AddHunks(ARepo, APaths[i], Lines);
+  finally
+    ARepo.IgnoreWhitespace := Ignoring;
   end;
 end;
 

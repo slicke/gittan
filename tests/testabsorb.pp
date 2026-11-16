@@ -41,6 +41,7 @@ type
     procedure TestRunAll;
     procedure TestRunIntoFixup;
     procedure TestRunSome;
+    procedure TestRunWhitespaceIgnored;
     procedure TestRunNothing;
     procedure TestRunStale;
     procedure TestRunMoved;
@@ -421,6 +422,40 @@ begin
       StringReplace(GitOut(['status', '--porcelain']), #10, '|', [rfReplaceAll]));
     AssertEquals('one|two!!|three|four|five!|five-b|six!|seven|eight|nine|ten!',
       ReadLines('a.txt'));
+  finally
+    Plan.Free;
+  end;
+end;
+
+{ With whitespace ignored in the view, a change of blanks alone is still
+  a change of its own: it is not taken into the commit of the change
+  put there, and stays in the work tree. }
+procedure TAbsorbTest.TestRunWhitespaceIgnored;
+var
+  Plan: TGittanAbsorbPlan;
+  Chosen: array of boolean;
+  Commits, h: integer;
+  Conflicts, Stopped: boolean;
+  Err: string;
+begin
+  MakeBranch;
+  WriteLines('a.txt', ['one', 'two!', 'three', 'four', 'five!!', 'six!', 'seven', 'eight',
+    'nine  ', 'ten']);
+  FRepo.IgnoreWhitespace := True;
+  Plan := TGittanAbsorbPlan.Create;
+  try
+    AssertEquals('', Build(Plan, ['a.txt']));
+    AssertTrue('the view still ignores it', FRepo.IgnoreWhitespace);
+    AssertEquals('two hunks', 2, Length(Plan.Hunks));
+    Chosen := nil;
+    SetLength(Chosen, Length(Plan.Hunks));
+    for h := 0 to High(Plan.Hunks) do
+      Chosen[h] := Plan.Hunks[h].Line = 5;
+    AssertTrue('run: ' + Err, AbsorbRun(FRepo, Plan, Chosen, [], Commits, Conflicts,
+      Stopped, Err));
+    AssertEquals('one|two!|three|four|five!!|six!|seven|eight|nine|ten',
+      StringReplace(GitOut(['show', 'HEAD:a.txt']), #10, '|', [rfReplaceAll]));
+    AssertEquals('one|two!|three|four|five!!|six!|seven|eight|nine  |ten', ReadLines('a.txt'));
   finally
     Plan.Free;
   end;
