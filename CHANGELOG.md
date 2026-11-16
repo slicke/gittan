@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- At a high DPI in a low window, the Changes and Commit headings and the tree of changed files no longer disappear under the Commit section: its tip goes and its message box shrinks first.
 - On Linux with GTK3, Gittan no longer stops at startup with "Division by zero" when no AI agent is installed.
 - A pull request with more review comments than Gittan reads (over 100 replies in a thread, or 2000 threads) says so, where the rest were left out unsaid.
 - At a display scale above 100 % on Windows and Linux, the rounded corners, check marks, close crosses and lines of the summary, banners, notices, popup lists and image view scale with the rest.

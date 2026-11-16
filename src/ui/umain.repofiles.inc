@@ -133,10 +133,56 @@ end;
   each while both the Repository and the Submodules sections show. The
   tree of changed files gives way last: it keeps room for its rows as
   long as the open sections keep MinSectionRows each. }
+{ The Commit section gives up room before it runs over the headers and
+  the tree of changed files above it, which a high DPI in a low window
+  did (the page rows, the filter field and a tall tip left the tree
+  nothing and hid the Changes and Commit headings): first the tick tip
+  goes, it can be read again with more room, then the message box
+  shrinks down to CommitMemoMin. A note that says something of this
+  commit stays. }
+procedure TRepoFrame.FitCommitPanel;
+var
+  Avail, Full, Over, MemoFull, MemoLeast: integer;
+  TipWanted, TipShown, NoRoom: boolean;
+begin
+  if FFittingCommit or (FCommitPanel = nil) or not FCommitPanel.Visible then
+    Exit;
+  Avail := FTreePanel.ClientHeight - Px(MinFileTree);
+  if FSideNav <> nil then
+    Dec(Avail, FSideNav.Top + FSideNav.Height);
+  if FRepoPanel.Visible then
+    Dec(Avail, FRepoHeader.Height);
+  if (FSubPanel <> nil) and FSubPanel.Visible then
+    Dec(Avail, FSubHeader.Height);
+  TipWanted := FCommitBox.Visible and (FCommitNote.Text = rsCommitTickHint);
+  TipShown := TipWanted and FCommitNote.Visible;
+  if TipShown then
+    FTipHeight := FCommitNote.Height + FCommitNote.BorderSpacing.Top;
+  MemoFull := Px(CommitMemoHeight);
+  MemoLeast := Px(CommitMemoMin);
+  { The panel's height with the whole message box and the tip. }
+  Full := FCommitPanel.Height;
+  if FCommitBox.Visible then
+    Inc(Full, MemoFull - FCommitMemo.Height);
+  if TipWanted and not TipShown then
+    Inc(Full, FTipHeight);
+  Over := Full - Avail;
+  NoRoom := TipWanted and (Over > 0);
+  if NoRoom then
+    Dec(Over, FTipHeight);
+  FFittingCommit := True;
+  try
+    FTipNoRoom := NoRoom;
+    if TipWanted then
+      FCommitNote.Visible := not NoRoom;
+    FCommitMemo.Height := MemoFull - EnsureRange(Over, 0, MemoFull - MemoLeast);
+  finally
+    FFittingCommit := False;
+  end;
+end;
+
 procedure TRepoFrame.LayoutRepoFiles;
 const
-  { The least the tree of changed files keeps of the panel. }
-  MinFileTree = 80;
   { The rows an open section keeps before the tree of changed files
     gives up any of its own. }
   MinSectionRows = 2;
@@ -183,6 +229,7 @@ var
   end;
 
 begin
+  FitCommitPanel;
   Limit := FTreePanel.ClientHeight div 2;
   if (FSubPanel <> nil) and FSubPanel.Visible and FRepoPanel.Visible then
     Limit := FTreePanel.ClientHeight div 3;

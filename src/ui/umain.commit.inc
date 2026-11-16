@@ -73,7 +73,7 @@ begin
   FCommitMemo := TCommitMemo.Create(Self);
   FCommitMemo.Align := alTop;
   FCommitMemo.Top := 500;
-  FCommitMemo.Height := 84;
+  FCommitMemo.Height := Px(CommitMemoHeight);
   FCommitMemo.WordWrap := True;
   FCommitMemo.ScrollBars := ssAutoVertical;
   FCommitMemo.WantReturns := True;
@@ -685,7 +685,8 @@ begin
   end
   else
     FCommitNote.Icon := -1;
-  FCommitNote.Visible := Note <> '';
+  FCommitNote.Visible := (Note <> '') and
+    not (FTipNoRoom and (Note = rsCommitTickHint));
   UpdateBisectState;
   if FCommitItem <> nil then
     FCommitItem.Enabled := FRepo.Root <> '';

@@ -601,6 +601,11 @@ type
       tree while it chooses what to commit. }
     FTickSepItem, FTickAllItem, FUntickAllItem: TMenuItem;
     FCommitNote: TGittanHintBox;
+    { The tick tip is left out while the panel has no room for it
+      (FitCommitPanel), FTipHeight what it took when it last showed;
+      FFittingCommit keeps the panel's own resize out meanwhile. }
+    FTipNoRoom, FFittingCommit: boolean;
+    FTipHeight: integer;
     FCommitItem, FIdentityItem: TMenuItem;
     FCommitJob: TGittanCommitJob;
     { A commit running as a fixup of a commit from the graph's menu
@@ -2058,6 +2063,7 @@ type
     procedure ColorRepoHeader;
     procedure FillRepoFiles;
     procedure LayoutRepoFiles;
+    procedure FitCommitPanel;
     procedure RepoHeaderToggle(Sender: TObject);
     procedure FileTreeFolded(Sender: TObject; Node: TTreeNode);
     procedure TreePanelResize(Sender: TObject);
@@ -4041,6 +4047,12 @@ const
   navProject = 6;
   { The tag of Automatic in the list of the kinds of project. }
   KindsAutomatic = -2;
+  { The least the tree of changed files keeps of the tree panel, and the
+    message box's height, which it shrinks to at least CommitMemoMin
+    while the panel is short of room (FitCommitPanel); 96-DPI pixels. }
+  MinFileTree = 80;
+  CommitMemoHeight = 84;
+  CommitMemoMin = 44;
   { Scrolling on past the bottom of a file goes to the next one, and
     past the top to the previous: the wheel delta the pull needs (120 is
     one notch of a mouse wheel, 8 one pixel of a trackpad on macOS), the
