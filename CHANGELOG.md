@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Fixed
+
+- An extension's command no longer gets the file's path or the selected code without the data permission, nor the repository's folder unless it may also run programs.
 - Git Flow's Finish merges the branch when a tag has the same name, where git merged the tag's older commit and Finish then deleted the branch with the commits after it.
 - Discard is no longer offered on a renamed file, where it emptied the file, nor on a file taken out of the index with `git rm --cached` but still on disk, where it wrote the file's content in front of itself.
 - A file whose name holds `[`, `*` or `?` shows its own changes, where `[ab].txt` also showed those of `a.txt`, and Leave Out and Put into Its Commit wrote them into it.

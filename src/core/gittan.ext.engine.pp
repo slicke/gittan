@@ -3706,6 +3706,35 @@ begin
   end;
 end;
 
+{ What a command of an extension granted AGranted gets of its context:
+  without data no file's path and no selected code, and no repository's
+  root unless exec gives it anyway (git and programs run there, which a
+  Batch operation with exec alone needs to name its repository). }
+function CommandContextFor(AGranted: TExtPermSet; const AJson: string): string;
+var
+  Data: TJSONData;
+  Key: string;
+begin
+  if epData in AGranted then
+    Exit(AJson);
+  Result := '{}';
+  try
+    Data := GetJSON(AJson);
+  except
+    Exit;
+  end;
+  try
+    if not (Data is TJSONObject) then
+      Exit;
+    for Key in TStringArray.Create('path', 'selection', 'repo') do
+      if (Key <> 'repo') or not (epExec in AGranted) then
+        TJSONObject(Data).Delete(Key);
+    Result := Data.AsJSON;
+  finally
+    Data.Free;
+  end;
+end;
+
 function TGittanExtEngine.GrantedForContext(ctx: JSContext): TExtPermSet;
 var
   i: integer;
@@ -3866,7 +3895,7 @@ begin
   Result := True;
   Func := JS_DupValue(Cmd.Ctx, Cmd.Func);
   try
-    arg := ParseJsonIn(Cmd.Ctx, AContextJson);
+    arg := ParseJsonIn(Cmd.Ctx, CommandContextFor(GrantedForContext(Cmd.Ctx), AContextJson));
     ret := JS_Call(Cmd.Ctx, Func, JS_UNDEFINED, 1, @arg);
     if JS_IsException(ret) then
       DumpJSError(Cmd.Ctx);

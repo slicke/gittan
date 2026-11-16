@@ -78,6 +78,7 @@ type
     procedure TearDown; override;
   published
     procedure TestCommandRegisteredAndRun;
+    procedure TestCommandContextNeedsData;
     procedure TestCommandUnregister;
     procedure TestListenerCancels;
     procedure TestListenerScopedToRepos;
@@ -314,8 +315,32 @@ begin
   AssertFalse('not in the editor popup', cwEditorPopup in Cmd.Where);
   AssertTrue('runs', FEngine.RunCommand(TGittanExtRegistry.CommandKey('hello', 'hi'),
     '{"repo": "/r", "path": "a.txt"}'));
-  AssertEquals('got its context', '/r:a.txt', EvalIn(Info^.Ctx, 'globalThis.ran'));
+  AssertEquals('no data, no file', 'undefined:undefined', EvalIn(Info^.Ctx, 'globalThis.ran'));
   AssertFalse('no such command', FEngine.RunCommand('hello'#9'nope', '{}'));
+end;
+
+{ Without data a command learns neither the file nor the code; exec keeps the
+  repository's root, which it could run git in anyway. }
+procedure TExtEngineTest.TestCommandContextNeedsData;
+const
+  Script = 'Gittan.commands.register({id: "c", title: "C", run: function (c) {' +
+    ' globalThis.ran = [c.repo, c.path, c.selection, c.line].join("|"); }});';
+  Ctx = '{"repo": "/r", "path": "a.txt", "selection": "code", "line": 3}';
+var
+  Plain, Exec, Data: PExtContextInfo;
+begin
+  Plain := Load('plain', Script, PermBaseline);
+  Exec := Load('exec', Script, PermBaseline + [epExec]);
+  Data := Load('data', Script, PermBaseline + [epData]);
+  AssertLoaded('plain', string(FEngine.ExtExecuteFile(Plain)));
+  AssertLoaded('exec', string(FEngine.ExtExecuteFile(Exec)));
+  AssertLoaded('data', string(FEngine.ExtExecuteFile(Data)));
+  AssertTrue(FEngine.RunCommand(TGittanExtRegistry.CommandKey('plain', 'c'), Ctx));
+  AssertTrue(FEngine.RunCommand(TGittanExtRegistry.CommandKey('exec', 'c'), Ctx));
+  AssertTrue(FEngine.RunCommand(TGittanExtRegistry.CommandKey('data', 'c'), Ctx));
+  AssertEquals('plain', '|||3', EvalIn(Plain^.Ctx, 'globalThis.ran'));
+  AssertEquals('exec', '/r|||3', EvalIn(Exec^.Ctx, 'globalThis.ran'));
+  AssertEquals('data', '/r|a.txt|code|3', EvalIn(Data^.Ctx, 'globalThis.ran'));
 end;
 
 procedure TExtEngineTest.TestCommandUnregister;
@@ -551,7 +576,7 @@ begin
     '  if (c.repo === "/bad") throw new Error("boom");' +
     '  if (c.repo === "/loop") { var o = {}; o.self = o; return o; }' +
     '  return c.repo + "!"; }});' +
-    'globalThis.typeOk = typeof Gittan._deliver;', PermBaseline);
+    'globalThis.typeOk = typeof Gittan._deliver;', PermBaseline + [epExec]);
   AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
   AssertEquals('deliver out of reach', 'undefined', EvalIn(Info^.Ctx, 'globalThis.typeOk'));
   AssertEquals('three', 3, FEngine.Registry.CommandCount);
