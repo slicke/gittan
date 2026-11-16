@@ -505,7 +505,9 @@ type
       rebasing, as on the command line. }
     function Pull(AMode: TGittanPullMode; out ADiverged: boolean): boolean;
     {** Pushes the branch to its upstream (`git push <remote>
-      HEAD:<branch>`, whatever push.default says), or, without one, to a
+      HEAD:<branch>`), to its pushRemote or remote.pushDefault when one
+      is set, and under its own name when the upstream's differs (unless
+      push.default is upstream), or, without an upstream, to a
       branch of the same name on the remote RemoteFor gives, which then
       becomes its upstream (-u). False, with git's reason in Error, when
       nothing was pushed: ARejected is then set when the remote has
@@ -549,8 +551,9 @@ type
       pushes to to APushUrl (`git remote set-url`, with --push); with
       APushUrl empty or AUrl it pushes to AUrl, any push URL unset. }
     function SetRemoteUrls(const AName, AUrl, APushUrl: string): boolean;
-    {** The remote a push goes to: that of the current branch's upstream,
-      else the one RemoteFor gives; empty when there is none. }
+    {** The remote a push of the current branch goes to: its pushRemote,
+      else remote.pushDefault, else its upstream's remote, else the one
+      RemoteFor gives; empty when there is none. }
     function PushRemote: string;
     {** Whether the repository has the hook AName (pre-push, say): a file
       of that name in its hooks folder, `core.hooksPath` (husky's
@@ -4788,9 +4791,45 @@ begin
     Result := False;
 end;
 
+{ A config value of ARoot, trimmed; '' when it is not set. }
+function ConfigIn(const ARoot, AKey: string): string;
+var
+  Err: string;
+begin
+  if not RunGitIn(ARoot, ['config', AKey], Result, Err) then
+    Result := '';
+  Result := Trim(Result);
+end;
+
+{ The remote a push of branch AName goes to, as git picks it:
+  branch.<name>.pushRemote, else remote.pushDefault, else AUpRemote (the
+  upstream's remote). ADest is the branch there: the upstream's (AMerge)
+  only when the push goes to the upstream's remote and the upstream has
+  the branch's own name, or push.default is upstream; else the branch's
+  own name. So a branch made from origin/main is never pushed onto main,
+  which git's own push (push.default simple) refuses as well. }
+function PushTarget(const ARoot, AName, AUpRemote, AMerge: string;
+  out ADest: string): string;
+var
+  Mode: string;
+begin
+  Result := ConfigIn(ARoot, 'branch.' + AName + '.pushRemote');
+  if Result = '' then
+    Result := ConfigIn(ARoot, 'remote.pushDefault');
+  if Result = '' then
+    Result := AUpRemote;
+  ADest := 'refs/heads/' + AName;
+  if (Result = AUpRemote) and (AMerge <> '') then
+  begin
+    Mode := LowerCase(ConfigIn(ARoot, 'push.default'));
+    if (AMerge = ADest) or (Mode = 'upstream') or (Mode = 'tracking') then
+      ADest := AMerge;
+  end;
+end;
+
 function TGittanRepo.Push(out ARejected: boolean): boolean;
 var
-  Name, Remote, Merge: string;
+  Name, Remote, Merge, Dest: string;
 begin
   ARejected := False;
   Result := False;
@@ -4802,22 +4841,26 @@ begin
     Exit;
   end;
   Name := Trim(Name);
-  if RunGit(FRoot, ['config', 'branch.' + Name + '.remote'], Remote) and
-    RunGit(FRoot, ['config', 'branch.' + Name + '.merge'], Merge) and
-    (Trim(Remote) <> '') and (Trim(Merge) <> '') and (Trim(Remote) <> '.') then
-    Result := RunRemote(['push', '--progress', Trim(Remote), 'HEAD:' + Trim(Merge)])
-  else if Trim(Remote) = '.' then
+  Remote := ConfigIn(FRoot, 'branch.' + Name + '.remote');
+  Merge := ConfigIn(FRoot, 'branch.' + Name + '.merge');
+  if (Remote = '.') or ((Remote <> '') and (Merge <> '')) then
   begin
-    { A branch tracking a local one: "." is the repository itself, and
-      a push there would move the local branch, not reach a server. The
-      branch goes to the remote under its own name, its upstream kept. }
-    Remote := RemoteFor('');
+    { "." is the repository itself (a branch tracking a local one): a push
+      there would move the local branch, not reach a server. The branch
+      goes to the remote under its own name, its upstream kept. }
+    if Remote = '.' then
+    begin
+      Remote := RemoteFor('');
+      Merge := '';
+    end;
+    if Remote <> '' then
+      Remote := PushTarget(FRoot, Name, Remote, Merge, Dest);
     if Remote = '' then
     begin
       FError := 'The repository has no remote to push to.';
       Exit;
     end;
-    Result := RunRemote(['push', '--progress', Remote, 'HEAD:refs/heads/' + Name]);
+    Result := RunRemote(['push', '--progress', Remote, 'HEAD:' + Dest]);
   end
   else
   begin
@@ -4838,7 +4881,7 @@ end;
   with "stale info" when the remote's branch is not there. }
 function TGittanRepo.ForcePush(out AStale, AUnseen: boolean): boolean;
 var
-  Name, Remote, Merge: string;
+  Name, Remote, Merge, Dest: string;
 begin
   AStale := False;
   AUnseen := False;
@@ -4866,15 +4909,17 @@ begin
   if Remote = '.' then
   begin
     Remote := RemoteFor('');
-    if Remote = '' then
-    begin
-      FError := 'The repository has no remote to push to.';
-      Exit;
-    end;
-    Merge := 'refs/heads/' + Name;
+    Merge := '';
+  end;
+  if Remote <> '' then
+    Remote := PushTarget(FRoot, Name, Remote, Merge, Dest);
+  if Remote = '' then
+  begin
+    FError := 'The repository has no remote to push to.';
+    Exit;
   end;
   Result := RunRemote(['push', '--progress', '--force-with-lease', '--force-if-includes',
-    Remote, 'HEAD:' + Merge]);
+    Remote, 'HEAD:' + Dest]);
   if not Result then
   begin
     AStale := Pos('stale info', FError) > 0;
@@ -4961,9 +5006,15 @@ begin
   Result := '';
   if FRoot = '' then
     Exit;
-  if HeadBranchIn(FRoot, Name) and
-    RunGit(FRoot, ['config', 'branch.' + Trim(Name) + '.remote'], Result) then
-    Result := Trim(Result);
+  if HeadBranchIn(FRoot, Name) then
+  begin
+    Name := Trim(Name);
+    Result := ConfigIn(FRoot, 'branch.' + Name + '.pushRemote');
+    if Result = '' then
+      Result := ConfigIn(FRoot, 'remote.pushDefault');
+    if Result = '' then
+      Result := ConfigIn(FRoot, 'branch.' + Name + '.remote');
+  end;
   { "." is the repository itself, for a branch tracking a local one. }
   if (Result = '') or (Result = '.') then
     Result := RemoteFor('');

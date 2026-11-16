@@ -509,7 +509,18 @@ begin
     if AskDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
       mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave,
       'NoCancel'], 0) = mrYes then
-      SaveEdit(False)
+    begin
+      { A failed save (a locked or read-only file) asks again: the caller
+        replaces the text next, so giving up has to be the user's word. }
+      while not SaveEdit(False) do
+        if AskDlg(rsAppName, Format(rsSaveFailedAsk, [ExtractFileName(FEditPath)]),
+          mtWarning, [mrYes, rsSaveAgain, 'IsDefault', mrNo, rsDontSave,
+          'NoCancel'], 0) <> mrYes then
+        begin
+          Edit.Modified := False;
+          Break;
+        end;
+    end
     else
       Edit.Modified := False;
   finally

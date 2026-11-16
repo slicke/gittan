@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Push sends a branch made from another one's upstream (`git switch -c fix origin/main`) to a branch of its own name, where it pushed the commits onto main; it also honours `pushRemote` and `remote.pushDefault`, so in a fork setup the push goes to the fork.
+- An extension's `alert`, `Gittan.confirm` and `Gittan.log` with an object whose text changes each time it is read no longer overwrite Gittan's memory.
+- Saving a file in the editor that fails (a locked or read-only file) before going to another file asks again, where the edits were dropped.
+- Next Conflict in the merge editor with the last row at the top no longer reads before the start of the rows.
+- Quitting or closing a tab while a command from `.gittan` runs no longer reads the command after it was freed.
 - An extension's command no longer gets the file's path or the selected code without the data permission, nor the repository's folder unless it may also run programs.
 - Git Flow's Finish merges the branch when a tag has the same name, where git merged the tag's older commit and Finish then deleted the branch with the commits after it.
 - Discard is no longer offered on a renamed file, where it emptied the file, nor on a file taken out of the index with `git rm --cached` but still on disk, where it wrote the file's content in front of itself.

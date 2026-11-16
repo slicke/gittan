@@ -91,6 +91,7 @@ type
     procedure TestToolSearchPath;
     procedure TestNodeManagerBins;
     procedure TestPushFetchPull;
+    procedure TestPushTarget;
     procedure TestPushHook;
     procedure TestPullDiverged;
     procedure TestCommitTemplate;
@@ -2495,6 +2496,67 @@ begin
   finally
     RemoveTree(Remote);
     RemoveTree(Other);
+  end;
+end;
+
+{ A branch made from origin/main tracks main but is pushed under its own
+  name, as git's push.default simple would have it, unless push.default
+  is upstream; remote.pushDefault sends it to another remote. }
+procedure TGitRepoTest.TestPushTarget;
+var
+  Remote, Fork, Output, Main, MainTip: string;
+  Code: integer;
+  Rejected, Stale, Unseen: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Remote := FDir + '-remote';
+  Fork := FDir + '-fork';
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
+    [poStderrToOutPut]);
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Fork], Output, Code,
+    [poStderrToOutPut]);
+  try
+    Git(['remote', 'add', 'origin', Remote]);
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    Main := Trim(Git(['branch', '--show-current']));
+    MainTip := Trim(Git(['rev-parse', 'HEAD']));
+    Git(['checkout', '-q', '-b', 'fix', '--track', 'origin/' + Main]);
+    WriteFile('a.txt', 'fix'#10);
+    Commit('fix');
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    AssertEquals('main untouched', MainTip,
+      Trim(Git(['--git-dir=' + Remote, 'rev-parse', 'refs/heads/' + Main])));
+    AssertEquals('pushed as fix', Trim(Git(['rev-parse', 'HEAD'])),
+      Trim(Git(['--git-dir=' + Remote, 'rev-parse', 'refs/heads/fix'])));
+    Git(['commit', '-q', '--amend', '-m', 'fix again']);
+    AssertTrue(FRepo.Error, FRepo.ForcePush(Stale, Unseen));
+    AssertEquals('force left main alone', MainTip,
+      Trim(Git(['--git-dir=' + Remote, 'rev-parse', 'refs/heads/' + Main])));
+    AssertEquals('force moved fix', Trim(Git(['rev-parse', 'HEAD'])),
+      Trim(Git(['--git-dir=' + Remote, 'rev-parse', 'refs/heads/fix'])));
+
+    Git(['remote', 'add', 'fork', Fork]);
+    Git(['config', 'remote.pushDefault', 'fork']);
+    AssertEquals('fork', FRepo.PushRemote);
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    AssertEquals('pushed to the fork', Trim(Git(['rev-parse', 'HEAD'])),
+      Trim(Git(['--git-dir=' + Fork, 'rev-parse', 'refs/heads/fix'])));
+    Git(['config', '--unset', 'remote.pushDefault']);
+    AssertEquals('origin', FRepo.PushRemote);
+
+    Git(['config', 'push.default', 'upstream']);
+    Git(['reset', '-q', '--hard', 'origin/' + Main]);
+    WriteFile('a.txt', 'onto main'#10);
+    Commit('onto main');
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    AssertEquals('upstream mode pushes onto main', Trim(Git(['rev-parse', 'HEAD'])),
+      Trim(Git(['--git-dir=' + Remote, 'rev-parse', 'refs/heads/' + Main])));
+  finally
+    RemoveTree(Remote);
+    RemoveTree(Fork);
   end;
 end;
 

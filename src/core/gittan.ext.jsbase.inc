@@ -49,8 +49,6 @@ argc: integer; argv: PJSValues; magic: integer);
 var
   i: integer;
   output: rawutf8;
-  totalLen: integer;
-  p: PAnsiChar;
 begin
   res^ := JS_UNDEFINED;
   if argc <= 0 then
@@ -58,16 +56,10 @@ begin
     TGittanExtEngine.Instance.alert('', TGittanExtEngine.Instance.ExtensionNameForContext(ctx));
     Exit;
   end;
-  totalLen := 0;
+  // One conversion an argument: a toString may answer differently each time
+  output := '';
   for i := 0 to argc - 1 do
-    Inc(totalLen, Length(ctx^.ToUtf8(argv^[i])));
-  SetLength(output, totalLen);
-  p := PAnsiChar(output);
-  for i := 0 to argc - 1 do
-  begin
-    Move(PAnsiChar(ctx^.ToUtf8(argv^[i]))^, p^, Length(ctx^.ToUtf8(argv^[i])));
-    Inc(p, Length(ctx^.ToUtf8(argv^[i])));
-  end;
+    output := output + ctx^.ToUtf8(argv^[i]);
   TGittanExtEngine.Instance.alert(Output, TGittanExtEngine.Instance.ExtensionNameForContext(ctx));
 end;
 
@@ -86,24 +78,11 @@ argc: integer; argv: PJSValues; magic: integer);
 var
   i: integer;
   output: rawutf8;
-  totalLen: integer;
-  p: PAnsiChar;
 begin
   try
     output := '';
-    if argc > 0 then
-    begin
-      totalLen := 0;
-      for i := 0 to argc - 1 do
-        Inc(totalLen, Length(ctx^.ToUtf8(argv^[i])));
-      SetLength(output, totalLen);
-      p := PAnsiChar(output);
-      for i := 0 to argc - 1 do
-      begin
-        Move(PAnsiChar(ctx^.ToUtf8(argv^[i]))^, p^, Length(ctx^.ToUtf8(argv^[i])));
-        Inc(p, Length(ctx^.ToUtf8(argv^[i])));
-      end;
-    end;
+    for i := 0 to argc - 1 do
+      output := output + ctx^.ToUtf8(argv^[i]);
 
     if ExtHost.Confirm(TGittanExtEngine.Instance.ExtensionNameForContext(ctx), output) then
       res^ := JS_TRUE

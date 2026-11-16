@@ -3809,6 +3809,8 @@ resourcestring
   rsRevertAsk = 'Drop the changes to %s and load it from disk again?';
   rsSaved = 'Saved %s';
   rsSaveFailed = 'Could not save %s: %s';
+  rsSaveFailedAsk = 'Could not save %s. Try again, or drop the changes?';
+  rsSaveAgain = 'Save Again';
   rsChangedOnDisk = 'changed on disk';
   rsDiscardChange = '&Discard Change';
   rsUndoDiscard = '&Undo Discard';

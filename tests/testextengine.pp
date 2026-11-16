@@ -96,6 +96,7 @@ type
     procedure TestCommandKeysApart;
     procedure TestTimers;
     procedure TestNoExceptionLeftPending;
+    procedure TestDialogTextFromChangingToString;
   end;
 
 implementation
@@ -471,6 +472,24 @@ begin
   AssertEquals('console.log shown', 1, FHost.Logs.Count);
   AssertTrue('with its text', Pos('logged', FHost.Logs[0]) > 0);
   AssertEquals('under the extension''s name', 'dialogs · console.log: logged', FHost.Logs[0]);
+end;
+
+procedure TExtEngineTest.TestDialogTextFromChangingToString;
+var
+  Info: PExtContextInfo;
+begin
+  // Each toString call answers longer: the text is what one call gave,
+  // not a buffer sized by one call and filled by the next
+  FHost.ConfirmAnswer := True;
+  Info := Load('grows', 'globalThis.n = 0;' +
+    'var o = {toString() { globalThis.n++; return "x".repeat(globalThis.n * 16); }};' +
+    'alert(o); globalThis.c = Gittan.confirm(o);', PermBaseline);
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  AssertEquals('two dialogs', 2, FHost.Alerts.Count);
+  AssertEquals('alert has the first answer', StringOfChar('x', 16), FHost.Alerts[0]);
+  AssertEquals('confirm has the second', 'confirm:' + StringOfChar('x', 32),
+    FHost.Alerts[1]);
+  AssertEquals('toString called once each', '2', EvalIn(Info^.Ctx, 'String(globalThis.n)'));
 end;
 
 procedure TExtEngineTest.TestPermissionGate;

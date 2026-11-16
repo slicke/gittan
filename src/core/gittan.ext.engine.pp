@@ -999,22 +999,10 @@ procedure TGittanExtEngine.SetOutput(ctx: JSContext; const vals: PJSValues;
 const len: integer);
 var
   i: integer;
-  totalLen: integer;
-  temp: rawutf8;
-  p: PAnsiChar;
 begin
-  if len < 0 then Exit;
-  totalLen := 0;
+  // One conversion a value: a toString may answer differently each time
   for i := 0 to len do
-    Inc(totalLen, Length(ctx^.ToUtf8(vals^[i])));
-  SetLength(temp, totalLen);
-  p := PAnsiChar(temp);
-  for i := 0 to len do
-  begin
-    Move(PAnsiChar(ctx^.ToUtf8(vals^[i]))^, p^, Length(ctx^.ToUtf8(vals^[i])));
-    Inc(p, Length(ctx^.ToUtf8(vals^[i])));
-  end;
-  output := output + temp;
+    output := output + ctx^.ToUtf8(vals^[i]);
 end;
 
 {** Clear accumulated output buffer. }
