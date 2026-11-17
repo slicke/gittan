@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Quitting or leaving a repository no longer waits for a background fetch, or a fetch you started, from a server that does not answer; the fetch is given up. Fetch, pull and push over ssh give up a server that stays silent for a minute or takes over 30 seconds to connect, and over HTTP a transfer that has stalled for a minute, unless your own ssh command or `http.lowSpeedLimit`/`lowSpeedTime` settings say otherwise. A pull request fetch now uses the same ssh settings as the other fetches.
 - The commit graph with No Merges no longer takes seconds and hundreds of megabytes on a long history (20,000 commits took 44 s); it lays out at once.
 - A large changed or untracked file no longer slows down every poll of the repository and every commit, stash or switch: its content is hashed only while it is being written (a 512 MB file cost 1.7 s a poll, now 40 ms), and those commands no longer wait for a poll under way.
 - Showing a large diff or file no longer slows down with its size: git's output is read without copying all of it for every piece (a 130 MB diff took 7.5 s, now a fraction of a second).

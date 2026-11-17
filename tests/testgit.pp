@@ -2854,10 +2854,23 @@ begin
   AssertTrue(FRepo.Open(FDir));
   Env := FRepo.RemoteEnvironment;
   if (GetEnvironmentVariable('GIT_SSH_COMMAND') = '') and
-    (GetEnvironmentVariable('GIT_SSH') = '') then
+    (GetEnvironmentVariable('GIT_SSH') = '') and
+    (GetEnvironmentVariable('GIT_HTTP_LOW_SPEED_LIMIT') = '') and
+    (GetEnvironmentVariable('GIT_HTTP_LOW_SPEED_TIME') = '') then
   begin
+    AssertEquals(3, Length(Env));
+    AssertEquals('GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=30 ' +
+      '-o ServerAliveInterval=15 -o ServerAliveCountMax=4', Env[0]);
+    AssertEquals('GIT_HTTP_LOW_SPEED_LIMIT=1', Env[1]);
+    AssertEquals('GIT_HTTP_LOW_SPEED_TIME=60', Env[2]);
+    Env := RemoteEnvironmentIn(FDir, 20);
+    AssertTrue('a shorter time to connect',
+      Pos(' -o ConnectTimeout=20 ', Env[0]) > 0);
+    { A lowest speed for one host is the user's choice too. }
+    Git(['config', 'http.https://example.invalid/.lowSpeedTime', '600']);
+    Env := FRepo.RemoteEnvironment;
     AssertEquals(1, Length(Env));
-    AssertEquals('GIT_SSH_COMMAND=ssh -o BatchMode=yes', Env[0]);
+    AssertEquals('GIT_SSH_COMMAND=', Copy(Env[0], 1, Length('GIT_SSH_COMMAND=')));
   end;
   Git(['config', 'core.sshCommand', 'ssh -i key']);
   AssertEquals('the user runs ssh their own way', 0, Length(FRepo.RemoteEnvironment));

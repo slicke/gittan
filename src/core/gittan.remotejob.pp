@@ -37,10 +37,11 @@ type
     the LFS server or gives its lock up (LfsLock, LfsUnlock), a forced
     unlock also another user's.
     OnDone is called in the main thread when it is done, unless the job
-    has been stopped. A job is never broken off, as a pull stopped
+    has been stopped. A job is not broken off by Stop, as a pull stopped
     halfway would leave a merge behind: Stop only drops the handler, and
     the thread is not terminated for it (a thread terminated before it
-    starts never runs Execute). }
+    starts never runs Execute). A fetch alone (Abortable) may be given
+    up: Abort also ends its git, which leaves the refs as they were. }
   TGittanRemoteJob = class(TGittanJob)
   private
     FRoot, FArg, FRemote, FPath, FBranch, FPullRef: string;
@@ -53,7 +54,9 @@ type
     FLock: TRTLCriticalSection;
     FProgress: string;
     FReturn, FOutputPending: boolean;
+    FAborted: boolean;
     function GetProgress: string;
+    function Aborted: boolean;
     procedure Output(const AText: string);
     procedure NotifyOutput;
   protected
@@ -64,6 +67,13 @@ type
       AMode: TGittanPullMode = pmAuto; const AArg: string = '';
       const ARemote: string = '');
     destructor Destroy; override;
+    {** Whether Abort ends the job's git: a fetch (rkFetch, rkFetchPull,
+      rkLfsFetch, whose checkout of the work tree is let finish). }
+    function Abortable: boolean;
+    {** Stops the job, as Stop(False), and ends a git that only fetches
+      (Abortable) at once, so the thread is soon done; a job that is not
+      Abortable goes on to its end. }
+    procedure Abort;
     property Root: string read FRoot;
     property Kind: TGittanRemoteKind read FKind;
     property Mode: TGittanPullMode read FMode;
@@ -192,6 +202,23 @@ begin
   DoneCriticalSection(FLock);
 end;
 
+function TGittanRemoteJob.Abortable: boolean;
+begin
+  Result := FKind in [rkFetch, rkFetchPull, rkLfsFetch];
+end;
+
+function TGittanRemoteJob.Aborted: boolean;
+begin
+  Result := FAborted;
+end;
+
+procedure TGittanRemoteJob.Abort;
+begin
+  if Abortable then
+    FAborted := True;
+  Stop(False);
+end;
+
 function TGittanRemoteJob.GetProgress: string;
 begin
   EnterCriticalSection(FLock);
@@ -258,6 +285,8 @@ begin
   try
     Repo.OnOutput := @Output;
     Repo.NoVerify := FNoVerify;
+    if Abortable then
+      Repo.Cancel := @Aborted;
     if Repo.Open(FRoot) then
       case FKind of
         rkFetch: FOk := Repo.Fetch;

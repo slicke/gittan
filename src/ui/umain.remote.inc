@@ -583,8 +583,10 @@ begin
   end;
 end;
 
-{ A job is never broken off: one still running when the repository
-  changes goes on without a handler, and quitting waits for it. }
+{ A fetch (the background one, or one the user started) is given up,
+  its git ended, as nothing is lost with it; any other job goes on
+  without a handler when the repository changes, and quitting waits for
+  it, as a pull or a push stopped halfway would leave a mess. }
 procedure TRepoFrame.StopRemoteJob(AWait: boolean);
 begin
   FPendingRemote := False;
@@ -598,11 +600,8 @@ begin
   end;
   if FAutoFetchJob <> nil then
   begin
-    FAutoFetchJob.Stop(AWait);
-    if AWait then
-      FAutoFetchJob.Free
-    else
-      FBlameZombies.Add(FAutoFetchJob);
+    FAutoFetchJob.Abort;
+    FBlameZombies.Add(FAutoFetchJob);
     FAutoFetchJob := nil;
   end;
   if FRemoteJob = nil then
@@ -610,11 +609,19 @@ begin
   FNoticeTimer.Enabled := False;
   FNotice.Close;
   FAfterFetchRef := '';
-  FRemoteJob.Stop(AWait);
-  if AWait then
-    FRemoteJob.Free
-  else
+  if FRemoteJob.Abortable then
+  begin
+    FRemoteJob.Abort;
     FBlameZombies.Add(FRemoteJob);
+  end
+  else
+  begin
+    FRemoteJob.Stop(AWait);
+    if AWait then
+      FRemoteJob.Free
+    else
+      FBlameZombies.Add(FRemoteJob);
+  end;
   FRemoteJob := nil;
 end;
 

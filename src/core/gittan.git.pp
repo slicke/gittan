@@ -17,6 +17,16 @@ const
     holds a change, the work tree differs from the index. }
   flagStaged = 16;
   flagUnstaged = 32;
+  {** How long ssh may take to connect, in seconds (RemoteEnvironmentIn). }
+  RemoteConnectTimeout = 30;
+  {** ssh asks a silent server every RemoteAliveInterval seconds whether
+    it is still there, and gives up after RemoteAliveCount unanswered. }
+  RemoteAliveInterval = 15;
+  RemoteAliveCount = 4;
+  {** A transfer over HTTP below RemoteLowSpeedLimit bytes a second for
+    RemoteLowSpeedTime seconds is given up: one that has stalled. }
+  RemoteLowSpeedLimit = 1;
+  RemoteLowSpeedTime = 60;
 
 type
   {** A piece of what a git process wrote, on stdout or stderr, as it
@@ -303,6 +313,7 @@ type
     FHashKeys: TStringList;
     FHashValues: TStringArray;
     FOnOutput: TGittanOutputEvent;
+    FCancel: TGittanCancelEvent;
     { The last MergeConflicts of Snapshot: the two commits merged (HEAD's
       and the default branch's, '' for none), the count and the paths.
       The merge depends on the two commits alone, so a snapshot while
@@ -313,7 +324,7 @@ type
     function RunGit(const ADir: string; const AArgs: array of string;
       out AOutput: string; const AIndexFile: string = ''): boolean;
     function ResetToWorkTree(const ATarget: string): boolean;
-    function RunRemote(const AArgs: array of string): boolean;
+    function RunRemote(const AArgs: array of string; ACancellable: boolean = True): boolean;
     function StoredSize(const APath, ARef: string; out ASize: int64): boolean;
     function LfsPointerAt(const APath, ARef: string; AStoredSize: int64; out AOid: string;
       out ASize: int64): boolean;
@@ -572,8 +583,15 @@ type
       own: ssh in batch mode (`ssh -o BatchMode=yes`), so a key that
       needs its passphrase, or a host not yet known, fails at once with
       ssh's reason instead of waiting for an answer at a terminal nobody
-      sees; none when the user runs ssh their own way (GIT_SSH_COMMAND,
-      GIT_SSH or core.sshCommand). A key in the agent still works. }
+      sees, with a time to connect (RemoteConnectTimeout) and keepalives
+      that give up on a server silent for RemoteAliveInterval times
+      RemoteAliveCount seconds; no ssh command when the user runs ssh
+      their own way (GIT_SSH_COMMAND, GIT_SSH or core.sshCommand). A key
+      in the agent still works. Over HTTP, a transfer slower than
+      RemoteLowSpeedLimit bytes a second for RemoteLowSpeedTime seconds
+      is given up (GIT_HTTP_LOW_SPEED_LIMIT and _TIME), unless the
+      environment or the config (http.lowSpeedLimit or lowSpeedTime,
+      for any URL) sets either. }
     function RemoteEnvironment: TStringArray;
     {** Whether AName may name a branch (`git check-ref-format --branch`). }
     function IsBranchName(const AName: string): boolean;
@@ -1193,6 +1211,11 @@ type
       and the output of the hooks it runs. Called in the caller's
       thread. }
     property OnOutput: TGittanOutputEvent read FOnOutput write FOnOutput;
+    {** Asked as a fetch runs (Fetch, FetchPullRequest, the download of
+      LfsDownload); True ends its git, which then fails with no reason.
+      Called in the caller's thread. A pull, a push or a checkout is
+      never ended halfway, so only a job that fetches sets it. }
+    property Cancel: TGittanCancelEvent read FCancel write FCancel;
     {** Pushes, the deletions on a remote among them, without the
       pre-push hook (`git push --no-verify`). }
     property NoVerify: boolean read FNoVerify write FNoVerify;
@@ -1475,10 +1498,13 @@ function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
   const AInput: string = ''): boolean;
 
 {** The variables a command that goes to the network runs with in ADir
-  besides Gittan's own: ssh in batch mode (see
-  TGittanRepo.RemoteEnvironment), unless the environment or the config
-  read in ADir (the repository's, else the user's) says how to run ssh. }
-function RemoteEnvironmentIn(const ADir: string): TStringArray;
+  besides Gittan's own: ssh in batch mode with AConnectTimeout seconds
+  to connect and keepalives, unless the environment or the config read
+  in ADir (the repository's, else the user's) says how to run ssh, and
+  a lowest speed over HTTP, unless they set one (see
+  TGittanRepo.RemoteEnvironment). }
+function RemoteEnvironmentIn(const ADir: string;
+  AConnectTimeout: integer = 0): TStringArray;
 
 {** Clones the repository at AUrl into the folder ATarget (`git clone
   --progress`, with --recurse-submodules when ASubmodules is set), which
@@ -3529,14 +3555,11 @@ end;
 
 function TGittanRepo.FetchPullRequest(const ARemote: string; ANumber: integer;
   const APullRef, ABaseRef: string; out AHeadRef: string): boolean;
-var
-  Output: string;
 begin
   AHeadRef := 'refs/gittan/pr/' + IntToStr(ANumber);
   Result := (FRoot <> '') and (ARemote <> '') and (APullRef <> '') and
-    RunGit(FRoot, ['fetch', '--no-tags', '-q', ARemote, ABaseRef, '+' + APullRef + ':' +
-    AHeadRef],
-    Output);
+    RunRemote(['fetch', '--no-tags', '-q', ARemote, ABaseRef, '+' + APullRef + ':' +
+    AHeadRef]);
 end;
 
 function TGittanRepo.TakeSnapshot(out AId: string): boolean;
@@ -4514,19 +4537,50 @@ end;
   Fetch, pull and push go to the network: they run with
   RemoteEnvironment, and their output on stderr (progress, "To ...") is
   no failure. }
-function RemoteEnvironmentIn(const ADir: string): TStringArray;
+function RemoteEnvironmentIn(const ADir: string; AConnectTimeout: integer): TStringArray;
 var
-  Output, Err: string;
+  Output, Err, Line, Key: string;
+  OwnSsh, OwnSpeed: boolean;
+  Lines: TStringArray;
+  Sp: integer;
 begin
   Result := nil;
-  if (EnvironmentVariable('GIT_SSH_COMMAND') <> '') or
-    (EnvironmentVariable('GIT_SSH') <> '') then
-    Exit;
-  if (ADir <> '') and RunGitIn(ADir, ['config', 'core.sshCommand'], Output, Err) and
-    (Trim(Output) <> '') then
-    Exit;
-  SetLength(Result, 1);
-  Result[0] := 'GIT_SSH_COMMAND=ssh -o BatchMode=yes';
+  if AConnectTimeout <= 0 then
+    AConnectTimeout := RemoteConnectTimeout;
+  OwnSsh := (EnvironmentVariable('GIT_SSH_COMMAND') <> '') or
+    (EnvironmentVariable('GIT_SSH') <> '');
+  OwnSpeed := (EnvironmentVariable('GIT_HTTP_LOW_SPEED_LIMIT') <> '') or
+    (EnvironmentVariable('GIT_HTTP_LOW_SPEED_TIME') <> '');
+  { One git for both: the keys come lowercased but for a URL's part. }
+  if (ADir <> '') and not (OwnSsh and OwnSpeed) and RunGitIn(ADir,
+    ['config', '--get-regexp', '^(core\.sshcommand|http\..*lowspeed(limit|time))$'],
+    Output, Err) then
+  begin
+    Lines := Output.Split([#10]);
+    for Line in Lines do
+    begin
+      Sp := Pos(' ', Line);
+      if Sp = 0 then
+        Key := Trim(Line)
+      else
+        Key := Copy(Line, 1, Sp - 1);
+      if Key = 'core.sshcommand' then
+      begin
+        if (Sp > 0) and (Trim(Copy(Line, Sp + 1, MaxInt)) <> '') then
+          OwnSsh := True;
+      end
+      else if Key <> '' then
+        OwnSpeed := True;
+    end;
+  end;
+  if not OwnSsh then
+    Result := Concat(Result, ['GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=' +
+      IntToStr(AConnectTimeout) + ' -o ServerAliveInterval=' +
+      IntToStr(RemoteAliveInterval) + ' -o ServerAliveCountMax=' +
+      IntToStr(RemoteAliveCount)]);
+  if not OwnSpeed then
+    Result := Concat(Result, ['GIT_HTTP_LOW_SPEED_LIMIT=' + IntToStr(RemoteLowSpeedLimit),
+      'GIT_HTTP_LOW_SPEED_TIME=' + IntToStr(RemoteLowSpeedTime)]);
 end;
 
 function TGittanRepo.RemoteEnvironment: TStringArray;
@@ -4642,8 +4696,9 @@ begin
 end;
 
 { With NoVerify a push gets --no-verify right after the command. }
-function TGittanRepo.RunRemote(const AArgs: array of string): boolean;
+function TGittanRepo.RunRemote(const AArgs: array of string; ACancellable: boolean): boolean;
 var
+  Asked: TGittanCancelEvent;
   Output, Err: string;
   Args: TStringArray;
   i: integer;
@@ -4654,8 +4709,11 @@ begin
     Args[i] := AArgs[i];
   if FNoVerify and (Length(Args) > 0) and (Args[0] = 'push') then
     Insert('--no-verify', Args, 1);
+  Asked := nil;
+  if ACancellable then
+    Asked := FCancel;
   Result := (FRoot <> '') and RunGitEnv(FRoot, Args, RemoteEnvironment, Output, Err, '',
-    FOnOutput);
+    FOnOutput, Asked);
   if not Result then
     FError := Err;
 end;
@@ -8822,7 +8880,9 @@ begin
     Wanted := ['HEAD'];
   Pattern := LfsPattern(APath);
   Args := Concat(['lfs', 'fetch', '--include=' + Pattern, Remote], Wanted);
-  Result := RunRemote(Args) and (not WorkTree or RunRemote(['lfs', 'checkout', '--', Pattern]));
+  { The checkout writes the work tree, so it is not ended halfway. }
+  Result := RunRemote(Args) and (not WorkTree or
+    RunRemote(['lfs', 'checkout', '--', Pattern], False));
 end;
 
 { ---------------------------------------------------------------------------
