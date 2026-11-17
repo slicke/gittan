@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- An extension can have at most 64 calls such as `git.run` or `fetch` under way at once; more are rejected. Before, thousands at once could use up the threads, after which every reload waited a second and quitting two seconds for tasks that did not exist.
 - An extension file removed or changed while Gittan loads it no longer stops the extensions after it from loading with an error dialog, and the code that runs is the code whose permissions you approved, not the file read again.
 - A program an extension runs (`git.run`, `exec.run`, the forge's tool) is stopped when the extensions are reloaded, after ten minutes, or once it has written 32 MB, instead of keeping a thread for the whole session and making every reload and quit wait for it.
 - An extension can no longer register a Batch operation or a forge tab around `Gittan.batch` and `Gittan.forgeTabs`, which left a run on "Running on 1 of N…" or a tab on Loading for good.

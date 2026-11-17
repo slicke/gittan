@@ -103,6 +103,15 @@ function IsExtShuttingDown: boolean;
     reload paths wait until this drops to zero instead of a fixed delay. }
 function ActiveAsyncTaskCount: integer;
 
+const
+  {** The most tasks one context may have under way at once: a call past it
+      is rejected, so an extension cannot make threads until none can be
+      made, for itself and every other one. }
+  MaxAsyncTasksPerContext = 64;
+
+{** The tasks of ctx under way. }
+function AsyncTasksOf(ctx: JSContext): integer;
+
 {** Drain the runtime's pending Promise job queue, bounded by a small budget.
     Returns False when the budget stopped the drain with jobs still queued, so
     the caller knows the queue is not empty; True when it emptied (or a job
@@ -124,6 +133,59 @@ implementation
 var
 gExtShuttingDown: boolean = false;
 gActiveAsyncTasks: longint = 0;
+  { The contexts with tasks under way and how many each, under gTaskLock:
+    a task counts itself in on the main thread and out on its own. }
+gTaskLock: TRTLCriticalSection;
+gTaskContexts: array of JSContext;
+gTaskCounts: array of integer;
+
+procedure CountTask(ctx: JSContext; ADelta: integer);
+var
+  i, n: integer;
+begin
+  EnterCriticalSection(gTaskLock);
+  try
+    for i := 0 to High(gTaskContexts) do
+      if gTaskContexts[i] = ctx then
+      begin
+        Inc(gTaskCounts[i], ADelta);
+        if gTaskCounts[i] <= 0 then
+        begin
+          n := High(gTaskContexts);
+          gTaskContexts[i] := gTaskContexts[n];
+          gTaskCounts[i] := gTaskCounts[n];
+          SetLength(gTaskContexts, n);
+          SetLength(gTaskCounts, n);
+        end;
+        Exit;
+      end;
+    if ADelta > 0 then
+    begin
+      n := Length(gTaskContexts);
+      SetLength(gTaskContexts, n + 1);
+      SetLength(gTaskCounts, n + 1);
+      gTaskContexts[n] := ctx;
+      gTaskCounts[n] := ADelta;
+    end;
+  finally
+    LeaveCriticalSection(gTaskLock);
+  end;
+end;
+
+function AsyncTasksOf(ctx: JSContext): integer;
+var
+  i: integer;
+begin
+  Result := 0;
+  EnterCriticalSection(gTaskLock);
+  try
+    for i := 0 to High(gTaskContexts) do
+      if gTaskContexts[i] = ctx then
+        Exit(gTaskCounts[i]);
+  finally
+    LeaveCriticalSection(gTaskLock);
+  end;
+end;
 
 procedure SetExtShuttingDown(const Value: boolean);
 begin
@@ -164,8 +226,17 @@ begin
   // Count from creation (on the main thread) so shutdown waiters never observe
   // a started-but-not-yet-counted task; Execute decrements when done.
   InterLockedIncrement(gActiveAsyncTasks);
-  inherited Create(false);
-  // This will start the thread
+  CountTask(FContext, 1);
+  try
+    inherited Create(false);
+  except
+    { No thread: nothing will count it out, and the caller (AsyncTask)
+      rejects the promise and releases its values. }
+    CountTask(FContext, -1);
+    InterLockedDecrement(gActiveAsyncTasks);
+    FPairHeld := False;
+    raise;
+  end;
 end;
 
 {** Thread execution:
@@ -223,6 +294,7 @@ begin
     end;
     self.Terminate;
   finally
+    CountTask(FContext, -1);
     InterLockedDecrement(gActiveAsyncTasks);
   end;
 end;
@@ -378,5 +450,11 @@ begin
   end;
   ReleasePair;
 end;
+
+initialization
+  InitCriticalSection(gTaskLock);
+
+finalization
+  DoneCriticalSection(gTaskLock);
 
 end.

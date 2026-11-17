@@ -407,7 +407,9 @@ begin
   end;
 
   // 5) Validate arity against min/max constraints (unless min=-1 which means “free-form”).
-  //    On mismatch the promise is rejected and the task never runs.
+  //    On mismatch the promise is rejected and the task never runs, and so it
+  //    is when the context has MaxAsyncTasksPerContext running already.
+  arityMsg := '';
   if (not ((params >= cb^.params.min) and (params <= cb^.params.max))) and
     (cb^.params.min > -1) then
   begin
@@ -418,7 +420,31 @@ begin
       arityMsg := Format('[%s] Needs %d - %d parameters, but we got %d',
         [func, cb^.params.min, cb^.params.max, params]);
     ExtError(arityMsg);
+  end
+  else if AsyncTasksOf(ctx) >= MaxAsyncTasksPerContext then
+    arityMsg := Format('[%s] More than %d calls are under way at once; wait for some to end',
+      [func, MaxAsyncTasksPerContext])
+  else
+  begin
+    // 6) Kick off the asynchronous work.
+    //    The task is responsible for:
+    //      - Performing the actual native operation tied to 'func'
+    //      - Calling funcs[0] (resolve) or funcs[1] (reject) with a JS value
+    //      - Freeing any allocated argument/JS values when done
+    //    A thread that cannot be made (too many at once) leaves all of that
+    //    here: the promise is rejected below.
+    try
+      TJSAsyncTask.Create(ctx, cb^, @funcs);
+      // Avoid further use of params by the engine; ownership transferred to the task
+      cb^.params.values.Data := nil;
+    except
+      on E: Exception do
+        arityMsg := Format('[%s] %s', [func, E.Message]);
+    end;
+  end;
 
+  if arityMsg <> '' then
+  begin
     errVal := JS_NewString(ctx, pansichar(RawUtf8(arityMsg)));
     callRes := JS_Call(ctx, funcs[JprReject], JS_UNDEFINED, 1, @errVal);
     ctx^.FreeInlined(PJSValue(@callRes));
@@ -427,18 +453,7 @@ begin
     ctx^.FreeInlined(PJSValue(@funcs[JprReject]));
 
     FreeJSParameters(cb^.params.values.Data);
-    res^ := promise;
-    Exit;
   end;
-
-  // 6) Kick off the asynchronous work.
-  //    The task is responsible for:
-  //      - Performing the actual native operation tied to 'func'
-  //      - Calling funcs[0] (resolve) or funcs[1] (reject) with a JS value
-  //      - Freeing any allocated argument/JS values when done
-  TJSAsyncTask.Create(ctx, cb^, @funcs);
-  // Avoid further use of params by the engine; ownership transferred to the task
-  cb^.params.values.Data := nil;
 
   // 7) Return the Promise object to JavaScript immediately.
   res^ := promise;

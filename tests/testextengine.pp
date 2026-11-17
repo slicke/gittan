@@ -13,7 +13,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, gittan.ext.quickjs, gittan.ext.engine,
-  gittan.ext.functions, gittan.ext.host, gittan.ext.registry, gittan.ext.perm, gittan.reviews;
+  gittan.ext.functions, gittan.ext.promise, gittan.ext.host, gittan.ext.registry, gittan.ext.perm, gittan.reviews;
 
 type
 
@@ -106,6 +106,7 @@ type
     procedure TestUnloadWithPromisePending;
     procedure TestLogGoesToConsole;
     procedure TestNoExceptionCrossesExtensions;
+    procedure TestTasksCapped;
   end;
 
 implementation
@@ -625,6 +626,44 @@ begin
   Res := LoadResult('after2', 'alert("two"); "d";');
   AssertEquals('after a reason that cannot be shown', 'd', Res);
   AssertEquals('both alerts shown', 'one,two', FHost.Alerts.CommaText);
+end;
+
+{ An extension that starts many calls at once gets MaxAsyncTasksPerContext
+  of them run and the rest rejected, and every one counted out again. }
+procedure TExtEngineTest.TestTasksCapped;
+var
+  Info: PExtContextInfo;
+  GiveUpAt: QWord;
+begin
+  Info := Load('many', '', PermBaseline);
+  FEngine.BeginRegistration(Info);
+  try
+    FEngine.AddPromise('slowTask', @SlowTask, 0, 0, True);
+  finally
+    FEngine.EndRegistration;
+  end;
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  EvalIn(Info^.Ctx, 'globalThis.ok = 0; globalThis.no = 0; globalThis.why = "";' +
+    'for (var i = 0; i < 100; i++) slowTask().then(function () { globalThis.ok++; },' +
+    '  function (e) { globalThis.no++; globalThis.why = String(e); });');
+  AssertEquals('the cap of them under way', MaxAsyncTasksPerContext, AsyncTasksOf(Info^.Ctx));
+  GiveUpAt := GetTickCount64 + 10000;
+  while (EvalIn(Info^.Ctx, 'String(globalThis.ok + globalThis.no)') <> '100') and
+    (GetTickCount64 < GiveUpAt) do
+  begin
+    CheckSynchronize(10);
+    FEngine.PumpJobs;
+  end;
+  AssertEquals('run', IntToStr(MaxAsyncTasksPerContext), EvalIn(Info^.Ctx, 'String(globalThis.ok)'));
+  AssertEquals('rejected', IntToStr(100 - MaxAsyncTasksPerContext),
+    EvalIn(Info^.Ctx, 'String(globalThis.no)'));
+  AssertTrue(EvalIn(Info^.Ctx, 'globalThis.why'),
+    Pos('under way at once', EvalIn(Info^.Ctx, 'globalThis.why')) > 0);
+  GiveUpAt := GetTickCount64 + 5000;
+  while (ActiveAsyncTaskCount > 0) and (GetTickCount64 < GiveUpAt) do
+    CheckSynchronize(10);
+  AssertEquals('counted out', 0, AsyncTasksOf(Info^.Ctx));
+  AssertEquals('none left', 0, ActiveAsyncTaskCount);
 end;
 
 procedure TExtEngineTest.TestPermissionGate;
