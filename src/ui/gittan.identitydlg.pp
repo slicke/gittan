@@ -72,6 +72,11 @@ resourcestring
   rsIdentityDlgTestFailed = 'Signing failed: %s';
   rsIdentityDlgTestOther = 'Signed, but the key does not stand for the committer''s e-mail %s, ' +
     'so commits show as signed by someone else. Save puts the key under the e-mail above.';
+  { OpenPGP and X.509: Save adds no user id to a key, nor an e-mail to a
+    certificate. }
+  rsIdentityDlgTestOtherKey = 'Signed, but the key does not stand for the committer''s e-mail %s, ' +
+    'so commits show as signed by someone else. Pick a key or certificate with that e-mail, ' +
+    'or the e-mail the key has.';
 
 const
   DialogWidth = 480;
@@ -533,7 +538,12 @@ begin
     ssUnknownKey:
       Say(SysUtils.Format(rsIdentityDlgTestUnknown, [Commits[0].Signature.Key]));
     ssOtherSigner:
-      Say(SysUtils.Format(rsIdentityDlgTestOther, [Commits[0].Signature.Committer]));
+      { Only for SSH does Save put the key under the e-mail, in the
+        allowed signers file. }
+      if Commits[0].Signature.Format = sfSsh then
+        Say(SysUtils.Format(rsIdentityDlgTestOther, [Commits[0].Signature.Committer]))
+      else
+        Say(SysUtils.Format(rsIdentityDlgTestOtherKey, [Commits[0].Signature.Committer]));
   else
     Say(rsIdentityDlgTestUnchecked);
   end;
