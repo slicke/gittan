@@ -298,7 +298,8 @@ function SshFingerprint(const AKey: string): string;
 
 {** The principals fields of the lines of AText, an allowed signers
   file, whose key has the fingerprint AFingerprint; a cert-authority
-  line is none, its key signs no commit. }
+  line is none, its key signs no commit, nor is one whose namespaces
+  leave git out. Only the line's key counts, not a key in its comment. }
 function AllowedSignerPrincipals(const AText, AFingerprint: string): TStringArray;
 
 {** The e-mails of the user ids, not revoked, of the key in AOutput (gpg
@@ -632,12 +633,44 @@ begin
   end;
 end;
 
+{ The value of the option AName ("namespaces") in AOptions, an allowed
+  signers line's options field, without its quotes; whether it is there. }
+function SignerOption(const AOptions, AName: string; out AValue: string): boolean;
+var
+  Option: string;
+  i: integer;
+  Quoted: boolean;
+begin
+  AValue := '';
+  Result := False;
+  { Split at the commas outside quotes: a quoted value holds commas. }
+  Option := '';
+  Quoted := False;
+  for i := 1 to Length(AOptions) + 1 do
+    if (i > Length(AOptions)) or ((AOptions[i] = ',') and not Quoted) then
+    begin
+      if SameText(Copy(Option, 1, Length(AName) + 1), AName + '=') then
+      begin
+        AValue := Copy(Option, Length(AName) + 2, MaxInt);
+        if (Length(AValue) >= 2) and (AValue[1] = '"') and (AValue[Length(AValue)] = '"') then
+          AValue := Copy(AValue, 2, Length(AValue) - 2);
+        Exit(True);
+      end;
+      Option := '';
+    end
+    else
+    begin
+      if AOptions[i] = '"' then
+        Quoted := not Quoted;
+      Option := Option + AOptions[i];
+    end;
+end;
+
 function AllowedSignerPrincipals(const AText, AFingerprint: string): TStringArray;
 var
-  Line: string;
+  Line, Options, Spaces: string;
   Fields: TStringArray;
-  i: integer;
-  Authority: boolean;
+  KeyAt: integer;
 begin
   Result := nil;
   if AFingerprint = '' then
@@ -649,19 +682,32 @@ begin
     Fields := SignerFields(Trim(Line));
     if Length(Fields) < 3 then
       Continue;
-    { The options, if any, are the second field; the key is the first
-      field after the principals that a key's base64 follows. }
-    Authority := Pos('cert-authority', LowerCase(Fields[1])) > 0;
-    for i := 1 to High(Fields) - 1 do
-      if SshFingerprint(Fields[i] + ' ' + Fields[i + 1]) = AFingerprint then
-      begin
-        if not Authority then
-        begin
-          SetLength(Result, Length(Result) + 1);
-          Result[High(Result)] := Fields[0];
-        end;
-        Break;
-      end;
+    { The principals, the options if any, the key's type and base64, and
+      a comment, whose words are no key even when they read as one: the
+      options are there when the second field is no key. }
+    if SshFingerprint(Fields[1] + ' ' + Fields[2]) <> '' then
+    begin
+      Options := '';
+      KeyAt := 1;
+    end
+    else if Length(Fields) >= 4 then
+    begin
+      Options := Fields[1];
+      KeyAt := 2;
+    end
+    else
+      Continue;
+    if SshFingerprint(Fields[KeyAt] + ' ' + Fields[KeyAt + 1]) <> AFingerprint then
+      Continue;
+    { A certificate authority's key signs no commit, and a key limited to
+      other namespaces than git's does not sign commits under this name. }
+    if Pos('cert-authority', LowerCase(Options)) > 0 then
+      Continue;
+    if SignerOption(Options, 'namespaces', Spaces) and
+      not SshPrincipalMatches(Spaces, 'git') then
+      Continue;
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := Fields[0];
   end;
 end;
 

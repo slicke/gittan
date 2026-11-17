@@ -628,6 +628,18 @@ begin
     'b@x,c@x namespaces="git,file" ssh-ed25519 ' +
     'AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl', SshFingerprint(
     'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl'))[0]);
+  { A key in the comment is no key of the line; nor is one whose
+    namespaces leave git out. }
+  AssertEquals('a@x', ''.Join('|', AllowedSignerPrincipals(
+    'b@x ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIdvb6MD7FzQ0SSdDL7Xtn7S1vvDn4pO7kSeqm725Z+3 ' +
+    'note ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl'#10 +
+    'c@x namespaces="file" ssh-ed25519 ' +
+    'AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl'#10 +
+    'd@x valid-after="20200101",namespaces="file,*-not-git" ssh-ed25519 ' +
+    'AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl'#10 +
+    'a@x valid-after="20200101",namespaces="file,gi?" ssh-ed25519 ' +
+    'AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl', SshFingerprint(
+    'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl'))));
 
   Fprs := GpgKeyEmails('pub:u:255:22:AAAA:1::::::scESC::::::23::0:'#10 +
     'fpr:::::::::1111111111111111111111111111111111111111:'#10 +
