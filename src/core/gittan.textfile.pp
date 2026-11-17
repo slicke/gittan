@@ -197,16 +197,19 @@ end;
 function JsonTooDeep(const AJson: string): boolean;
 var
   i, Depth: integer;
+  Quote: char;
 begin
   Depth := 0;
   i := 1;
   while i <= Length(AJson) do
   begin
     case AJson[i] of
-      '"':
+      { GetJSON is not strict and reads a string in single quotes too. }
+      '"', '''':
       begin
+        Quote := AJson[i];
         Inc(i);
-        while (i <= Length(AJson)) and (AJson[i] <> '"') do
+        while (i <= Length(AJson)) and (AJson[i] <> Quote) do
         begin
           if AJson[i] = '\' then
             Inc(i);

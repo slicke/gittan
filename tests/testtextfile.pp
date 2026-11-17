@@ -162,6 +162,14 @@ begin
   AssertTrue('an escaped quote does not end it',
     JsonTooDeep('["\"", ' + StringOfChar('[', 500)));
   AssertFalse('closers do not go below none', JsonTooDeep(StringOfChar(']', 500) + '[1]'));
+  { GetJSON reads a string in single quotes too, where a double quote
+    is a character and hides nothing. }
+  AssertTrue('a double quote in a single-quoted string',
+    JsonTooDeep('[''"'', ' + StringOfChar('[', 500)));
+  AssertFalse('brackets in a single-quoted string',
+    JsonTooDeep('[''' + StringOfChar('[', 500) + ''']'));
+  AssertTrue('a single quote in a string',
+    JsonTooDeep('["''", ' + StringOfChar('[', 500)));
 end;
 
 procedure TTextFileTest.TestTomlTooDeep;
