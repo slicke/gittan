@@ -8454,8 +8454,9 @@ var
   Paths, Keys: TStringList;
   Values: TStringArray;
   Info: TSearchRec;
-  FileName, Id, Left, Right, Stamp, Hash, Cached: string;
+  FileName, Id, Left, Right, Stamp, Hash, Cached, Mark: string;
   i, k: integer;
+  Settled: boolean;
 
   { The name, time and size of each file in ADir, none when it is not
     there. }
@@ -8573,21 +8574,40 @@ begin
         Cached := '';
         if (FHashKeys <> nil) and FHashKeys.Find(Paths[i], k) then
           Cached := FHashValues[PtrInt(FHashKeys.Objects[k])];
-        if (Abs(Now - Info.TimeStamp) * SecsPerDay < FreshSeconds) and (Info.Size <= HashMax) then
+        { A hash taken while the file was fresh is marked so: a write of
+          the same size within the stamp's resolution after it would
+          keep it, so it is taken once more when the file has settled,
+          and only then kept as it is. }
+        Mark := '';
+        Settled := False;
+        if Copy(Cached, 1, Length(Stamp) + 1) = Stamp + #9 then
+        begin
+          Hash := Copy(Cached, Length(Stamp) + 2, MaxInt);
+          Settled := Pos(#9, Hash) = 0;
+          if not Settled then
+            Hash := Copy(Hash, 1, Pos(#9, Hash) - 1);
+        end;
+        if Abs(Now - Info.TimeStamp) * SecsPerDay < FreshSeconds then
+        begin
+          Mark := #9'fresh';
+          Settled := False;
+        end;
+        if not Settled and (Info.Size <= HashMax) and ((Mark <> '') or (Hash <> '')) then
+        begin
+          Hash := '';
           try
             Hash := MD5Print(MD5File(FileName));
           except
             { Gone or unreadable between the stat and the read; the stat
               says what it can. }
-          end
-        else if Copy(Cached, 1, Length(Stamp) + 1) = Stamp + #9 then
-          Hash := Copy(Cached, Length(Stamp) + 2, MaxInt);
+          end;
+        end;
         if Hash <> '' then
         begin
           Result := Result + #9 + Hash;
           Keys.AddObject(Paths[i], TObject(PtrInt(Length(Values))));
           SetLength(Values, Length(Values) + 1);
-          Values[High(Values)] := Stamp + #9 + Hash;
+          Values[High(Values)] := Stamp + #9 + Hash + Mark;
         end;
       end;
       Result := Result + #10;

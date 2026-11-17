@@ -651,10 +651,22 @@ begin
     end;
 end;
 
+{ The line of APath in AFingerprint. }
+function LineOf(const AFingerprint, APath: string): string;
+var
+  Line: string;
+begin
+  Result := '';
+  for Line in AFingerprint.Split([#10]) do
+    if Pos(APath + #9, Line) = 1 then
+      Exit(Line);
+end;
+
 procedure TGitRepoTest.TestFingerprint;
 
 var
   A, B: string;
+  Stamp: TDateTime;
 begin
   MakeHistory;
   WriteFile('a.txt', 'one'#10'zwei'#10'three'#10);
@@ -715,6 +727,19 @@ begin
   AssertEquals('fresh: time, size and hash', 3, TabsOfLine(FRepo.Fingerprint, 'new.txt'));
   AssertEquals(0, FileSetDate(FDir + PathDelim + 'new.txt', DateTimeToFileDate(Now - 1 / 24)));
   AssertEquals('old: time and size', 2, TabsOfLine(FRepo.Fingerprint, 'new.txt'));
+  { A write of the same size at the same time as one hashed while fresh,
+    seen only once the file has settled: it is hashed once more then. }
+  Stamp := Now - 1.5 / SecsPerDay;
+  WriteFile('new.txt', 'k'#10);
+  AssertEquals(0, FileSetDate(FDir + PathDelim + 'new.txt', DateTimeToFileDate(Stamp)));
+  A := LineOf(FRepo.Fingerprint, 'new.txt');
+  WriteFile('new.txt', 'j'#10);
+  AssertEquals(0, FileSetDate(FDir + PathDelim + 'new.txt', DateTimeToFileDate(Stamp)));
+  Sleep(1700);
+  B := LineOf(FRepo.Fingerprint, 'new.txt');
+  AssertEquals('settled: hashed', 3, TabsOfLine(B + #10, 'new.txt'));
+  AssertTrue('the write seen once settled', A <> B);
+  AssertEquals('and then kept', B, LineOf(FRepo.Fingerprint, 'new.txt'));
 end;
 
 { A snapshot holds the untracked files, and the whole tree comparison
