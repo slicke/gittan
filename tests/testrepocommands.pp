@@ -10,7 +10,7 @@ unit testrepocommands;
 interface
 
 uses
-  Classes, SysUtils, {$ifndef windows}BaseUnix,{$endif} fpcunit, testregistry,
+  Classes, SysUtils, StrUtils, {$ifndef windows}BaseUnix,{$endif} fpcunit, testregistry,
   gittan.repocommands, gittan.project, gittan.sha256, testhelpers;
 
 type
@@ -466,6 +466,10 @@ begin
     StringOfChar('[', 100000) + '}')));
   AssertEquals(0, Length(ParseCommandsToml('project = ' + StringOfChar('[', 100000), E)));
   AssertTrue(E, Pos('Nested deeper', E) > 0);
+  AssertEquals(0, Length(ParseCommandsToml(DupeString('a.', 45000) + 'c = 1', E)));
+  AssertTrue('a dotted key', Pos('Nested deeper', E) > 0);
+  AssertEquals(0, Length(ParseCommandsToml('[' + DupeString('a.', 45000) + 'c]'#10'x = 1', E)));
+  AssertTrue('a header', Pos('Nested deeper', E) > 0);
 end;
 
 procedure TRepoCommandsTest.TestMakefileTargets;

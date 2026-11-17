@@ -48,7 +48,8 @@ resourcestring
 function JsonTooDeep(const AJson: string): boolean;
 
 {** The same for TOML: its basic, literal and multi-line strings and its
-  comments left out, inline tables and arrays counted. }
+  comments left out, inline tables and arrays counted, and the parts of
+  a dotted key or table header (a.b.c, [a.b.c]) as one level each. }
 function TomlTooDeep(const AToml: string): boolean;
 
 {** S with every byte that does not start a valid UTF-8 character (a
@@ -293,7 +294,9 @@ end;
 
 function TomlTooDeep(const AToml: string): boolean;
 var
-  i, Depth: integer;
+  i, Depth, Dots, Carried: integer;
+  { What Carried was outside each bracket open. }
+  Outer: array[1..MaxNesting] of integer;
 
   function At(const AQuote: string): boolean;
   begin
@@ -332,8 +335,16 @@ var
     Inc(i);
   end;
 
+{ toml-fp makes a table of every part of a dotted key, a.b.c = 1 or
+  [a.b.c], and frees them by recursion too, so the dots count as levels:
+  those of the key and value being read (Dots, which a comma, a line or
+  a bracket starts again) on top of the brackets open and of the keys
+  that led into them (Carried). A dot in a value, the one of 1.5, adds
+  one to its key's. }
 begin
   Depth := 0;
+  Dots := 0;
+  Carried := 0;
   i := 1;
   while i <= Length(AToml) do
     if At('"""') then
@@ -348,17 +359,36 @@ begin
         '#':
           while (i <= Length(AToml)) and (AToml[i] <> #10) do
             Inc(i);
+        '.':
+        begin
+          Inc(Dots);
+          if Depth + Carried + Dots > MaxNesting then
+            Exit(True);
+          Inc(i);
+        end;
+        ',', #10:
+        begin
+          Dots := 0;
+          Inc(i);
+        end;
         '[', '{':
         begin
           Inc(Depth);
-          if Depth > MaxNesting then
+          if Depth + Carried + Dots > MaxNesting then
             Exit(True);
+          Outer[Depth] := Carried;
+          Inc(Carried, Dots);
+          Dots := 0;
           Inc(i);
         end;
         ']', '}':
         begin
           if Depth > 0 then
+          begin
+            Carried := Outer[Depth];
             Dec(Depth);
+          end;
+          Dots := 0;
           Inc(i);
         end;
         else

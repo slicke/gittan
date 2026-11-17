@@ -10,7 +10,7 @@ unit testrepoconfig;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.repoconfig, testhelpers;
+  Classes, SysUtils, StrUtils, fpcunit, testregistry, gittan.repoconfig, testhelpers;
 
 type
   TRepoConfigTest = class(TTestCase)
@@ -112,6 +112,10 @@ var
 begin
   C := ParseRepoConfig('project = ' + StringOfChar('[', 100000));
   AssertTrue(C.Error, Pos('Nested deeper', C.Error) > 0);
+  C := ParseRepoConfig(DupeString('a.', 45000) + 'c = 1');
+  AssertTrue('a dotted key', Pos('Nested deeper', C.Error) > 0);
+  C := ParseRepoConfig('[' + DupeString('a.', 45000) + 'c]'#10'x = 1');
+  AssertTrue('a header', Pos('Nested deeper', C.Error) > 0);
 end;
 
 procedure TRepoConfigTest.TestWrongTypes;

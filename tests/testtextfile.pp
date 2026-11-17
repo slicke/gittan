@@ -8,8 +8,8 @@ unit testtextfile;
 interface
 
 uses
-  Classes, SysUtils, {$IFDEF UNIX}BaseUnix, {$ENDIF}fpcunit, testregistry, testhelpers,
-  gittan.textfile;
+  Classes, SysUtils, StrUtils, {$IFDEF UNIX}BaseUnix, {$ENDIF}fpcunit, testregistry,
+  testhelpers, gittan.textfile;
 
 type
   TTextFileTest = class(TTestCase)
@@ -180,6 +180,18 @@ begin
   AssertTrue('quotes before the closing three', TomlTooDeep('x = """a""""'#10'y = ' + Deep));
   AssertTrue('a quote in a comment', TomlTooDeep('# "'#10'y = ' + Deep));
   AssertTrue('a string not closed ends at its line', TomlTooDeep('x = "a'#10'y = ' + Deep));
+  { A dotted key or header makes a table of each part. }
+  AssertFalse('a dotted key at the limit', TomlTooDeep(DupeString('a.', MaxNesting) + 'c = 1'));
+  AssertTrue('a dotted key', TomlTooDeep(DupeString('a.', MaxNesting + 1) + 'c = 1'));
+  AssertTrue(TomlTooDeep(DupeString('a.', 45000) + 'c = 1'));
+  AssertTrue('a header', TomlTooDeep('[' + DupeString('a.', 45000) + 'c]'#10'x = 1'));
+  AssertTrue('quoted parts', TomlTooDeep(DupeString('"a".', 45000) + 'c = 1'));
+  AssertTrue('dots through inline tables',
+    TomlTooDeep('x = ' + DupeString('{' + DupeString('a.', 99) + 'a = ', 3) + '1}}}'));
+  AssertFalse('lines start again', TomlTooDeep(DupeString(DupeString('a.', 150) + 'c = 1'#10, 3)));
+  AssertFalse('floats in a long array',
+    TomlTooDeep('x = [' + DupeString('1.5, ', 1000) + '2.5]'));
+  AssertFalse('dots in a string key', TomlTooDeep('"' + DupeString('a.', 500) + '" = 1'));
 end;
 
 procedure TTextFileTest.TestUnescapeC;
