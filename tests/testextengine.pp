@@ -96,6 +96,7 @@ type
     procedure TestCommandKeysApart;
     procedure TestTimers;
     procedure TestNoExceptionLeftPending;
+    procedure TestConsoleLinesCut;
     procedure TestDialogTextFromChangingToString;
   end;
 
@@ -320,27 +321,32 @@ begin
   AssertFalse('no such command', FEngine.RunCommand('hello'#9'nope', '{}'));
 end;
 
-{ Without data a command learns neither the file nor the code; exec keeps the
-  repository's root, which it could run git in anyway. }
+{ Without data a command learns neither the file nor the code; exec and
+  forge keep the repository's root, which they could run git or gh in
+  anyway. }
 procedure TExtEngineTest.TestCommandContextNeedsData;
 const
   Script = 'Gittan.commands.register({id: "c", title: "C", run: function (c) {' +
     ' globalThis.ran = [c.repo, c.path, c.selection, c.line].join("|"); }});';
   Ctx = '{"repo": "/r", "path": "a.txt", "selection": "code", "line": 3}';
 var
-  Plain, Exec, Data: PExtContextInfo;
+  Plain, Exec, Forge, Data: PExtContextInfo;
 begin
   Plain := Load('plain', Script, PermBaseline);
   Exec := Load('exec', Script, PermBaseline + [epExec]);
+  Forge := Load('forge', Script, PermBaseline + [epForge]);
   Data := Load('data', Script, PermBaseline + [epData]);
   AssertLoaded('plain', string(FEngine.ExtExecuteFile(Plain)));
   AssertLoaded('exec', string(FEngine.ExtExecuteFile(Exec)));
+  AssertLoaded('forge', string(FEngine.ExtExecuteFile(Forge)));
   AssertLoaded('data', string(FEngine.ExtExecuteFile(Data)));
   AssertTrue(FEngine.RunCommand(TGittanExtRegistry.CommandKey('plain', 'c'), Ctx));
   AssertTrue(FEngine.RunCommand(TGittanExtRegistry.CommandKey('exec', 'c'), Ctx));
+  AssertTrue(FEngine.RunCommand(TGittanExtRegistry.CommandKey('forge', 'c'), Ctx));
   AssertTrue(FEngine.RunCommand(TGittanExtRegistry.CommandKey('data', 'c'), Ctx));
   AssertEquals('plain', '|||3', EvalIn(Plain^.Ctx, 'globalThis.ran'));
   AssertEquals('exec', '/r|||3', EvalIn(Exec^.Ctx, 'globalThis.ran'));
+  AssertEquals('forge', '/r|||3', EvalIn(Forge^.Ctx, 'globalThis.ran'));
   AssertEquals('data', '/r|a.txt|code|3', EvalIn(Data^.Ctx, 'globalThis.ran'));
 end;
 
@@ -472,6 +478,21 @@ begin
   AssertEquals('console.log shown', 1, FHost.Logs.Count);
   AssertTrue('with its text', Pos('logged', FHost.Logs[0]) > 0);
   AssertEquals('under the extension''s name', 'dialogs · console.log: logged', FHost.Logs[0]);
+end;
+
+{ console.push keeps each line of an entry as a line and cuts a long one,
+  so neither a many-line entry nor a huge one gets past the cap. }
+procedure TExtEngineTest.TestConsoleLinesCut;
+var
+  Info: PExtContextInfo;
+begin
+  Info := Load('cons', 'console.push("a\nb"); console.push("x".repeat(5000));' +
+    'globalThis.n = console.pop();', PermBaseline);
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  AssertEquals('three lines', '3', EvalIn(Info^.Ctx, 'globalThis.n'));
+  AssertEquals('one log', 1, FHost.Logs.Count);
+  AssertTrue('the long line cut', Length(FHost.Logs[0]) < 2200);
+  AssertTrue('with an ellipsis', Pos('…', FHost.Logs[0]) > 0);
 end;
 
 procedure TExtEngineTest.TestDialogTextFromChangingToString;

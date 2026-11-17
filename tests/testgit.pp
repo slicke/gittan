@@ -2588,6 +2588,18 @@ begin
     Git(['config', '--unset', 'remote.pushDefault']);
     AssertEquals('origin', FRepo.PushRemote);
 
+    { A new branch with no upstream goes where pushRemote says, not to
+      origin. }
+    Git(['checkout', '-q', '-b', 'fresh']);
+    Git(['config', 'branch.fresh.pushRemote', 'fork']);
+    AssertEquals('fork', FRepo.PushRemote);
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    AssertEquals('fresh on the fork', Trim(Git(['rev-parse', 'HEAD'])),
+      Trim(Git(['--git-dir=' + Fork, 'rev-parse', 'refs/heads/fresh'])));
+    AssertEquals('fresh not on origin', '',
+      Trim(Git(['--git-dir=' + Remote, 'branch', '--list', 'fresh'])));
+    Git(['checkout', '-q', 'fix']);
+
     Git(['config', 'push.default', 'upstream']);
     Git(['reset', '-q', '--hard', 'origin/' + Main]);
     WriteFile('a.txt', 'onto main'#10);

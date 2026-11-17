@@ -23,6 +23,7 @@ type
     procedure TestUtf8Clean;
     procedure TestTomlTooDeep;
     procedure TestWriteThroughLink;
+    procedure TestTempFileNamePrivate;
   end;
 
 implementation
@@ -188,6 +189,31 @@ begin
   AssertEquals(#7#8#12#11, UnescapeC('\a\b\f\v'));
   AssertEquals('end\', UnescapeC('end\'));
   AssertEquals('', UnescapeC(''));
+end;
+
+{ Two names never meet, and on Unix they are in a folder of the user's
+  own that no one else may enter, not in the shared /tmp itself. }
+procedure TTextFileTest.TestTempFileNamePrivate;
+var
+  A, B: string;
+  {$IFDEF UNIX}
+  Info: Stat;
+  {$ENDIF}
+begin
+  A := TempFileName('gittan-test-');
+  B := TempFileName('gittan-test-');
+  AssertTrue('two names', A <> B);
+  AssertTrue('nothing there yet', not FileExists(A));
+  AssertTrue('the folder is there', DirectoryExists(ExtractFileDir(A)));
+  {$IFDEF UNIX}
+  AssertTrue('not the temporary folder itself',
+    ExcludeTrailingPathDelimiter(ExtractFileDir(A)) <>
+    ExcludeTrailingPathDelimiter(GetTempDir));
+  AssertEquals(0, fpLStat(ExtractFileDir(A), Info));
+  AssertTrue('a folder, not a link', fpS_ISDIR(Info.st_mode));
+  AssertEquals('the user''s', fpGetUID, Info.st_uid);
+  AssertEquals('closed to others', 0, Info.st_mode and &077);
+  {$ENDIF}
 end;
 
 initialization

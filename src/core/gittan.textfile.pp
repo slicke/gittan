@@ -68,7 +68,11 @@ function HasNoNewline(ALines: TStrings; AIndex: integer): boolean;
   or another, gets: APrefix, the process id and a count. Nothing is
   there (a file an earlier run with the same id left is deleted); the
   caller writes it, or git makes it. GetTempFileName only skips names
-  that exist, so two threads asking before either wrote got the same. }
+  that exist, so two threads asking before either wrote got the same.
+  On Unix the folder is one of the user's own inside the temporary one
+  (PrivateTempDir), since /tmp is shared: another user could otherwise
+  put a file or a link at the name first and read or redirect what is
+  written there, a partial commit's text among it. }
 function TempFileName(const APrefix: string): string;
 
 {** Writes AText as the whole of AFileName, creating its folder: into a
@@ -378,6 +382,10 @@ const
 var
   { The writes so far, which name each one's temporary file. }
   WriteCount: longint = 0;
+{$IFDEF UNIX}
+  { The private folder PrivateTempDir settled on, '' before the first. }
+  PrivateTemp: string = '';
+{$ENDIF}
 
 { AFileName, or the file the symbolic link there leads to, through a
   few links at most (a loop of them ends there); a relative target
@@ -424,9 +432,62 @@ begin
   Result := (AIndex >= 0) and (AIndex < ALines.Count) and (ALines.Objects[AIndex] = NoNewlineMark);
 end;
 
+{$IFDEF UNIX}
+{ Whether ADir is a folder (not a link to one) of this user that no one
+  else may enter. }
+function OwnPrivateDir(const ADir: string): boolean;
+var
+  Info: Stat;
+begin
+  Result := (fpLStat(ADir, Info) = 0) and fpS_ISDIR(Info.st_mode) and
+    (Info.st_uid = fpGetUID) and ((Info.st_mode and &077) = 0);
+end;
+
+{ The temporary folder's gittan-<uid>, made 0700 when it is not there;
+  when someone else's or a link is there, a new folder of the user's
+  own with a name nobody can tell in advance. The temporary folder
+  itself only when no folder can be made, as before. }
+function PrivateTempDir: string;
+var
+  Base, Dir, Name: string;
+  i: integer;
+begin
+  Dir := PrivateTemp;
+  if (Dir <> '') and OwnPrivateDir(Dir) then
+    Exit(IncludeTrailingPathDelimiter(Dir));
+  Base := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-' + IntToStr(fpGetUID);
+  fpMkdir(Base, &700);
+  if OwnPrivateDir(Base) then
+    Dir := Base
+  else
+  begin
+    Dir := '';
+    Randomize;
+    for i := 1 to 20 do
+    begin
+      Name := Base + '-' + IntToHex(Random($7FFFFFFF), 8);
+      if fpMkdir(Name, &700) = 0 then
+      begin
+        Dir := Name;
+        Break;
+      end;
+    end;
+  end;
+  if Dir = '' then
+    Exit(IncludeTrailingPathDelimiter(GetTempDir));
+  PrivateTemp := Dir;
+  Result := IncludeTrailingPathDelimiter(Dir);
+end;
+{$ENDIF}
+
 function TempFileName(const APrefix: string): string;
 begin
-  Result := IncludeTrailingPathDelimiter(GetTempDir) + APrefix + IntToStr(GetProcessID) + '-' +
+  {$IFDEF UNIX}
+  Result := PrivateTempDir;
+  {$ELSE}
+  Result := IncludeTrailingPathDelimiter(GetTempDir);
+  {$ENDIF}
+  Result := Result + APrefix + IntToStr(GetProcessID) + '-' +
     IntToStr(InterLockedIncrement(WriteCount)) + '.tmp';
   DeleteFile(Result);
 end;

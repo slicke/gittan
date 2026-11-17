@@ -2003,7 +2003,9 @@ end;
   TProcess turns into the Unicode environment the process gets) without
   the variables whose names (with the equals sign) are in ASkip, so the
   caller can set those, and with ToolSearchPath as its PATH outside
-  Windows (whose variable is "Path", and whose PATH is kept as it is). }
+  Windows (whose variable is "Path", and whose PATH is kept as it is).
+  Windows takes a name in any case, so there ASkip is matched so too:
+  Copilot_Allow_All is the COPILOT_ALLOW_ALL it would read. }
 procedure CopyEnvironment(P: TProcess; const ASkip: array of string);
 var
   Env, Prefix: string;
@@ -2013,7 +2015,11 @@ begin
   begin
     Keep := True;
     for Prefix in ASkip do
+      {$ifdef windows}
+      if SameText(Copy(Env, 1, Length(Prefix)), Prefix) then
+      {$else}
       if Pos(Prefix, Env) = 1 then
+      {$endif}
         Keep := False;
     {$ifndef windows}
     if Pos('PATH=', Env) = 1 then
@@ -4882,7 +4888,13 @@ begin
   end
   else
   begin
-    Remote := RemoteFor('');
+    { No upstream yet: where git would push it (branch.<name>.pushRemote,
+      remote.pushDefault), else the one remote or origin. }
+    Remote := ConfigIn(FRoot, 'branch.' + Name + '.pushRemote');
+    if Remote = '' then
+      Remote := ConfigIn(FRoot, 'remote.pushDefault');
+    if (Remote = '') or (Remote = '.') then
+      Remote := RemoteFor('');
     if Remote = '' then
     begin
       FError := 'The repository has no remote to push to.';
