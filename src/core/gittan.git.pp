@@ -6083,9 +6083,23 @@ begin
       FError := Format('Could not write the rebase files in %s.', [Folder]);
       Exit(False);
     end;
-  Result := RunGitEnv(FRoot, WithConflictStyle(FRoot, ['rebase', '-i', '--autostash',
-    '--empty=keep', AOnto]),
+  { missingCommitsCheck: the todo names every commit, a dropped one
+    with drop, so one missing is one the list did not know of (a commit
+    made after it was read), which git then refuses to lose. }
+  Result := RunGitEnv(FRoot, WithConflictStyle(FRoot, ['-c', 'rebase.missingCommitsCheck=error',
+    'rebase', '-i', '--autostash', '--empty=keep', AOnto]),
     ['GIT_SEQUENCE_EDITOR=cp ' + ShellQuote(Folder + 'todo'), 'GIT_EDITOR=:'], Output, Err);
+  { The check stops before any commit with the rebase begun, waiting
+    for --edit-todo: given up at once, the branch and the autostash as
+    they were. }
+  if not Result and (Pos('dropped accidentally', Err) > 0) and (Operation = 'rebasing') then
+  begin
+    RunGitIn(FRoot, ['rebase', '--abort'], Output, Ignored);
+    CleanRebaseFiles;
+    FError := 'The branch has commits the list did not have, made after it was read; ' +
+      'nothing was rebased.';
+    Exit(False);
+  end;
   if Operation = 'rebasing' then
   begin
     AConflicts := RunGitIn(FRoot, ['ls-files', '-u'], Output, Ignored) and (Trim(Output) <> '');

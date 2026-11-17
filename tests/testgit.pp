@@ -131,6 +131,7 @@ type
     procedure TestRebaseOntoConflicts;
     procedure TestRebaseStray;
     procedure TestRebaseInteractive;
+    procedure TestRebaseInteractiveMissing;
     procedure TestRebaseInteractiveEdit;
     procedure TestRebaseInteractiveFixup;
     procedure TestRebaseInteractiveConflicts;
@@ -3498,6 +3499,35 @@ end;
 { The commits after the first, replayed in another order: the fourth
   squashed into the third with the messages joined, then the second
   with another message. }
+{ A commit made after the list was read (from the terminal while the
+  dialog was open) is in none of its lines: git refuses rather than
+  drop it, and the branch is as it was. }
+procedure TGitRepoTest.TestRebaseInteractiveMissing;
+var
+  First, Late: string;
+  Steps: TGittanRebaseSteps;
+  Merges, Conflicts, Stopped: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  First := Trim(Git(['rev-parse', 'HEAD']));
+  WriteFile('b.txt', 'b'#10);
+  Commit('second');
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.RebaseSteps(First, Steps, Merges));
+  AssertEquals(1, Length(Steps));
+  WriteFile('c.txt', 'c'#10);
+  Commit('late');
+  Late := Trim(Git(['rev-parse', 'HEAD']));
+  AssertFalse('refused', FRepo.RebaseInteractive(First, Steps, Conflicts, Stopped));
+  AssertTrue(FRepo.Error, Pos('nothing was rebased', FRepo.Error) > 0);
+  AssertFalse(Conflicts);
+  AssertFalse(Stopped);
+  AssertEquals('no rebase left begun', '', FRepo.Operation);
+  AssertEquals('the late commit kept', Late, Trim(Git(['rev-parse', 'HEAD'])));
+end;
+
 procedure TGitRepoTest.TestRebaseInteractive;
 var
   First, Main: string;

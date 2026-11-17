@@ -1899,6 +1899,7 @@ type
     function FileLineOfRow(ARow: integer): integer;
     function RepoBusy: boolean;
     function RepoReady: boolean;
+    function MovedWhileAsked(const AHead, ABranch, AMessage: string): boolean;
     function FoldPath: string;
     procedure KeepFolds;
     procedure RestoreFolds;
@@ -3419,6 +3420,8 @@ resourcestring
     'Commit section.';
   rsBmMergeNothing = '%s has no commits %s lacks: nothing to merge';
   rsBmMergeMoved = 'The checked-out branch changed while you were asked: nothing was merged';
+  rsRiMoved = 'The checked-out branch changed while you were asked: nothing was rebased';
+  rsCaResetMoved = 'The checked-out branch changed while you were asked: nothing was reset';
   rsBmFastForward = 'Fast-forward';
   rsBmMergeCommit = 'Merge Commit';
   rsBmSquash = 'Squash';
@@ -7118,6 +7121,18 @@ end;
 function TRepoFrame.RepoReady: boolean;
 begin
   Result := (FRepo.Root <> '') and not RepoBusy;
+end;
+
+{ After a question about HEAD's branch: whether it may have moved while
+  it was asked (a commit from the terminal, a pull that waited for the
+  fetch, a switch), or a job started, so what was asked about is no
+  longer what would be done; AMessage in the status bar then. AHead and
+  ABranch are HEAD's commit and FRepo.Branch from before the question. }
+function TRepoFrame.MovedWhileAsked(const AHead, ABranch, AMessage: string): boolean;
+begin
+  Result := not RepoReady or (FRepo.CommitId('HEAD') <> AHead) or (FRepo.Branch <> ABranch);
+  if Result then
+    StatusNote(AMessage, True);
 end;
 
 { The index in FStats of APath, -1 when it is not changed. }

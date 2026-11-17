@@ -494,13 +494,15 @@ end;
   interactive rebase's dialog with the same commits instead. }
 procedure TRepoFrame.RebaseOntoAsk(const ARef: string);
 var
-  Branch, Msg, Err: string;
+  Branch, Msg, Err, Head, Checked: string;
   Count, Pushed: integer;
   Ok, Conflicts: boolean;
 begin
   Branch := FBranch;
   if not RepoReady or (Branch = '') then
     Exit;
+  Head := FRepo.CommitId('HEAD');
+  Checked := FRepo.Branch;
   if not FRepo.CommitsToRebase(ARef, Count, Pushed) then
   begin
     BannerError(rsCaFailed, FRepo.Error);
@@ -530,6 +532,10 @@ begin
     else
       Exit;
   end;
+  { The question named the branch and its commits; another rebased
+    instead would lose its own. }
+  if MovedWhileAsked(Head, Checked, rsRiMoved) then
+    Exit;
   StopWatcher;
   try
     Screen.Cursor := crHourGlass;
