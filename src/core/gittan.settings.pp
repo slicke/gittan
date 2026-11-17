@@ -1065,8 +1065,9 @@ begin
 end;
 
 { Reads AFileName again and gives what to write: ADoc merged into it
-  against ABase. A file missing or broken now is taken as the base, so
-  what was never changed here is kept. }
+  against ABase. A file missing, broken or empty now (ReadDoc does not
+  count an empty one as damaged, and no save writes an empty object) is
+  taken as the base, so what was never changed here is kept. }
 function MergedWithFile(const AFileName: string; ABase, ADoc: TJSONObject;
   ATrustedKeys: boolean): TJSONObject;
 var
@@ -1080,7 +1081,7 @@ begin
     Theirs := nil;
     Damaged := True;
   end;
-  if Damaged then
+  if Damaged or (Theirs.Count = 0) then
   begin
     Theirs.Free;
     Theirs := TJSONObject(ABase.Clone);

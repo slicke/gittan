@@ -763,6 +763,26 @@ begin
   finally
     C.Free;
   end;
+
+  { A file emptied meanwhile is no file that dropped every setting. }
+  A := TGittanSettings.Create(FDir);
+  try
+    A.Load;
+    Put('settings.json', '');
+    A.Width := 900;
+    A.Save;
+  finally
+    A.Free;
+  end;
+  C := TGittanSettings.Create(FDir);
+  try
+    C.Load;
+    AssertEquals('the zoom kept', 120, C.Zoom);
+    AssertFalse('the extension still off', C.ExtEnabled('ext.a'));
+    AssertEquals(900, C.Width);
+  finally
+    C.Free;
+  end;
 end;
 
 procedure TSettingsTest.TestTrust;
