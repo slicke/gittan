@@ -446,6 +446,17 @@ JS_PUMP_CLOCK_EVERY = 64;
     caller's variable is left alone. }
 function JS_DrainPendingJobs(rt: JSRuntime; ctx: JSContext): boolean;
 
+var
+  {** Takes a job's exception off the context it ran in and reports it
+      (the engine's DumpJSError); without one it is dropped. quickjs-ng
+      keeps an exception for the whole runtime, so one left there would be
+      thrown by the next native any extension calls. }
+  JSJobFailed: procedure(ctx: JSContext) = nil;
+
+{** What JS_ExecutePendingJob gave for the job in ctx, with a failed job's
+    exception taken off (JSJobFailed). }
+procedure JS_JobDone(ctx: JSContext; AResult: integer);
+
 type
   {** What JSWaitBegin put aside of the watchdog's clock. }
   TJSWait = record
@@ -843,10 +854,25 @@ begin
   end;
 end;
 
+procedure JS_JobDone(ctx: JSContext; AResult: integer);
+var
+  e: JSValue;
+begin
+  if (AResult >= 0) or (ctx = nil) then
+    Exit;
+  if Assigned(JSJobFailed) then
+    JSJobFailed(ctx);
+  if JS_HasException(ctx) then
+  begin
+    e := JS_GetException(ctx);
+    JS_FreeValue(ctx, e);
+  end;
+end;
+
 function JS_DrainPendingJobs(rt: JSRuntime; ctx: JSContext): boolean;
 var
   runCtx: JSContext;
-  jobs: integer;
+  jobs, r: integer;
   startedAt: QWord;
 begin
   Result := true;
@@ -857,10 +883,13 @@ begin
   startedAt := GetTickCount64;
   while JS_IsJobPending(rt) do
   begin
-    // 0 means the queue turned out to be empty, <0 that the job threw; either
-    // way the drain is over, and both have always ended it here.
-    if JS_ExecutePendingJob(rt, @runCtx) <= 0 then
+    // 0 means the queue turned out to be empty; <0 that the job threw, whose
+    // exception is taken off and reported, and the other jobs still run.
+    r := JS_ExecutePendingJob(rt, @runCtx);
+    if r = 0 then
       Break;
+    JS_JobDone(runCtx, r);
+    runCtx := ctx;
     Inc(jobs);
     if (jobs >= JS_PUMP_MAX_JOBS) or
       ((jobs mod JS_PUMP_CLOCK_EVERY = 0) and

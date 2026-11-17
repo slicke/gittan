@@ -233,8 +233,9 @@ procedure PromiseRejectionTracker(ctx: JSContext; promise, reason: PJSValue;
 is_handled: integer; opaque: Pointer); cdecl;
 var
   error_msg, stack: RawUtf8;
-  st: JSValue;
+  st, left: JSValue;
   eng: TGittanExtEngine;
+  hadException: boolean;
 begin
   // The runtime calls this from inside a C frame, so nothing may unwind out of
   // it - and Instance returns nil once shutdown has been signalled, which is
@@ -261,6 +262,10 @@ begin
       Exit;
     end;
 
+    // A toString or a stack getter of the reason may throw itself (an object
+    // without a prototype, a Symbol): what it leaves pending is taken off
+    // below, as it would be thrown by the next native of any extension.
+    hadException := JS_HasException(ctx);
     try
       // Convert the JS 'reason' value to a string for display/logging
       error_msg := JSValueConstToUtf8(ctx, reason^);
@@ -283,6 +288,13 @@ begin
     except
       on E: Exception do
         error_msg := '[error retrieving message]';
+    end;
+    if not hadException and JS_HasException(ctx) then
+    begin
+      left := JS_GetException(ctx);
+      JS_FreeValue(ctx, left);
+      if error_msg = '' then
+        error_msg := '[a reason that cannot be shown]';
     end;
     eng.NoteRejection(JSValueId(promise^), string(error_msg));
   except

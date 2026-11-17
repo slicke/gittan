@@ -1228,6 +1228,7 @@ begin
   if FRuntime = nil then
     raise Exception.Create('Failed to create JS runtime');
   ExtRuntimeAlive := True;
+  JSJobFailed := @DumpJSError;
 
   // Create the context
   FContext := JS_NewContext(FRuntime);
@@ -1922,7 +1923,7 @@ destructor TGittanExtEngine.Destroy;
 var
   cb: PJSCallback;
   tmpCtx: JSContext;
-  timeoutCounter: integer;
+  timeoutCounter, r: integer;
   WaitUntil: QWord;
   globalObj, timersObj: JSValueRaw;
   i: integer;
@@ -2028,8 +2029,10 @@ begin
     timeoutCounter := 0;
     while JS_IsJobPending(FRuntime) and (timeoutCounter < 100) do  // Max 100 iterations
     begin
-      if JS_ExecutePendingJob(FRuntime, @tmpCtx) <= 0 then
+      r := JS_ExecutePendingJob(FRuntime, @tmpCtx);
+      if r = 0 then
         Break;
+      JS_JobDone(tmpCtx, r);
       Inc(timeoutCounter);
 
       // Give a small pause every few iterations
@@ -2093,7 +2096,7 @@ begin
         timeoutCounter := 0;
         while JS_IsJobPending(FRuntime) and (timeoutCounter < 10) do
         begin
-          JS_ExecutePendingJob(FRuntime, @tmpCtx);
+          JS_JobDone(tmpCtx, JS_ExecutePendingJob(FRuntime, @tmpCtx));
           Inc(timeoutCounter);
         end;
 
@@ -2109,6 +2112,7 @@ begin
     FContext := nil;
   end;
 
+  JSJobFailed := nil;
   // Normal runtime cleanup; a promise task that ends later leaves its
   // values alone from here on.
   ExtRuntimeAlive := False;
@@ -2465,7 +2469,7 @@ end;
 
 procedure TGittanExtEngine.UnloadExtensions;
 var
-  i, timeoutCounter: integer;
+  i, timeoutCounter, r: integer;
   WaitUntil: QWord;
   tmpCtx: JSContext;
 begin
@@ -2512,7 +2516,9 @@ begin
       timeoutCounter := 0;
       while JS_IsJobPending(FRuntime) and (timeoutCounter < 100) do
       begin
-        if JS_ExecutePendingJob(FRuntime, @tmpCtx) <= 0 then Break;
+        r := JS_ExecutePendingJob(FRuntime, @tmpCtx);
+        if r = 0 then Break;
+        JS_JobDone(tmpCtx, r);
         Inc(timeoutCounter);
       end;
       JS_RunGC(FRuntime);

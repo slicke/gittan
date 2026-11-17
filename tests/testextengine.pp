@@ -105,6 +105,7 @@ type
     procedure TestWatchdogStopsNativeLoop;
     procedure TestUnloadWithPromisePending;
     procedure TestLogGoesToConsole;
+    procedure TestNoExceptionCrossesExtensions;
   end;
 
 implementation
@@ -602,6 +603,28 @@ begin
     AssertEquals('round ' + IntToStr(Round), 'started', Res);
     FEngine.UnloadExtensions;
   end;
+end;
+
+{ A job stopped by the watchdog, or a rejection whose reason throws as
+  it is shown, left its exception pending on the runtime, and the next
+  native another extension called threw it after doing its work. }
+procedure TExtEngineTest.TestNoExceptionCrossesExtensions;
+var
+  Res: string;
+begin
+  ExtWatchdogMs := 300;
+  try
+    LoadResult('spinner', 'Promise.resolve().then(function () { for (;;); }); "a";');
+  finally
+    ExtWatchdogMs := 10000;
+  end;
+  FHost.Alerts.Clear;
+  Res := LoadResult('after1', 'alert("one"); "b";');
+  AssertEquals('the next extension''s native works', 'b', Res);
+  LoadResult('rejecter', 'Promise.reject(Object.create(null)); "c";');
+  Res := LoadResult('after2', 'alert("two"); "d";');
+  AssertEquals('after a reason that cannot be shown', 'd', Res);
+  AssertEquals('both alerts shown', 'one,two', FHost.Alerts.CommaText);
 end;
 
 procedure TExtEngineTest.TestPermissionGate;
