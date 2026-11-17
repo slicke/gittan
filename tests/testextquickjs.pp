@@ -226,6 +226,8 @@ var
   P, Inner: JSParameters;
   Depth: integer;
   WasAlive: boolean;
+  Text: string;
+  Obj: JSValue;
 begin
   { The objects parsed hold a reference, which FreeJSParameters gives back
     through this runtime. }
@@ -245,6 +247,21 @@ begin
     AssertTrue('an object', P[0]^.Data.match = JD_OBJ);
   finally
     FreeJSParameters(P);
+  end;
+  { A string is one; an object is not, and is not parsed, so it keeps
+    no reference. }
+  Obj := JS_Eval(FContext, '"text"', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertTrue('a string', JSTryToString(FContext, Obj, Text));
+    AssertEquals('text', Text);
+  finally
+    JS_FreeValue(FContext, Obj);
+  end;
+  Obj := JS_Eval(FContext, '({a: 1})', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertFalse('an object is no string', JSTryToString(FContext, Obj, Text));
+  finally
+    JS_FreeValue(FContext, Obj);
   end;
   P := Parsed('(function (a, b) {})');
   try

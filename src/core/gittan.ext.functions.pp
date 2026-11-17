@@ -731,7 +731,11 @@ end;
 
 function JSTryToString(ctx: JSContext; Data: JSValue; out str: string): boolean;
 begin
-  // Attempt to parse the JSValue as a string
+  str := '';
+  // Only a string is parsed: an object or array would take references
+  // (and memory) that nothing here gives back.
+  if not JS_IsString(Data) then
+    Exit(false);
   with JSParseValue(ctx, Data) do
     if Data.match <> JD_STR then
       Result := false
