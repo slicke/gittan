@@ -19,6 +19,7 @@ type
     procedure TestParseEmpty;
     procedure TestPrependTruncate;
     procedure TestLayers;
+    procedure TestUncommittedHunk;
   end;
 
 implementation
@@ -206,6 +207,67 @@ begin
     AssertEquals('d is new', 0, Rows[6].Depth);
   finally
     H.Free;
+  end;
+end;
+
+function DiffLines(const ALines: array of string): TStringList;
+var
+  L: string;
+begin
+  Result := TStringList.Create;
+  for L in ALines do
+    Result.Add(L);
+end;
+
+function Joined(const AHunk: TGittanHistoryHunk): string;
+begin
+  Result := string.Join(',', AHunk.Lines);
+end;
+
+{ The work tree's lines for a range: a range that starts inside a
+  replaced block keeps the added lines in the places of its own deleted
+  lines, one that ends inside it does not take the ones after, and lines
+  added after a kept line go with it. }
+procedure THistoryTest.TestUncommittedHunk;
+var
+  Lines: TStringList;
+  Hunk: TGittanHistoryHunk;
+begin
+  Lines := DiffLines(['-a', '-b', '-c', '+A', '+B', '+C', ' d', '+e']);
+  try
+    AssertTrue(UncommittedHunk(Lines, 2, 3, Hunk));
+    AssertEquals('-b,-c,+B,+C', Joined(Hunk));
+    AssertEquals(2, Hunk.OldStart);
+    AssertEquals(2, Hunk.NewStart);
+    AssertTrue(UncommittedHunk(Lines, 1, 2, Hunk));
+    AssertEquals('-a,-b,+A,+B', Joined(Hunk));
+    AssertEquals(1, Hunk.NewStart);
+    AssertTrue(UncommittedHunk(Lines, 2, 2, Hunk));
+    AssertEquals('-b,+B', Joined(Hunk));
+    AssertTrue(UncommittedHunk(Lines, 3, 4, Hunk));
+    AssertEquals('-c,+C, d,+e', Joined(Hunk));
+    AssertEquals(3, Hunk.NewStart);
+  finally
+    Lines.Free;
+  end;
+  { From inside one replaced block to inside the next. }
+  Lines := DiffLines(['-a', '-b', '+A', '+B', ' c', '-d', '-e', '+D', '+E']);
+  try
+    AssertTrue(UncommittedHunk(Lines, 2, 4, Hunk));
+    AssertEquals('-b,+B, c,-d,+D', Joined(Hunk));
+  finally
+    Lines.Free;
+  end;
+  { More deleted lines than added: the last ones have none. }
+  Lines := DiffLines(['-a', '-b', '-c', '+A', ' d']);
+  try
+    AssertTrue(UncommittedHunk(Lines, 3, 3, Hunk));
+    AssertEquals('-c', Joined(Hunk));
+    AssertTrue(UncommittedHunk(Lines, 2, 2, Hunk));
+    AssertEquals('-b', Joined(Hunk));
+    AssertFalse('unchanged', UncommittedHunk(Lines, 4, 4, Hunk));
+  finally
+    Lines.Free;
   end;
 end;
 

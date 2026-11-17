@@ -234,6 +234,7 @@ begin
   FThreadsRepo := '';
   FThreadsHead := '';
   FThreadsKey := '';
+  FThreadsCut := False;
   FReviewError := '';
   FMapDiffKey := '';
   FReviewSegments.Clear;
@@ -314,12 +315,15 @@ begin
   FThreadsHead := Job.HeadOid;
   FSummary.SetNotes(Format(rsConversation, [Job.Number]), Job.Notes);
   UpdateStatus;
+  { Said once for what was read, not at every poll: when the threads
+    change, or when the read is cut short with the ones shown the same,
+    as when more come past the limit. }
+  if Job.Cut and ((Key <> FThreadsKey) or not FThreadsCut) then
+    StatusNote(Format(rsReviewsCut, [Job.Number]));
+  FThreadsCut := Job.Cut;
   if Key = FThreadsKey then
     Exit;
   FThreadsKey := Key;
-  { Said once for what was read, not at every poll. }
-  if Job.Cut then
-    StatusNote(Format(rsReviewsCut, [Job.Number]));
   { The bodies of the threads gone are dropped with the rest. }
   FReviewSegments.Clear;
   CollectShownThreads;

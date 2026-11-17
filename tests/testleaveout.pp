@@ -165,6 +165,9 @@ begin
   AssertEquals('a'#10'b'#10, Text('a'#10'b'#10, []));
   Lines([' a', '-b', '+b', '\']);
   AssertEquals('a'#10'b', Text('a'#10'b', []));
+  { CRLF lines, the old last one bare: put back without a CR either. }
+  Lines(['-a', '-b', '\', '+A', '+B']);
+  AssertEquals('A'#13#10'b', Text('A'#13#10'B'#13#10, [Pair('b', 'B', 2)]));
 end;
 
 procedure TLeaveOutTest.TestNotFound;

@@ -1296,8 +1296,8 @@ type
     { View > Review Comments (see umain.reviews.inc): whether it is on,
       its menu item, the job that fetches the threads, the threads of the
       pull request FThreadsNumber of FThreadsRepo with its head commit,
-      what they hold (FThreadsKey) and gh's message when the last fetch
-      failed; the diff line of each thread in the shown file
+      what they hold (FThreadsKey), whether the last read was cut short
+      (FThreadsCut) and gh's message when the last fetch failed; the diff line of each thread in the shown file
       (FThreadRows), the diff from the head to the work tree the lines
       are mapped through (for FMapDiffKey, head and path), the threads
       folded or unfolded against their default, the width the cards of
@@ -1311,6 +1311,7 @@ type
       the gaps' Tags index it. }
     FShown: TGittanReviewThreads;
     FThreadsNumber: integer;
+    FThreadsCut: boolean;
     FThreadsRepo, FThreadsHead, FThreadsKey, FReviewError: string;
     FThreadRows: TIntegerDynArray;
     FMapDiff, FMapDiffKey: string;
@@ -8372,10 +8373,12 @@ end;
 procedure TRepoFrame.ShowEditor;
 begin
   { A history still being fetched is for a view that is no longer shown,
-    unless the same file is shown again, as a refresh does while git log
-    runs: that one would never come. }
+    unless the same file is shown again in the same comparison, as a
+    refresh does while git log runs: that one would never come. A new
+    base or range reads the file at another commit, so its job goes. }
   if (FView <> gvHistory) and not (((FHistoryJob <> nil) or (FTimelapseJob <> nil)) and
-    (FHistoryPath <> '') and (ShownRelPath = FHistoryPath)) then
+    (FHistoryPath <> '') and (ShownRelPath = FHistoryPath) and
+    (FHistoryRef = HistoryRef)) then
   begin
     AbandonHistoryJob;
     EndTimelapse;

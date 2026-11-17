@@ -494,7 +494,7 @@ end;
   interactive rebase's dialog with the same commits instead. }
 procedure TRepoFrame.RebaseOntoAsk(const ARef: string);
 var
-  Branch, Msg: string;
+  Branch, Msg, Err: string;
   Count, Pushed: integer;
   Ok, Conflicts: boolean;
 begin
@@ -538,6 +538,8 @@ begin
     finally
       Screen.Cursor := crDefault;
     end;
+    { The refresh's git commands may leave their own error. }
+    Err := FRepo.Error;
     FSummary.Notice := '';
     RefreshRepository;
   finally
@@ -545,12 +547,12 @@ begin
   end;
   if Ok then
     StatusNote(Format(rsBmRebased, [Branch, ARef]))
-  else if Conflicts and (FRepo.Error = StashClashMessage) then
-    BannerError(Format(rsBmRebased, [Branch, ARef]), FRepo.Error)
+  else if Conflicts and (Err = StashClashMessage) then
+    BannerError(Format(rsBmRebased, [Branch, ARef]), Err)
   else if Conflicts then
     StatusNote(rsCaConflicts, True)
   else
-    BannerError(rsCaFailed, FRepo.Error);
+    BannerError(rsCaFailed, Err);
 end;
 
 { ---------------------------------------------------------------------------
@@ -775,7 +777,7 @@ end;
 function TRepoFrame.RunMerge(const ARef, AName: string; AWay: TGittanMergeWay): boolean;
 var
   Ok, Conflicts: boolean;
-  Branch: string;
+  Branch, Err: string;
 begin
   Branch := FBranch;
   StopWatcher;
@@ -786,6 +788,8 @@ begin
     finally
       Screen.Cursor := crDefault;
     end;
+    { The refresh's git commands may leave their own error. }
+    Err := FRepo.Error;
     FLoadError := '';
     FSummary.Notice := '';
     RefreshRepository;
@@ -800,5 +804,5 @@ begin
   else if Conflicts then
     StatusNote(rsCaConflicts, True)
   else
-    BannerError(rsCaFailed, FRepo.Error);
+    BannerError(rsCaFailed, Err);
 end;

@@ -724,6 +724,18 @@ begin
   Result := True;
 end;
 
+{ Whether ARest, what follows a word, starts with an assignment's
+  operator: =, :=, ::=, :::=, ?=, += or !=. }
+function Assigns(const ARest: string): boolean;
+var
+  S: string;
+begin
+  S := TrimLeft(ARest);
+  Result := (Copy(S, 1, 1) = '=') or (Copy(S, 1, 2) = ':=') or (Copy(S, 1, 3) = '::=') or
+    (Copy(S, 1, 4) = ':::=') or (Copy(S, 1, 2) = '?=') or (Copy(S, 1, 2) = '+=') or
+    (Copy(S, 1, 2) = '!=');
+end;
+
 function ParseMakefileTargets(const AText: string): TStringArray;
 var
   Start, P, i: integer;
@@ -759,10 +771,14 @@ begin
           InDefine := False;
         Continue;
       end;
-      for Prefix in TStringArray.Create('', 'override ', 'export ', 'private ') do
-        if (Pos(Prefix + 'define ', Word) = 1) or (Pos(Prefix + 'define'#9, Word) = 1) or
-          (Word = Prefix + 'define') then
-          InDefine := True;
+      { A recipe line's text is the shell's, "define HELP" in a heredoc
+        too; "define = x" sets a variable named define. }
+      if (Line <> '') and (Line[1] <> #9) then
+        for Prefix in TStringArray.Create('', 'override ', 'export ', 'private ') do
+          if ((Pos(Prefix + 'define ', Word) = 1) or (Pos(Prefix + 'define'#9, Word) = 1) or
+            (Word = Prefix + 'define')) and
+            not Assigns(Copy(Word, Length(Prefix) + 7, MaxInt)) then
+            InDefine := True;
       if InDefine then
         Continue;
       if (Line = '') or (Line[1] in [#9, ' ', '#']) then

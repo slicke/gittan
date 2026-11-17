@@ -141,8 +141,12 @@ begin
           Left := Match[i + Old + k];
         if (Left >= 0) <> AOthers then
         begin
+          { A bare last line gets no CR either: it ends the file. }
           if Pairs[k].HasOld then
-            Emit(Pairs[k].Old + Cr, HasNoNewline(ALines, i + k));
+            if HasNoNewline(ALines, i + k) then
+              Emit(Pairs[k].Old, True)
+            else
+              Emit(Pairs[k].Old + Cr, False);
           if Pairs[k].HasNew and not Take(Pairs[k].New, False) then
             Exit;
         end

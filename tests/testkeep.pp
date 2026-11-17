@@ -8,7 +8,7 @@ unit testkeep;
 interface
 
 uses
-  Classes, SysUtils, Types, fpcunit, testregistry, gittan.keep;
+  Classes, SysUtils, Types, fpcunit, testregistry, gittan.keep, gittan.textfile;
 
 type
   TKeepTest = class(TTestCase)
@@ -33,6 +33,7 @@ type
     procedure TestNearestWins;
     procedure TestUnmatched;
     procedure TestNoBlocks;
+    procedure TestNoNewlineMarks;
     procedure TestKeeps;
     procedure TestMatch;
   end;
@@ -202,6 +203,24 @@ begin
   AssertEquals(0, ApplyKeeps(FLines, [Keep('a', 'b', 1)], FKeptOf));
   AssertEquals(' a| b|', Joined);
   AssertEquals(2, Length(FKeptOf));
+end;
+
+{ The marks of a last line without a newline go through, kept or not,
+  so a discard after ends the file as git said. }
+procedure TKeepTest.TestNoNewlineMarks;
+begin
+  Lines([' a', '-old', '+new']);
+  FLines.Objects[1] := NoNewlineMark;
+  FLines.Objects[2] := NoNewlineMark;
+  AssertEquals(0, ApplyKeeps(FLines, [], FKeptOf));
+  AssertEquals(' a|-old|+new|', Joined);
+  AssertTrue('old side bare', FLines.Objects[1] = NoNewlineMark);
+  AssertTrue('new side bare', FLines.Objects[2] = NoNewlineMark);
+  Lines([' a', '-old', '+new']);
+  FLines.Objects[2] := NoNewlineMark;
+  AssertEquals(1, ApplyKeeps(FLines, [Keep('old', 'new', 2)], FKeptOf));
+  AssertEquals(' a| new|', Joined);
+  AssertTrue('kept line bare', FLines.Objects[1] = NoNewlineMark);
 end;
 
 { The keeps of a session by path: added, counted, removed by the index

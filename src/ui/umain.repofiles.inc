@@ -157,8 +157,14 @@ begin
     Dec(Avail, FSubHeader.Height);
   TipWanted := FCommitBox.Visible and (FCommitNote.Text = rsCommitTickHint);
   TipShown := TipWanted and FCommitNote.Visible;
+  { The tip hidden is measured at the width it would have now: the
+    sidebar may have been made narrower since it was shown. }
   if TipShown then
-    FTipHeight := FCommitNote.Height + FCommitNote.BorderSpacing.Top;
+    FTipHeight := FCommitNote.Height + FCommitNote.BorderSpacing.Top
+  else if TipWanted then
+    FTipHeight := FCommitNote.HeightFor(FCommitNote.Parent.ClientWidth -
+      FCommitNote.BorderSpacing.Left - FCommitNote.BorderSpacing.Right -
+      2 * FCommitNote.BorderSpacing.Around) + FCommitNote.BorderSpacing.Top;
   MemoFull := Px(CommitMemoHeight);
   MemoLeast := Px(CommitMemoMin);
   { The panel's height with the whole message box and the tip. }

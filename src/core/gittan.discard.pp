@@ -212,7 +212,16 @@ begin
         leaves the line before it last, which had one, or it would have
         been in the block. }
       if ABlock.EndsKnown and (ABlock.After = '$') then
+      begin
+        { The file's end as the block saw it, else something changed it
+          since: a line break added or taken away there would be undone. }
+        if (Length(ABlock.NewLines) > 0) and (FinalNewline = ABlock.NewEndsBare) then
+        begin
+          AError := rsDiscardStale;
+          Exit;
+        end;
         FinalNewline := (Length(ABlock.OldLines) = 0) or not ABlock.OldEndsBare;
+      end;
       SplitLf(Text, Lines);
       Eol := #10;
       if (Lines.Count > 0) and (Lines[0] <> BareLine(Lines[0])) then

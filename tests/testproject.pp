@@ -816,6 +816,29 @@ begin
   AssertEquals('npm''s >1.2 is past them', '1.3.0', ResolvedIn(TGittanNodeKind, '>1.2, <1.4'));
   AssertEquals('Python''s >1.2 takes 1.2.5', '1.2.5', Resolved('>1.2, <1.3'));
   AssertEquals('and npm''s does not', '', ResolvedIn(TGittanNodeKind, '>1.2, <1.3'));
+  L := nil;
+  AddLocked(L, 'syn', '1.2.9');
+  AddLocked(L, 'syn', '1.3.0');
+  AssertEquals('npm''s ^1.2.x is ^1.2', '1.3.0', ResolvedIn(TGittanNodeKind, '^1.2.x'));
+  AssertEquals('while 1.2.x is 1.2.x', '1.2.9', ResolvedIn(TGittanNodeKind, '1.2.x'));
+  L := nil;
+  AddLocked(L, 'syn', '1.0.0-beta2');
+  AddLocked(L, 'syn', '1.0.0-beta10');
+  AssertEquals('SemVer''s beta10 is below beta2', '1.0.0-beta2',
+    ResolvedIn(TGittanNodeKind, '>=1.0.0-beta2'));
+  L := nil;
+  AddLocked(L, 'syn', '1.0rc1');
+  AddLocked(L, 'syn', '1.1rc1');
+  AssertEquals('Python''s pre-release of other numbers', '1.1rc1', Resolved('>=1.0rc1'));
+  L := nil;
+  AddLocked(L, 'syn', '1.0.0-rc.1');
+  AddLocked(L, 'syn', '1.1.0-rc.1');
+  AssertEquals('npm''s only of the same numbers', '1.0.0-rc.1',
+    ResolvedIn(TGittanNodeKind, '>=1.0.0-rc.1'));
+  L := nil;
+  AddLocked(L, 'syn', '1.0a1');
+  AddLocked(L, 'syn', '2.0');
+  AssertEquals('Python''s alpha1 is a1', '1.0a1', Resolved('==1.0alpha1'));
 end;
 
 procedure TProjectTest.TestPickedChecks;

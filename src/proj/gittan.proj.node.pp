@@ -232,10 +232,11 @@ begin
       P := Pos(',', Key);
       if P > 0 then
         Key := Copy(Key, 1, P - 1);
+      { YAML lets berry's quotes be single ones too. }
       Key := Trim(Key);
-      if (Key <> '') and (Key[1] = '"') then
+      if (Key <> '') and (Key[1] in ['"', '''']) then
         Delete(Key, 1, 1);
-      if (Key <> '') and (Key[Length(Key)] = '"') then
+      if (Key <> '') and (Key[Length(Key)] in ['"', '''']) then
         SetLength(Key, Length(Key) - 1);
       Name := NameOfLockKey(Key);
       Continue;

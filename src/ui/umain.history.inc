@@ -157,14 +157,15 @@ begin
     { The file on disk, which may not be HistoryRef's: its rows go
       through its diff to that, so lines added in the work tree do not
       shift the range. Unsaved edits are not in the diff: their rows are
-      not counted. }
+      not counted. Neither are the rows of a file changed on disk since it
+      was loaded, which the diff no longer describes. }
     if (ShownRelPath = '') or FRepo.IsRange then
     begin
       AFrom := AFromRow + 1;
       ATo := AToRow + 1;
       Exit(True);
     end;
-    if Edit.Modified then
+    if Edit.Modified or ((FEditPath <> '') and (FileAge(FEditPath) <> FEditStamp)) then
       Exit(False);
     Lines := TStringList.Create;
     try
@@ -318,14 +319,11 @@ end;
 { Puts the changes of the lines not committed yet first, as a commit of
   their own, when the history is counted from HEAD and the work tree
   changed any of the lines: the file's diff against HEAD, cut to the
-  lines of the range (an added line between two of them or right after
-  the last included), as a hunk. Read afresh, since the view may be rebuilt on a refresh. }
+  lines of the range as UncommittedHunk does. Read afresh, since the
+  view may be rebuilt on a refresh. }
 procedure TRepoFrame.AddUncommittedHistory;
 var
   Lines: TStringList;
-  OldNum, NewNum: TIntegerDynArray;
-  First, Last, i: integer;
-  AnyChange: boolean;
   Commit: TGittanHistoryCommit;
 begin
   if (FRepo.Base <> '') or FRepo.IsRange then
@@ -334,42 +332,11 @@ begin
   try
     if not FRepo.FileChanges(FHistoryPath, Lines) or (Lines.Count = 0) then
       Exit;
-    NumberLines(Lines, OldNum, NewNum);
-    First := -1;
-    Last := -1;
-    AnyChange := False;
-    for i := 0 to Lines.Count - 1 do
-      if (OldNum[i] >= FHistoryFrom) and (OldNum[i] <= FHistoryTo) then
-      begin
-        if First < 0 then
-          First := i;
-        Last := i;
-      end;
-    if First < 0 then
-      Exit;
-    { The lines added right after the range's last line go with it: the
-      new text of a changed last line, or lines added at the end. }
-    while (Last + 1 < Lines.Count) and (Lines[Last + 1][1] = '+') do
-      Inc(Last);
-    for i := First to Last do
-      if Lines[i][1] <> ' ' then
-        AnyChange := True;
-    if not AnyChange then
-      Exit;
     Commit := Default(TGittanHistoryCommit);
-    Commit.Info.Uncommitted := True;
     SetLength(Commit.Hunks, 1);
-    Commit.Hunks[0].OldStart := 0;
-    Commit.Hunks[0].NewStart := 0;
-    SetLength(Commit.Hunks[0].Lines, Last - First + 1);
-    for i := First to Last do
-    begin
-      Commit.Hunks[0].Lines[i - First] := Lines[i];
-      if (Commit.Hunks[0].OldStart = 0) and (OldNum[i] > 0) then
-        Commit.Hunks[0].OldStart := OldNum[i];
-      if (Commit.Hunks[0].NewStart = 0) and (NewNum[i] > 0) then
-        Commit.Hunks[0].NewStart := NewNum[i];
-    end;
+    if not UncommittedHunk(Lines, FHistoryFrom, FHistoryTo, Commit.Hunks[0]) then
+      Exit;
+    Commit.Info.Uncommitted := True;
     FHistory.Prepend(Commit);
   finally
     Lines.Free;

@@ -146,6 +146,9 @@ begin
   AssertEquals('vue', Names(D));
   AssertEquals('3.4.21', Find(D, 'vue').Resolved);
   { Berry quotes several descriptors together. }
+  D := ParseYarnLock('''vue@npm:^3'':' + LE + '  version: 3.4.21' + LE);
+  AssertEquals('single quotes', 'vue', Names(D));
+  AssertEquals('3.4.21', Find(D, 'vue').Resolved);
   D := ParseYarnLock('"@babel/core@npm:^7.0.0, @babel/core@npm:^7.12.3":' + LE +
     '  version: 7.20.0' + LE);
   AssertEquals('@babel/core', Names(D));

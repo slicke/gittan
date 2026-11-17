@@ -708,8 +708,9 @@ begin
 end;
 
 { The parts of a suffix (VersionSuffix), without its local label or
-  build metadata: "beta", "2" of "beta.2", "rc", "1" of Python's "rc1". }
-function SuffixParts(const ASuffix: string): TStringArray;
+  build metadata: "beta", "2" of "beta.2", "rc", "1" of Python's "rc1".
+  SemVer's identifiers are split at dots alone: "beta2" is one. }
+function SuffixParts(const ASuffix: string; ASemver: boolean): TStringArray;
 var
   S, Part: string;
   i: integer;
@@ -731,12 +732,13 @@ begin
     S := Copy(S, 1, Pos('+', S) - 1);
   Part := '';
   for i := 1 to Length(S) do
-    if S[i] in ['.', '-', '_'] then
+    if (S[i] = '.') or (not ASemver and (S[i] in ['-', '_'])) then
       Add
     else
     begin
       { A number and a word written together are two parts. }
-      if (Part <> '') and ((S[i] in ['0'..'9']) <> (Part[1] in ['0'..'9'])) then
+      if not ASemver and (Part <> '') and
+        ((S[i] in ['0'..'9']) <> (Part[1] in ['0'..'9'])) then
         Add;
       Part := Part + S[i];
     end;
@@ -747,15 +749,19 @@ end;
   is below, equal to or above that of B, as SemVer and Python order
   them: part by part, a number below a word, numbers by value, words
   in the order dev, alpha (a), beta (b), rc (c, pre, preview), the
-  others by their letters; when one runs out first it is the lower. }
-function CompareSuffixes(const A, B: string): integer;
+  others by their letters; when one runs out first it is the lower.
+  SemVer (ASemver) has no such words: its identifiers that are not
+  numbers go by their letters alone, beta10 below beta2, and no dev. }
+function CompareSuffixes(const A, B: string; ASemver: boolean): integer;
 var
   X, Y: TStringArray;
   i: integer;
 
   function KnownWord(const APart: string): string;
   begin
-    if APart = 'dev' then
+    if ASemver then
+      Result := APart
+    else if APart = 'dev' then
       Result := #1
     else if (APart = 'a') or (APart = 'alpha') then
       Result := 'alpha'
@@ -799,15 +805,15 @@ var
   end;
 
 begin
-  X := SuffixParts(A);
-  Y := SuffixParts(B);
+  X := SuffixParts(A, ASemver);
+  Y := SuffixParts(B, ASemver);
   { The longer is the higher (beta.1 past beta), but Python's .devN
     goes before what it follows: 1.0a1.dev1 is below 1.0a1. }
   for i := 0 to High(X) do
   begin
     if i > High(Y) then
     begin
-      if X[i] = 'dev' then
+      if not ASemver and (X[i] = 'dev') then
         Exit(-1);
       Exit(1);
     end;
@@ -817,7 +823,7 @@ begin
   end;
   if Length(Y) > Length(X) then
   begin
-    if Y[Length(X)] = 'dev' then
+    if not ASemver and (Y[Length(X)] = 'dev') then
       Result := 1
     else
       Result := -1;
@@ -829,14 +835,14 @@ end;
 { CompareVersionParts of two versions as written, a pre-release below
   the release with the same numbers and a post-release above it; two
   pre-releases (or post-releases) of it by their suffixes, beta.1 below
-  beta.2 and rc1. }
-function CompareVersions(const A, B: string): integer;
+  beta.2 and rc1, in SemVer's way or Python's (CompareSuffixes). }
+function CompareVersions(const A, B: string; ASemver: boolean): integer;
 begin
   Result := CompareVersionParts(VersionParts(A), VersionParts(B));
   if Result = 0 then
     Result := VersionRank(A) - VersionRank(B);
   if (Result = 0) and (VersionRank(A) <> 0) then
-    Result := CompareSuffixes(VersionSuffix(A), VersionSuffix(B));
+    Result := CompareSuffixes(VersionSuffix(A), VersionSuffix(B), ASemver);
 end;
 
 { Whether AVersion starts with the numbers of APrefix. }
@@ -850,6 +856,15 @@ begin
     if StrToInt64Def(AVersion[i], 0) <> StrToInt64Def(APrefix[i], 0) then
       Exit(False);
   Result := True;
+end;
+
+{ The local label of a suffix, what follows its "+". }
+function LocalLabel(const ASuffix: string): string;
+begin
+  if Pos('+', ASuffix) = 0 then
+    Result := ''
+  else
+    Result := Copy(ASuffix, Pos('+', ASuffix) + 1, MaxInt);
 end;
 
 { Whether AVersion meets one constraint of a requirement: ">=1.2",
@@ -876,19 +891,18 @@ begin
   if Length(Want) = 0 then
     Exit(True);
   Text := Copy(AConstraint, i, MaxInt);
-  { A wildcard, 1.2.* or 1.2.x, is the versions that start so, whatever
-    the operator before it (npm's ~1.2.x, Python's !=1.4.*), where the
-    caret took 1.2.* for ^1.2. }
+  { A wildcard, 1.2.* or 1.2.x, is the versions that start so (npm's
+    ~1.2.x, Python's !=1.4.*), but npm's ^1.2.x is ^1.2, which goes on to
+    1.3.0: the caret below takes the numbers before the wildcard. }
   if (Pos('*', Text) > 0) or (Pos('.x', LowerCase(Text)) > 0) then
     if Op = '!=' then
       Exit(not HasVersionPrefix(AVersion, Want))
-    else if (Op = '') or (Op = '=') or (Op = '==') or (Op = '^') or (Op = '~') or
-      (Op = '~=') then
+    else if (Op = '') or (Op = '=') or (Op = '==') or (Op = '~') or (Op = '~=') then
       Exit(HasVersionPrefix(AVersion, Want));
   WantPre := IsPreRelease(Text);
   { 1.2.3-beta is below 1.2.3 and beta.2, Python's 1.4.post1 above 1.4
     (<=1.4 and !=1.4 see it so). }
-  c := CompareVersions(AText, Text);
+  c := CompareVersions(AText, Text, ASemver);
   { But 1.4.post1 is not >1.4: > leaves out the post-releases of the
     version it names. }
   if (Op = '>') and (VersionRank(AText) = 1) and (VersionRank(Text) = 0) and
@@ -917,8 +931,9 @@ begin
     Result := c <> 0
   else if (Op = '===') or ((Op = '==') and (Pos('*', AConstraint) = 0)) then
     { Python's ==1.4 is 1.4 alone; ==1.4.* is 1.4.x. }
-    { 1.4.post1 is not ==1.4 either: what follows the numbers is the same. }
-    Result := (c = 0) and (Suffix = VersionSuffix(Text))
+    { 1.4.post1 is not ==1.4 either: CompareVersions holds the suffixes
+      the same, alpha1 as a1; a local label must be the one asked for. }
+    Result := (c = 0) and (LocalLabel(Suffix) = LocalLabel(VersionSuffix(Text)))
   else if ((Op = '=') or (Op = '==')) and WantPre then
     { Cargo's and npm's =2.0.0-beta.1 is that pre-release alone. }
     Result := c = 0
@@ -947,10 +962,12 @@ end;
   its "||" alternatives, each a list of constraints by commas or spaces
   (">=1.2, <2", ">=1.2 <2"). }
 { Whether the pre-release AVersion may meet a range whose constraints
-  are AConstraints: only when one of them names a pre-release of the
-  same numbers, as npm, Cargo and pip have it, so <2 and ^1.2 leave out
-  2.0.0-rc.1 and 1.6.0-beta. Any other version may. }
-function PreReleaseAllowed(const AVersion: string; const AConstraints: array of string): boolean;
+  are AConstraints: only when one of them names a pre-release, of the
+  same numbers in SemVer (ASemver) as npm and Cargo have it, so <2 and
+  ^1.2 leave out 2.0.0-rc.1 and 1.6.0-beta; of any numbers in Python,
+  whose >=1.0rc1 takes 1.1rc1. Any other version may. }
+function PreReleaseAllowed(const AVersion: string; const AConstraints: array of string;
+  ASemver: boolean): boolean;
 var
   k, i: integer;
   Text: string;
@@ -964,8 +981,8 @@ begin
     while (i <= Length(Text)) and (Text[i] in ['<', '>', '=', '!', '~', '^', 'v']) do
       Inc(i);
     Text := Copy(Text, i, MaxInt);
-    if (VersionParts(Text) <> nil) and IsPreRelease(Text) and
-      (CompareVersionParts(VersionParts(Text), VersionParts(AVersion)) = 0) then
+    if (VersionParts(Text) <> nil) and IsPreRelease(Text) and (not ASemver or
+      (CompareVersionParts(VersionParts(Text), VersionParts(AVersion)) = 0)) then
       Exit(True);
   end;
   Result := False;
@@ -998,13 +1015,13 @@ begin
       { A pre-release as the end is a whole version: 2.0.0 is past
         2.0.0-beta.1. }
       if IsPreRelease(UpperText) then
-        InRange := CompareVersions(AVersion, UpperText) <= 0
+        InRange := CompareVersions(AVersion, UpperText, ASemver) <= 0
       else
         InRange := (CompareVersionParts(Version, Upper) <= 0) or
           HasVersionPrefix(Version, Upper);
       if InRange and
         MeetsConstraint(Version, AVersion, '>=' + Trim(Copy(Alternatives[i], 1, p - 1)), ASemver) and
-        PreReleaseAllowed(AVersion, [Copy(Alternatives[i], 1, p - 1), UpperText]) then
+        PreReleaseAllowed(AVersion, [Copy(Alternatives[i], 1, p - 1), UpperText], ASemver) then
         Exit(True);
       Continue;
     end;
@@ -1013,7 +1030,7 @@ begin
     for k := 0 to High(Constraints) do
       if not MeetsConstraint(Version, AVersion, Constraints[k], ASemver) then
         All := False;
-    if All and PreReleaseAllowed(AVersion, Constraints) then
+    if All and PreReleaseAllowed(AVersion, Constraints, ASemver) then
       Exit(True);
   end;
   Result := Length(Alternatives) = 0;
@@ -1069,7 +1086,7 @@ begin
             Break;
           end;
           if (Best < 0) or (CompareVersions(ALocked[j].Resolved,
-            ALocked[Best].Resolved) > 0) then
+            ALocked[Best].Resolved, (AKind <> nil) and AKind.SemverRanges) > 0) then
             Best := j;
         end;
     end;

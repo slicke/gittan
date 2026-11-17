@@ -226,6 +226,12 @@ begin
   { Undone, the newline is back. }
   AssertTrue(Err, DiscardBlock(Swapped(B), Err));
   AssertEquals('a'#10'b'#10, ReadRaw);
+  { The file's end changed since the diff: stale, the change left. }
+  WriteRaw('a'#10'B');
+  B := Block([' a', '-b', '+B'], 1);
+  AssertFalse('newline taken away since', DiscardBlock(B, Err));
+  AssertEquals(rsDiscardStale, Err);
+  AssertEquals('a'#10'B', ReadRaw);
   { A block in the middle keeps the file's end as it is. }
   WriteRaw('a'#10'B'#10'c');
   B := Block([' a', '-b', '+B', ' c', '\'], 1);

@@ -4,6 +4,21 @@
 
 ### Fixed
 
+- A branch's first push goes to the remote `branch.<name>.pushRemote` or `remote.pushDefault` names, as git would, where it went to the first remote.
+- On Windows, an extension's commands get the repository's environment when PATH and the like are spelled in another case.
+- An extension allowed to run commands or reach the forge is given the repository in its commands' context.
+- Outside Windows, temporary files go into a folder of Gittan's that only you can read.
+- An extension's console cuts a very long line and counts each line of a logged text toward its limit.
+- An AI fix is read as numbered lines only when its numbers run in order, so a line of the file that starts with a number keeps it.
+- Discard of a change at the end of a file says the file changed instead of putting back a last newline removed meanwhile; Leave Out of a file with CRLF line ends no longer adds a carriage return to a last line without a newline, and Keep holds which lines had none.
+- A Code History or Time-lapse still loading is dropped when the base or range changes, and Code History from a file changed on disk since it was opened says there is no history yet rather than count the wrong lines.
+- The uncommitted changes at the top of a Code History of lines inside a replaced block show the new lines in their places, not the block's first ones.
+- The project page reads npm's `^1.2.x` as `^1.2`, orders SemVer's `beta10` below `beta2`, takes Python's `>=1.0rc1` to mean `1.1rc1` too, `==1.0alpha1` to mean `1.0a1`, and reads Yarn lock entries in single quotes.
+- A pull request's notice that not all review comments were read comes when more come past the limit, too.
+- The Commit section's tip, hidden for room, is measured at the sidebar's width when it comes back.
+- A failed rebase, interactive rebase or merge reports git's reason, not that of a command run as the view refreshed.
+- Apply Patches on Linux takes two patches whose names differ only in case.
+- The Commands page reads a Makefile's targets after a recipe line with `define` in it, or a variable named `define`.
 - On Windows and Linux, the status bar's buttons and the check of a clean working tree have smooth edges.
 - On Windows, the commit message field shows its scroll bar only while the message is longer than the field.
 - At 125 % on Windows and Linux, the change badges, folders and check boxes are as large as the text around them, and sharp at 150 %.

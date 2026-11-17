@@ -220,9 +220,11 @@ var
   Out: TStringList;
   Olds, News: TStringList;
 
-  procedure Emit(const ALine: string; AKeep, AOld: integer);
+  { AMark is the line's Objects entry, NoNewlineMark for a last line
+    without one, which a discard and an undo read to end the file. }
+  procedure Emit(const ALine: string; AKeep, AOld: integer; AMark: TObject);
   begin
-    Out.Add(ALine);
+    Out.AddObject(ALine, AMark);
     if Out.Count > Length(AKeptOf) then
     begin
       SetLength(AKeptOf, 2 * Out.Count);
@@ -237,9 +239,9 @@ var
     n: integer;
   begin
     for n := 0 to Olds.Count - 1 do
-      Emit('-' + Olds[n], -1, OldNos[n]);
+      Emit('-' + Olds[n], -1, OldNos[n], Olds.Objects[n]);
     for n := 0 to News.Count - 1 do
-      Emit('+' + News[n], -1, 0);
+      Emit('+' + News[n], -1, 0, News.Objects[n]);
     Olds.Clear;
     News.Clear;
   end;
@@ -261,7 +263,7 @@ begin
       if ALines[i][1] = ' ' then
       begin
         Inc(OldLine);
-        Emit(ALines[i], -1, OldLine);
+        Emit(ALines[i], -1, OldLine, ALines.Objects[i]);
         Inc(i);
         Continue;
       end;
@@ -281,10 +283,10 @@ begin
           if Pairs[k].HasOld then
           begin
             OldNos[Olds.Count] := OldLine + k + 1;
-            Olds.Add(Pairs[k].Old);
+            Olds.AddObject(Pairs[k].Old, ALines.Objects[i + k]);
           end;
           if Pairs[k].HasNew then
-            News.Add(Pairs[k].New);
+            News.AddObject(Pairs[k].New, ALines.Objects[i + Old + k]);
         end
         else
         begin
@@ -294,7 +296,7 @@ begin
           if Pairs[k].HasNew then
           begin
             Flush;
-            Emit(' ' + Pairs[k].New, Keep, 0);
+            Emit(' ' + Pairs[k].New, Keep, 0, ALines.Objects[i + Old + k]);
           end;
         end;
       end;
