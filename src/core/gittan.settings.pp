@@ -1109,12 +1109,23 @@ begin
     FStateDoc.Free;
     FStateDoc := Doc;
     { The other process's changes are this one's now, and the fields
-      follow; the base is what goes to disk. }
+      follow; the base is what went to disk, so a file that could not be
+      written keeps its old one and this process's changes to it are
+      still changes at the next save. }
     ReadFields;
-    TakeBase;
+    PutSettings;
+    PutState;
     { The API key is in the file as it is, so no one else may read it. }
-    WriteFileReplacing(SettingsFile, FSettingsDoc.FormatJSON(JsonLayout) + LineEnding, &600);
-    WriteFileReplacing(StateFile, FStateDoc.FormatJSON(JsonLayout) + LineEnding);
+    if WriteFileReplacing(SettingsFile, FSettingsDoc.FormatJSON(JsonLayout) + LineEnding, &600) then
+    begin
+      FSettingsBase.Free;
+      FSettingsBase := TJSONObject(FSettingsDoc.Clone);
+    end;
+    if WriteFileReplacing(StateFile, FStateDoc.FormatJSON(JsonLayout) + LineEnding) then
+    begin
+      FStateBase.Free;
+      FStateBase := TJSONObject(FStateDoc.Clone);
+    end;
   except
     { Nothing to do; the next run starts with what was saved before. }
   end;

@@ -696,6 +696,7 @@ end;
 procedure TSettingsTest.TestTwoProcesses;
 var
   A, B, C: TGittanSettings;
+  Path: string;
 begin
   A := TGittanSettings.Create(FDir);
   try
@@ -780,6 +781,30 @@ begin
     AssertEquals('the zoom kept', 120, C.Zoom);
     AssertFalse('the extension still off', C.ExtEnabled('ext.a'));
     AssertEquals(900, C.Width);
+  finally
+    C.Free;
+  end;
+
+  { A change whose write failed is still a change at the next save,
+    though the file has the old value again. }
+  Path := IncludeTrailingPathDelimiter(FDir) + 'settings.json';
+  A := TGittanSettings.Create(FDir);
+  try
+    A.Load;
+    A.Zoom := 130;
+    AssertTrue(RenameFile(Path, Path + '.kept'));
+    AssertTrue(CreateDir(Path));
+    A.Save;
+    AssertTrue(RemoveDir(Path));
+    AssertTrue(RenameFile(Path + '.kept', Path));
+    A.Save;
+  finally
+    A.Free;
+  end;
+  C := TGittanSettings.Create(FDir);
+  try
+    C.Load;
+    AssertEquals('written at the second save', 130, C.Zoom);
   finally
     C.Free;
   end;
