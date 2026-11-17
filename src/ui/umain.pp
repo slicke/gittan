@@ -329,6 +329,9 @@ type
       whose references in commit messages the summary's card links
       (umain.issues.inc); Repository > Issue Tracker... sets it. }
     FIssueTracker: TGittanIssueTracker;
+    { The root and the repo.toml expression OfferRepoIssues last asked
+      about, so a snapshot does not ask again. }
+    FIssuesOffered: string;
     FIssueTrackerItem: TMenuItem;
     FForgeItems: array of TMenuItem;
     FForgeCaptions: array of string;
@@ -1494,6 +1497,8 @@ type
     procedure NoteRepoConfigError(const AOld: string);
     function CommitConfigNote: string;
     function EffectiveIssueTracker: TGittanIssueTracker;
+    procedure OfferRepoIssues;
+    procedure RepoIssuesTrustClick(Sender: TObject);
     procedure EditCommandsFile(const AFileName, AShown, ATemplate: string);
     procedure CommandPageCopyOutput(Sender: TObject);
     function CommandKey(AKey: word; AShift: TShiftState): boolean;
@@ -3243,6 +3248,10 @@ resourcestring
   rsIssueTrackerRegex = 'Regular expression';
   rsIssueTrackerIdRegex = 'Expression for the ids within a reference (optional)';
   rsIssueTrackerSaved = 'Issue tracker saved';
+  rsRepoIssuesUntrusted = 'This repository''s .gittan/repo.toml names an issue tracker';
+  rsRepoIssuesUntrustedDetail = 'Its expression is used to link issues in commit messages once you allow it, ' +
+    'since an expression from a clone could make Gittan hang.';
+  rsRepoIssuesUse = 'Use It';
   rsIssueTrackerFailed = 'Could not save the issue tracker';
   rsIssueNoAddress = 'No address is set for issue %s: Repository > Issue Tracker...';
   rsIssueNeedsRegex = 'An expression for the ids needs the regular expression that finds ' +
@@ -7923,6 +7932,7 @@ begin
   LoadRepoConfig;
   FIssueTracker := ASnap.IssueTracker;
   UpdateIssueTracker;
+  OfferRepoIssues;
   ApplyFlowSnapshot(ASnap);
   { The pull request is looked up for the branch HEAD is on, the detached
     id during a rebase, so this runs before the rebase branch stands in. }

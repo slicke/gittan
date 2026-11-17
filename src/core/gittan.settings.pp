@@ -288,6 +288,13 @@ type
     {** Trusts the commands file of ARoot as it is now; a change of its
       text asks again. }
     procedure TrustCommands(const ARoot, AHash: string);
+    {** Whether the [issues] expression ARegex of ARoot's .gittan/repo.toml
+      has been trusted: a clone's expression runs on every line of the
+      commit card, and TRegExpr has no step limit, so (a+)+b could hang
+      Gittan; it is used only then. An empty one needs no trust. }
+    function IssueRegexTrusted(const ARoot, ARegex: string): boolean;
+    {** Trusts ARegex for ARoot; another expression asks again. }
+    procedure TrustIssueRegex(const ARoot, ARegex: string);
     {** The kinds of project picked for ARoot on the Project page ("rust,
       go", "none"); '' when none were picked and the files decide. }
     function ProjectKindsOf(const ARoot: string): string;
@@ -355,7 +362,7 @@ resourcestring
 implementation
 
 uses
-  Math, jsonparser, gittan.textfile;
+  Math, jsonparser, gittan.textfile, gittan.sha256;
 
 const
   ConfigFolder = 'Gittan';
@@ -1034,6 +1041,19 @@ begin
   if AHash = '' then
     Exit;
   ChildOf(FStateDoc, 'trust').Strings[ARoot] := AHash;
+end;
+
+function TGittanSettings.IssueRegexTrusted(const ARoot, ARegex: string): boolean;
+begin
+  Result := (ARegex = '') or (StrOf(ObjOf(FStateDoc, 'trustIssues'), ARoot) =
+    SHA256Print(SHA256String(ARegex)));
+end;
+
+procedure TGittanSettings.TrustIssueRegex(const ARoot, ARegex: string);
+begin
+  if ARegex = '' then
+    Exit;
+  ChildOf(FStateDoc, 'trustIssues').Strings[ARoot] := SHA256Print(SHA256String(ARegex));
 end;
 
 function TGittanSettings.ProjectKindsOf(const ARoot: string): string;

@@ -703,6 +703,13 @@ begin
     AssertFalse('another root', S.CommandsTrusted('/tmp/b', 'abc'));
     S.TrustCommands('/tmp/a', 'def');
     S.TrustCommands('/tmp/b', '');
+    AssertTrue('no expression needs no trust', S.IssueRegexTrusted('/tmp/a', ''));
+    AssertFalse(S.IssueRegexTrusted('/tmp/a', '(a+)+b'));
+    S.TrustIssueRegex('/tmp/a', '#(\d+)');
+    AssertTrue(S.IssueRegexTrusted('/tmp/a', '#(\d+)'));
+    AssertFalse('another expression asks again', S.IssueRegexTrusted('/tmp/a', '(a+)+b'));
+    AssertFalse('another root', S.IssueRegexTrusted('/tmp/b', '#(\d+)'));
+    AssertFalse('the commands trust is not this one', S.CommandsTrusted('/tmp/a', '#(\d+)'));
     S.Save;
   finally
     S.Free;
@@ -713,6 +720,7 @@ begin
     AssertTrue('the newest hash is kept', S.CommandsTrusted('/tmp/a', 'def'));
     AssertFalse(S.CommandsTrusted('/tmp/a', 'abc'));
     AssertFalse('an empty hash trusts nothing', S.CommandsTrusted('/tmp/b', 'x'));
+    AssertTrue('the expression trusted is kept', S.IssueRegexTrusted('/tmp/a', '#(\d+)'));
   finally
     S.Free;
   end;

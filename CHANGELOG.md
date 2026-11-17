@@ -7,6 +7,7 @@
 - A `.gittan/repo.toml` or commands file with a dotted key or table header tens of thousands of parts long is refused instead of ending Gittan when the repository opens.
 - A Lazarus `.lpi` or `.lpk` nested thousands of levels deep is not read, instead of ending Gittan when the repository opens.
 - JSON an extension passes nested thousands of levels deep is refused instead of ending Gittan.
+- The issue expression of a cloned `.gittan/repo.toml` links issues only after you choose Use It in the banner that offers it, since an expression such as `(a+)+b` could make Gittan hang on a commit's message.
 - Add to .gitignore, Track with Git LFS and the editor no longer write through a `.gitignore`, `.gitattributes` or other repository file that is a committed symbolic link, which could point at `.git/config` or outside the clone; the Config section leaves such links out.
 - The Project page opens only web links, so a Cargo.toml whose repository is a `file:`, `smb:` or similar URL can no longer start a program with a click.
 - An interactive rebase, a rebase onto another branch or a reset no longer goes ahead when the branch moved or was switched while you were asked, where a commit made meanwhile was dropped; a tag made at HEAD goes on the commit the question named.
