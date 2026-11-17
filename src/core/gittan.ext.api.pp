@@ -56,7 +56,7 @@ implementation
 uses
   {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}BaseUnix,{$ENDIF}
   { DateUtils for LocalTimeToUniversal: FPC 3.2.2 has it only there. }
-  DateUtils, gittan.ext.functions, gittan.ext.perm, gittan.ext.host, gittan.ext.registry,
+  DateUtils, StrUtils, gittan.ext.functions, gittan.ext.perm, gittan.ext.host, gittan.ext.registry,
   gittan.ext.promise, gittan.ext.modules, gittan.http, gittan.textfile, gittan.reviews,
   gittan.forge;
 
@@ -1095,6 +1095,26 @@ begin
     Result := '';
 end;
 
+{ Whether AJson holds the escape of a NUL, \u0000 after an even number of
+  backslashes: FPC 3.2.2's fpjson drops the character as it parses, so it
+  is looked for in the text, before. }
+function JsonHasNul(const AJson: string): boolean;
+var
+  At, Back: integer;
+begin
+  At := Pos('\u0000', AJson);
+  while At > 0 do
+  begin
+    Back := 0;
+    while (At - Back > 1) and (AJson[At - Back - 1] = '\') do
+      Inc(Back);
+    if not Odd(Back) then
+      Exit(True);
+    At := PosEx('\u0000', AJson, At + 1);
+  end;
+  Result := False;
+end;
+
 { A JSON array of strings as arguments; False for anything else, and for
   a string with a NUL (\u0000), which the C string an argument is passed
   as would end at, so the program would get less than was checked. }
@@ -1107,6 +1127,8 @@ begin
   AArgs := nil;
   if AJson = '' then
     Exit(True);
+  if JsonHasNul(AJson) then
+    Exit;
   try
     Data := GetJSONLimited(AJson);
   except

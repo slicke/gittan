@@ -358,12 +358,14 @@ begin
     'Gittan.git.run(["rev-parse", "--verify", "no-such-ref"]).then(function (r) {' +
     'globalThis.code = r.status; globalThis.codeErr = r.stderr; }, function (e) { globalThis.code = "rejected: " + e; });' +
     'Gittan.git.run(["log", "--output\u0000", "x"]).then(function (r) { globalThis.nul = "ran: " + r.ok; },' +
-    'function (e) { globalThis.nul = "rejected: " + e; });',
+    'function (e) { globalThis.nul = "rejected: " + e; });' +
+    'Gittan.git.run(["log", "-n", "1", "--grep=\\u0000"]).then(function (r) { globalThis.text = "ran: " + r.ok; },' +
+    'function (e) { globalThis.text = "rejected: " + e; });',
     AllPerms);
   { Each set at all, not truthy: a status of 0 is a wrong answer to show,
     not a wait that never ends. }
   WaitFor(Info^.Ctx, 'globalThis.out !== undefined && globalThis.bad !== undefined && ' +
-    'globalThis.code !== undefined && globalThis.nul !== undefined',
+    'globalThis.code !== undefined && globalThis.nul !== undefined && globalThis.text !== undefined',
     'JSON.stringify({out: globalThis.out, bad: globalThis.bad, code: globalThis.code, nul: globalThis.nul})');
   AssertEquals('the subject', 'true:first', EvalIn(Info^.Ctx, 'globalThis.out'));
   AssertEquals('a failure', 'false:true', EvalIn(Info^.Ctx, 'globalThis.bad'));
@@ -373,6 +375,8 @@ begin
     passed. }
   AssertTrue('a NUL refused: ' + EvalIn(Info^.Ctx, 'globalThis.nul'),
     Pos('rejected: ', EvalIn(Info^.Ctx, 'globalThis.nul')) = 1);
+  { The text \u0000, a backslash and five characters, is no NUL. }
+  AssertEquals('the text of an escape is no NUL', 'ran: true', EvalIn(Info^.Ctx, 'globalThis.text'));
 end;
 
 { exec without data: git.run, exec.run and gh.run run in the shown
