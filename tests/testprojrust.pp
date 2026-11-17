@@ -29,6 +29,7 @@ type
     procedure TestCargoInfo;
     procedure TestRustSection;
     procedure TestRustNoLock;
+    procedure TestRustRepositoryLink;
   end;
 
 implementation
@@ -220,6 +221,40 @@ begin
   AssertTrue(Sec.Blocks[Bins].Rows[0].Cells[1].Style = psButton);
   AssertEquals('cargo run --bin tool', Sec.Blocks[Bins].Rows[0].Cells[1].Command);
   AssertEquals('run:tool', Sec.Blocks[Bins].Rows[0].Cells[1].CommandName);
+end;
+
+{ Only a web page is a link: OpenURL would start what a file: URL names. }
+procedure TProjRustTest.TestRustRepositoryLink;
+
+  function RepositoryCell(const AValue: string): TGittanProjectCell;
+  var
+    C: TGittanProjectContext;
+    Sec: TGittanProjectSection;
+    i: integer;
+  begin
+    Put('Cargo.toml', '[package]' + LE + 'name = "x"' + LE + 'repository = "' + AValue + '"' + LE);
+    C := TGittanProjectContext.Create(FDir, '', nil);
+    try
+      Sec := TGittanRustKind.Section(C, 'Cargo.toml');
+    finally
+      C.Free;
+    end;
+    Result := Default(TGittanProjectCell);
+    for i := 0 to High(Sec.Blocks[0].Rows) do
+      if Sec.Blocks[0].Rows[i].Cells[0].Text = 'Repository' then
+        Result := Sec.Blocks[0].Rows[i].Cells[1];
+  end;
+
+var
+  Cell: TGittanProjectCell;
+begin
+  Cell := RepositoryCell('https://github.com/a/x');
+  AssertTrue('a link', Cell.Style = psLink);
+  AssertEquals('https://github.com/a/x', Cell.Url);
+  Cell := RepositoryCell('file:///System/Applications/Utilities/Terminal.app');
+  AssertEquals('shown', 'file:///System/Applications/Utilities/Terminal.app', Cell.Text);
+  AssertTrue('no link', Cell.Style <> psLink);
+  AssertEquals('no URL', '', Cell.Url);
 end;
 
 procedure TProjRustTest.TestRustNoLock;
