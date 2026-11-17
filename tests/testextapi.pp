@@ -375,12 +375,14 @@ var
   Info: PExtContextInfo;
 begin
   Info := Load('execonly', 'Gittan.git.run(["log", "--format=%s", "-n", "1"]).then(function (r) {' +
-    'globalThis.out = r.ok + ":" + r.stdout.trim(); }, function (e) { globalThis.out = "rejected:" + String(e); });' +
+    'globalThis.out = r.ok + ":" + r.stdout.trim(); globalThis.err = r.status + " " + r.stderr; },' +
+    ' function (e) { globalThis.out = "rejected:" + String(e); });' +
     'Gittan.exec.run("git", ["rev-parse", "--is-inside-work-tree"]).then(function (r) {' +
     'globalThis.inside = r.stdout.trim(); }, function (e) { globalThis.inside = "rejected:" + String(e); });',
     PermBaseline + [epExec]);
   WaitFor(Info^.Ctx, 'globalThis.out && globalThis.inside');
-  AssertEquals('git in the shown repository', 'true:first', EvalIn(Info^.Ctx, 'globalThis.out'));
+  AssertEquals('git in the shown repository (' + EvalIn(Info^.Ctx, 'String(globalThis.err)') + ')',
+    'true:first', EvalIn(Info^.Ctx, 'globalThis.out'));
   AssertEquals('a program there too', 'true', EvalIn(Info^.Ctx, 'globalThis.inside'));
   AssertEquals('no repo without data', 'undefined', EvalIn(Info^.Ctx, 'typeof Gittan.repo'));
 end;
