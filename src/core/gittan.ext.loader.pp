@@ -369,7 +369,19 @@ begin
         Engine.EndRegistration;
       end;
     end;
-    Res := string(Engine.ExtExecuteFile(Ext));
+    { What runs is the text whose hash was granted, not the file read a
+      third time, which may be gone or another by now. }
+    try
+      Res := string(Engine.ExtExecuteSource(Ext, UTF8String(Source)));
+    except
+      on E: Exception do
+      begin
+        Inf.Error := E.Message;
+        ExtHost.ReportError(ExtractFileName(AFileName), Inf.Error);
+        Engine.DropExtensionContext(Ext);
+        Exit;
+      end;
+    end;
     if Engine.LastLoadFailed then
     begin
       { Reported by the engine as it happened. What the script did

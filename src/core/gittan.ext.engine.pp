@@ -169,6 +169,10 @@ private
         draining so a timer is never freed beneath its own event. }
   FInTimerCallback: integer;
   FLastLoadFailed: boolean;
+    { The entry file being loaded and the text read of it, which the module
+      loader takes instead of reading the file again (ExtExecuteSource). }
+  FEntryFile: string;
+  FEntrySource: RawUtf8;
     {** Rejections seen by PromiseRejectionTracker, reported (or cancelled)
         on the next job-pump tick. }
   FPendingRejections: array of TPendingRejection;
@@ -542,6 +546,10 @@ public
         LastLoadFailed says which, since a script's own last value may be a
         string that starts with Error: too. }
   function ExtExecuteFile(Ext: PExtContextInfo): RawUtf8;
+    {** As ExtExecuteFile, with ASource, the text read of Ext.FileName (the
+        bytes whose hash the grant is for), run instead of the file read
+        again; for a module it is also what the import of the entry gets. }
+  function ExtExecuteSource(Ext: PExtContextInfo; const ASource: RawUtf8): RawUtf8;
     {** Whether the last ExtExecuteFile threw rather than ran to its end. }
   property LastLoadFailed: boolean read FLastLoadFailed;
     {** Takes one extension's context out and frees it, with what it
@@ -699,7 +707,7 @@ GlobalShutdownInProgress: boolean = false;
 implementation
 
 uses
-  gittan.forge;
+  gittan.forge, gittan.textfile;
 
 const
   { The timers one extension may have at once (setTimeout and
@@ -1088,6 +1096,9 @@ begin
 
   if FileName = GittanModuleSpecifier then
     Script := GittanModuleSource
+  else if (TGittanExtEngine(opaque) <> nil) and (TGittanExtEngine(opaque).FEntryFile <> '') and
+    (ExpandFileName(FileName) = ExpandFileName(TGittanExtEngine(opaque).FEntryFile)) then
+    Script := TGittanExtEngine(opaque).FEntrySource
   else if not FileExists(FileName) then
   begin
     Fail('module not found: ' + FileName);
@@ -2732,8 +2743,28 @@ end;
 function TGittanExtEngine.ExtExecuteFile(Ext: PExtContextInfo): RawUtf8;
 var
   Script: RawUtf8;
-  FileStream: TFileStream;
-  StringStream: TStringStream;
+begin
+  Result := '';
+  FLastLoadFailed := false;
+  if (Ext = nil) or IsGlobalShutdown or (Ext^.Ctx = nil) then Exit;
+  try
+    Script := RawUtf8(ReadFileBytes(Ext^.FileName));
+  except
+    on E: Exception do
+    begin
+      FLastLoadFailed := true;
+      Result := RawUtf8('Error: ' + Format(RS_EXT_FILE, [Ext^.FileName]));
+      ExtError('Error loading', string(Result));
+      Exit;
+    end;
+  end;
+  Result := ExtExecuteSource(Ext, Script);
+end;
+
+function TGittanExtEngine.ExtExecuteSource(Ext: PExtContextInfo;
+  const ASource: RawUtf8): RawUtf8;
+var
+  Script: RawUtf8;
   EvalResult: JSValue;
   ResultStr: pansichar;
   err: RawUtf8;
@@ -2744,22 +2775,19 @@ begin
   if (Ext = nil) or IsGlobalShutdown then Exit;
   ctx := Ext^.Ctx;
   if ctx = nil then Exit;
-
-  if not FileExists(Ext^.FileName) then
-    raise Exception.CreateFmt(RS_EXT_FILE, [Ext^.FileName]);
-
-  FileStream := TFileStream.Create(Ext^.FileName, fmOpenRead or fmShareDenyWrite);
-  StringStream := TStringStream.Create;
-  try
-    StringStream.CopyFrom(FileStream, FileStream.Size);
-    Script := StringStream.DataString;
-  finally
-    StringStream.Free;
-    FileStream.Free;
-  end;
+  Script := ASource;
 
   if ScriptLooksLikeModule(Script) then
-    Exit(ExtExecuteModule(Ext));
+  begin
+    FEntryFile := Ext^.FileName;
+    FEntrySource := Script;
+    try
+      Exit(ExtExecuteModule(Ext));
+    finally
+      FEntryFile := '';
+      FEntrySource := '';
+    end;
+  end;
 
   EvalResult := ctx^.Eval(Script, ExtractFileName(Ext^.FileName),
     JS_EVAL_TYPE_GLOBAL, err);

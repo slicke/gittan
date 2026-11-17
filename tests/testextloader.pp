@@ -21,6 +21,7 @@ type
     FLoader: TGittanExtLoader;
     procedure Put(const AName, AScript: string);
     procedure EditModule;
+    procedure SwapFiles(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -37,6 +38,7 @@ type
     procedure TestCaseTwinRefused;
     procedure TestCaseTwinWithEqualsRefused;
     procedure TestNameRefused;
+    procedure TestRunsWhatWasRead;
   end;
 
 implementation
@@ -76,6 +78,33 @@ begin
   finally
     Lines.Free;
   end;
+end;
+
+{ Between the read and the run: a.js replaced, b.js (a module) too,
+  c.js gone. }
+procedure TExtLoaderTest.SwapFiles(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
+begin
+  if ExtractFileName(AExt^.FileName) = 'a.js' then
+    Put('a.js', '/* @name Ay */ Gittan.alert("swapped a");')
+  else if ExtractFileName(AExt^.FileName) = 'b.js' then
+    Put('b.js', '/* @name Bee */ export {}; Gittan.alert("swapped b");')
+  else
+    DeleteFile(AExt^.FileName);
+end;
+
+{ What runs is the text that was read and hashed for the grant, not the
+  file read again: one changed or removed between the two runs as read,
+  and the extensions after it still load. }
+procedure TExtLoaderTest.TestRunsWhatWasRead;
+begin
+  Put('a.js', '/* @name Ay */ Gittan.alert("a");');
+  Put('b.js', '/* @name Bee */ export {}; Gittan.alert("b");');
+  Put('c.js', '/* @name Cee */ Gittan.alert("c");');
+  Put('d.js', '/* @name Dee */ Gittan.alert("d");');
+  FLoader.OnProvision := @SwapFiles;
+  FLoader.Load;
+  AssertEquals('what was read ran', 'a,b,c,d', FHost.Alerts.CommaText);
+  AssertTrue('the removed one loaded', FLoader.Info(2).Loaded);
 end;
 
 procedure TExtLoaderTest.TestLoadsInNameOrder;
