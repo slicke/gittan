@@ -60,7 +60,10 @@ function TomlTooDeep(const AToml: string): boolean;
 
 {** The same for XML: its elements counted, an empty one (<a/>) not,
   comments, CDATA sections, processing instructions and the quoted
-  values of attributes left out. }
+  values of attributes left out. Text with a NUL byte counts as too
+  deep: UTF-16 or UTF-32, which the scan of bytes cannot read (a
+  character with a byte of 22h would pass for a quote) and the parser
+  can. }
 function XmlTooDeep(const AXml: string): boolean;
 
 {** S with every byte that does not start a valid UTF-8 character (a
@@ -464,6 +467,8 @@ var
   end;
 
 begin
+  if Pos(#0, AXml) > 0 then
+    Exit(True);
   Depth := 0;
   i := 1;
   while i <= Length(AXml) do

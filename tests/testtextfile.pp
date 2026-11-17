@@ -227,7 +227,8 @@ end;
 
 procedure TTextFileTest.TestXmlTooDeep;
 var
-  Deep: string;
+  Deep, Wide: string;
+  i: integer;
 begin
   Deep := DupeString('<a>', MaxNesting + 1);
   AssertFalse(XmlTooDeep('<?xml version="1.0"?><CONFIG><A><B Value="1"/></A></CONFIG>'));
@@ -243,6 +244,13 @@ begin
   { What would hide the nesting if the scan took these the wrong way. }
   AssertTrue('a > in a value', XmlTooDeep('<r v="a>b/">' + Deep));
   AssertTrue('/> in a value', XmlTooDeep(DupeString('<a v="/>">', MaxNesting + 1)));
+  { UTF-16, where U+0122 has a byte that reads as a quote and would hide
+    the elements after it from a scan of bytes. }
+  Wide := #$FF#$FE;
+  for i := 1 to Length(Deep) do
+    Wide := Wide + Deep[i] + #0;
+  AssertTrue('UTF-16', XmlTooDeep(#$FF#$FE'<'#0'r'#0' '#0'v'#0'='#0'"'#0#$22#$01'"'#0'>'#0 +
+    Copy(Wide, 3, MaxInt)));
 end;
 
 procedure TTextFileTest.TestUnescapeC;
