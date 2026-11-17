@@ -359,7 +359,7 @@ begin
     'globalThis.code = r.status; globalThis.codeErr = r.stderr; }, function (e) { globalThis.code = "rejected: " + e; });' +
     'Gittan.git.run(["log", "--output\u0000", "x"]).then(function (r) { globalThis.nul = "ran: " + r.ok; },' +
     'function (e) { globalThis.nul = "rejected: " + e; });' +
-    'Gittan.git.run(["log", "-n", "1", "--grep=\\u0000"]).then(function (r) { globalThis.text = "ran: " + r.ok; },' +
+    'Gittan.git.run(["log", "-n", "1", "--fixed-strings", "--grep=\\u0000"]).then(function (r) { globalThis.text = "ran: " + r.ok; },' +
     'function (e) { globalThis.text = "rejected: " + e; });',
     AllPerms);
   { Each set at all, not truthy: a status of 0 is a wrong answer to show,
@@ -375,7 +375,9 @@ begin
     passed. }
   AssertTrue('a NUL refused: ' + EvalIn(Info^.Ctx, 'globalThis.nul'),
     Pos('rejected: ', EvalIn(Info^.Ctx, 'globalThis.nul')) = 1);
-  { The text \u0000, a backslash and five characters, is no NUL. }
+  { The text \u0000, a backslash and five characters, is no NUL. As a
+    fixed string: FreeBSD's regcomp refuses \u as an escape it does not
+    know, so git failed there. }
   AssertEquals('the text of an escape is no NUL', 'ran: true', EvalIn(Info^.Ctx, 'globalThis.text'));
 end;
 
