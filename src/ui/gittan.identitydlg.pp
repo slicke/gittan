@@ -70,6 +70,8 @@ resourcestring
     'check SSH signatures like this one.';
   rsIdentityDlgTestUnknown = 'Signed, but the key is not among those known here: %s';
   rsIdentityDlgTestFailed = 'Signing failed: %s';
+  rsIdentityDlgTestOther = 'Signed, but the key does not stand for the committer''s e-mail %s, ' +
+    'so commits show as signed by someone else. Save puts the key under the e-mail above.';
 
 const
   DialogWidth = 480;
@@ -510,7 +512,7 @@ begin
   Setup.Key := KeyValue;
   Say(rsIdentityDlgTesting);
   Application.ProcessMessages;
-  if not TestSigning(FRoot, Setup, Id, Error) then
+  if not TestSigning(FRoot, Setup, Trim(FEmail.Text), Id, Error) then
   begin
     Say(SysUtils.Format(rsIdentityDlgTestFailed, [Trim(Error)]));
     Exit;
@@ -530,6 +532,8 @@ begin
     end;
     ssUnknownKey:
       Say(SysUtils.Format(rsIdentityDlgTestUnknown, [Commits[0].Signature.Key]));
+    ssOtherSigner:
+      Say(SysUtils.Format(rsIdentityDlgTestOther, [Commits[0].Signature.Committer]));
   else
     Say(rsIdentityDlgTestUnchecked);
   end;

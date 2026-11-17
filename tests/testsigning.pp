@@ -358,7 +358,8 @@ end;
 procedure TSigningTest.TestSetup;
 var
   Cfg: TGittanSigningSetup;
-  Error, Id, Allowed: string;
+  Error, Id, Allowed, Output: string;
+  Code: integer;
   Commits: TGittanSignedCommits;
 begin
   if not MakeKey then
@@ -396,14 +397,32 @@ begin
   AssertEquals('test@example.invalid ' + PublicKeyOf(Cfg.Key) + LineEnding, FileText(Allowed));
 
   { A commit signed as set up verifies, and is on no branch. }
-  AssertTrue(Error, gittan.signing.TestSigning(FDir, Cfg, Id, Error));
+  AssertTrue(Error, gittan.signing.TestSigning(FDir, Cfg, 'test@example.invalid', Id, Error));
   AssertEquals(40, Length(Id));
   AssertTrue(Error, CommitSignatures(FDir, [Id], nil, Commits, Error, []));
   AssertTrue('verified', Commits[0].Signature.State = ssGood);
+  AssertEquals('test@example.invalid', Commits[0].Signature.Committer);
+  { Under another e-mail the key signs, git says good, and it is not
+    the committer's. }
+  AssertTrue(Error, gittan.signing.TestSigning(FDir, Cfg, 'mallory@example.invalid', Id, Error));
+  AssertTrue(Error, CommitSignatures(FDir, [Id], nil, Commits, Error, []));
+  AssertEquals('G', Commits[0].Signature.Code);
+  AssertTrue('another signer', Commits[0].Signature.State = ssOtherSigner);
+  { The key under a second e-mail too: git names the first principal,
+    the file has the committer's on another line. }
+  WriteFile('allowed', FileText(Allowed) + 'mallory@example.invalid ' +
+    PublicKeyOf(FDir + PathDelim + 'key.pub') + LineEnding);
+  AssertTrue(Error, CommitSignatures(FDir, [Id], nil, Commits, Error, []));
+  AssertTrue('the key stands for that e-mail too', Commits[0].Signature.State = ssGood);
+  { The fingerprint as ssh-keygen -l gives it ("256 SHA256:... comment (ED25519)"). }
+  AssertTrue(RunTool('ssh-keygen', FDir, ['-lf', 'key.pub'], [], [], Output, Error, Code, nil));
+  AssertEquals(Output.Split([' '])[1], SshFingerprint(PublicKeyOf(FDir + PathDelim + 'key.pub')));
+  AssertEquals('both lines of the key', 2, Length(AllowedSignerPrincipals(FileText(Allowed),
+    SshFingerprint(PublicKeyOf(FDir + PathDelim + 'key.pub')))));
   AssertEquals('', Trim(Git(['branch', '--contains', Id])));
   { A key that is not there fails with git's reason. }
   Cfg.Key := FDir + PathDelim + 'nope.pub';
-  AssertFalse(gittan.signing.TestSigning(FDir, Cfg, Id, Error));
+  AssertFalse(gittan.signing.TestSigning(FDir, Cfg, 'test@example.invalid', Id, Error));
   AssertTrue(Error, Pos('nope.pub', Error) > 0);
 
   { Off again: both keys unset, the format and key kept. }
@@ -554,16 +573,22 @@ var
   Entry: string;
   Fprs: TStringArray;
 begin
-  Entry := TrustEntry('abcdef0123456789abcdef0123456789abcdef01', 'github.com', 'web-flow');
+  Entry := TrustEntry('abcdef0123456789abcdef0123456789abcdef01', 'github.com', 'web-flow',
+    'noreply@github.com,web@example.invalid');
   AssertEquals('ABCDEF0123456789ABCDEF0123456789ABCDEF01', TrustEntryKey(Entry));
   Commits := ParseSignatureHeaders('aaaa'#10'gpgsig -----BEGIN PGP SIGNATURE-----'#10#10'    a'#0 +
     'bbbb'#10'gpgsig -----BEGIN PGP SIGNATURE-----'#10#10'    b'#0 +
     'cccc'#10'gpgsig -----BEGIN PGP SIGNATURE-----'#10#10'    c'#0 +
-    'dddd'#10'gpgsig -----BEGIN PGP SIGNATURE-----'#10#10'    d'#0);
+    'dddd'#10'gpgsig -----BEGIN PGP SIGNATURE-----'#10#10'    d'#0 +
+    'eeee'#10'gpgsig -----BEGIN PGP SIGNATURE-----'#10#10'    e'#0);
   ApplyVerdicts('aaaa'#31'U'#31'GitHub <noreply@github.com>'#31'B5690EEEBB952194'#31'undefined'#31 +
-    'abcdef0123456789abcdef0123456789abcdef01'#31'abcdef0123456789abcdef0123456789abcdef01'#0 +
+    'abcdef0123456789abcdef0123456789abcdef01'#31'abcdef0123456789abcdef0123456789abcdef01'#31 +
+    'noreply@github.com'#0 +
     'bbbb'#31'U'#31'Sub'#31'1111'#31'undefined'#31'1111111111111111111111111111111111111111'#31 +
-    'ABCDEF0123456789ABCDEF0123456789ABCDEF01'#0 +
+    'ABCDEF0123456789ABCDEF0123456789ABCDEF01'#31'Web@Example.invalid'#0 +
+    'eeee'#31'U'#31'Linus <torvalds@example.invalid>'#31'1111'#31'undefined'#31 +
+    'abcdef0123456789abcdef0123456789abcdef01'#31'abcdef0123456789abcdef0123456789abcdef01'#31 +
+    'torvalds@example.invalid'#0 +
     'cccc'#31'U'#31'Other'#31'2222'#31'undefined'#31'2222222222222222222222222222222222222222'#31 +
     '2222222222222222222222222222222222222222'#0 +
     'dddd'#31'B'#31'Bad'#31'3333'#31'undefined'#31'abcdef0123456789abcdef0123456789abcdef01'#31 +
@@ -577,8 +602,50 @@ begin
   AssertTrue('a subkey of it', Commits[1].Signature.State = ssTrusted);
   AssertTrue('another key', Commits[2].Signature.State = ssUnknownKey);
   AssertTrue('a bad signature is never trusted', Commits[3].Signature.State = ssBad);
+  AssertEquals('torvalds@example.invalid', Commits[4].Signature.Committer);
+  AssertTrue('a trusted key, another committer', Commits[4].Signature.State = ssOtherSigner);
+  AssertEquals('web-flow', Commits[4].Signature.TrustedUser);
   ApplyTrust(Commits, []);
   AssertTrue(Commits[2].Signature.State = ssUnknownKey);
+  { An entry from before the e-mails were kept trusts nothing. }
+  Commits[0].Signature.State := ssUnknownKey;
+  ApplyTrust(Commits, [UpperCase('abcdef0123456789abcdef0123456789abcdef01') + #31'github.com'#31'web-flow']);
+  AssertTrue('an old entry', Commits[0].Signature.State = ssUnknownKey);
+
+  AssertTrue(SshPrincipalMatches('a@x,b@x', 'b@x'));
+  AssertTrue('case', SshPrincipalMatches('A@X', 'a@x'));
+  AssertTrue(SshPrincipalMatches('*@example.com', 'bob@example.com'));
+  AssertFalse(SshPrincipalMatches('*@example.com', 'bob@example.com.evil'));
+  AssertFalse('a negation rules it out', SshPrincipalMatches('*@example.com,!bob@example.com', 'bob@example.com'));
+  AssertTrue(SshPrincipalMatches('b?b@x', 'bob@x'));
+  AssertFalse(SshPrincipalMatches('a@x', ''));
+  AssertFalse(SshPrincipalMatches('a@x', 'b@x'));
+  AssertEquals('', SshFingerprint('nonsense'));
+  AssertEquals(0, Length(AllowedSignerPrincipals('a@x cert-authority ssh-ed25519 ' +
+    'AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl', SshFingerprint(
+    'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl'))));
+  AssertEquals('b@x,c@x', AllowedSignerPrincipals('# note'#10'a@x ssh-ed25519 AAAA'#10 +
+    'b@x,c@x namespaces="git,file" ssh-ed25519 ' +
+    'AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl', SshFingerprint(
+    'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl'))[0]);
+
+  Fprs := GpgKeyEmails('pub:u:255:22:AAAA:1::::::scESC::::::23::0:'#10 +
+    'fpr:::::::::1111111111111111111111111111111111111111:'#10 +
+    'uid:u::::1::X::Ada <ada@example.invalid>::::::::::0:'#10 +
+    'uid:r::::1::Y::Old <old@example.invalid>::::::::::0:'#10 +
+    'sub:u:255:18:BBBB:1::::::e::::::23:'#10 +
+    'fpr:::::::::2222222222222222222222222222222222222222:'#10 +
+    'pub:u:255:22:CCCC:1::::::scESC::::::23::0:'#10 +
+    'fpr:::::::::3333333333333333333333333333333333333333:'#10 +
+    'uid:u::::1::Z::bob@example.invalid::::::::::0:'#10,
+    '2222222222222222222222222222222222222222');
+  AssertEquals('a subkey finds its key, a revoked uid left out', 1, Length(Fprs));
+  AssertEquals('ada@example.invalid', Fprs[0]);
+  Fprs := GpgKeyEmails('pub:u:255:22:CCCC:1::::::scESC::::::23::0:'#10 +
+    'fpr:::::::::3333333333333333333333333333333333333333:'#10 +
+    'uid:u::::1::Z::bob@example.invalid::::::::::0:'#10, '3333333333333333333333333333333333333333');
+  AssertEquals('bob@example.invalid', Fprs[0]);
+  AssertEquals(0, Length(GpgKeyEmails('', '33')));
 
   Fprs := ParseGpgImport('gpg: key B5690EEEBB952194: public key imported'#10 +
     '[GNUPG:] IMPORTED B5690EEEBB952194 GitHub <noreply@github.com>'#10 +

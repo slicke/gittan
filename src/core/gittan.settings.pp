@@ -314,10 +314,11 @@ type
       latest first (AddCoAuthor), for the co-authors dialog to list. }
     property CoAuthors: TStringList read FCoAuthors;
     {** The signing keys taken on a forge's word (gittan.signing's
-      TrustEntry: fingerprint, host, user), kept in settings.json as
+      TrustEntry: fingerprint, host, user, e-mails), kept in settings.json as
       signing.trustedKeys, since trusting a key is a choice to keep. }
     property TrustedKeys: TStringList read FTrustedKeys;
-    {** Adds AEntry unless its fingerprint is there already. }
+    {** Adds AEntry, in place of the entry with its fingerprint when there
+      is one. }
     procedure AddTrustedKey(const AEntry: string);
     {** The entries as an array, for a job to take along. }
     function TrustedKeyList: TStringArray;
@@ -1098,9 +1099,14 @@ begin
   Key := UpperCase(Trim(AEntry.Split([#31])[0]));
   if Key = '' then
     Exit;
+  { Trusted again: the new entry replaces the old, which may be one
+    from before the e-mails were kept. }
   for i := 0 to FTrustedKeys.Count - 1 do
     if UpperCase(Trim(FTrustedKeys[i].Split([#31])[0])) = Key then
+    begin
+      FTrustedKeys[i] := AEntry;
       Exit;
+    end;
   FTrustedKeys.Add(AEntry);
 end;
 

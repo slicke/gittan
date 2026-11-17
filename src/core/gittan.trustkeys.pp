@@ -384,13 +384,16 @@ begin
 end;
 
 { Every key of every user is taken, so the commits of the same people
-  elsewhere in the history verify too. An SSH key goes in under the
-  e-mails of its owner alone, since git matches the committer's e-mail
-  against the principal: the e-mails GitHub lists for the user's GPG
-  keys, and the commit's author or committer e-mail where GitHub names
-  the user as that one (its word that the e-mail is theirs). Another
-  user's e-mail under the key would make a commit forged under that
-  e-mail verify as theirs. }
+  elsewhere in the history verify too. A key stands for the e-mails of
+  its owner alone: the e-mails GitHub lists for the user's GPG keys,
+  and the commit's author or committer e-mail where GitHub names the
+  user as that one (its word that the e-mail is theirs). An SSH key
+  goes into the allowed signers file under them, and a GPG key's trust
+  entry keeps them. git itself checks only that a key signed, not that
+  it is the committer's (any principal that lists the key will do), so
+  gittan.signing's CheckCommitters and ApplyTrust hold the committer's
+  e-mail against these; another user's e-mail here would make a commit
+  forged under that e-mail verify as theirs. }
 procedure TGittanTrustJob.Execute;
 var
   Base, Reason, Login, Armored, Key, Email, Author, Committer, AuthorEmail,
@@ -437,6 +440,7 @@ begin
       FError := Reason;
     SetLength(FUsers, Length(FUsers) + 1);
     FUsers[High(FUsers)] := Login;
+    Emails := SignerEmails(Login, Author, Committer, AuthorEmail, CommitterEmail, Keys.Emails);
     if (FGpgProgram <> '') and (Length(Keys.GpgKeys) > 0) then
     begin
       Armored := '';
@@ -446,7 +450,8 @@ begin
         for i := 0 to High(Fingerprints) do
         begin
           SetLength(FTrusted, Length(FTrusted) + 1);
-          FTrusted[High(FTrusted)] := TrustEntry(Fingerprints[i], FHost, Login);
+          FTrusted[High(FTrusted)] := TrustEntry(Fingerprints[i], FHost, Login,
+            string.Join(',', Emails));
         end
       else
         FError := Reason;
@@ -455,7 +460,6 @@ begin
       FError := 'gpg was not found, so ' + Login + '''s GPG keys could not be taken in.';
     if (FAllowedFile <> '') and (Length(Keys.SshKeys) > 0) then
     begin
-      Emails := SignerEmails(Login, Author, Committer, AuthorEmail, CommitterEmail, Keys.Emails);
       for Key in Keys.SshKeys do
       begin
         { With no e-mail to bind it to, the key is not added. }

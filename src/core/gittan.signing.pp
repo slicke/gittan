@@ -28,8 +28,14 @@ type
     whose key or signer git cannot vouch for: U, and gpg's E when the
     public key is missing), bad (B, or an expired or revoked key: X, Y,
     R; Code tells which), or unchecked (signed, but the verifier could
-    not run: no gpg, or no allowed signers file for an SSH signature). }
-  TGittanSignState = (ssNone, ssGood, ssTrusted, ssUnknownKey, ssBad, ssUnchecked);
+    not run: no gpg, or no allowed signers file for an SSH signature).
+    Another signer: a signature git or the forge vouches for, but by a
+    key that does not stand for the committer's e-mail (CheckCommitters,
+    ApplyTrust): git checks that a key signed, never whose commit it
+    signed, so anyone's trusted key could sign a commit made out to
+    someone else. }
+  TGittanSignState = (ssNone, ssGood, ssTrusted, ssUnknownKey, ssBad, ssUnchecked,
+    ssOtherSigner);
 
   {** How a commit was signed, from the first line of its signature. }
   TGittanSignFormat = (sfNone, sfSsh, sfOpenPgp, sfX509);
@@ -49,6 +55,8 @@ type
     {** For ssTrusted: the forge whose word the key was taken on and
       the user it belongs to there. }
     TrustedFrom, TrustedUser: string;
+    {** The committer's e-mail (%ce), which the key has to stand for. }
+    Committer: string;
   end;
 
   TGittanSignedCommit = record
@@ -190,9 +198,11 @@ function ParseGpgSecretKeys(const AOutput: string): TStringArray;
   (the program, the key, the agent or pinentry) without touching a
   branch; the commit is reachable from nothing and git gc prunes it.
   AId is its id; false with git's reason in AError (gpg failed to sign
-  the data, Couldn't load public key, ...). }
+  the data, Couldn't load public key, ...). The committer is AEmail
+  (Gittan's own when empty), so the read back holds the key against
+  the e-mail that will commit (CheckCommitters). }
 function TestSigning(const ARoot: string; const ASetup: TGittanSigningSetup;
-  out AId, AError: string): boolean;
+  const AEmail: string; out AId, AError: string): boolean;
 
 {** ~/.ssh/allowed_signers, the file Gittan sets up when none is. }
 function DefaultAllowedSignersFile: string;
@@ -231,7 +241,7 @@ function SignatureFormat(const ALine: string): TGittanSignFormat;
 function ParseSignatureHeaders(const AOutput: string): TGittanSignedCommits;
 
 {** Reads git's verdicts from AOutput, a log in VerifyFormat (-z, a
-  record per commit: hash, %G?, %GS, %GK, %GT, %GF, %GP at unit separators), into
+  record per commit: hash, %G?, %GS, %GK, %GT, %GF, %GP, %ce at unit separators), into
   the commits of ACommits by hash. A verdict of N for a signed commit
   leaves it unchecked, since git says N when the verifier could not
   run; any other letter sets the state (see TGittanSignState). }
@@ -243,7 +253,7 @@ function SignStateOf(ACode: char): TGittanSignState;
 {** The signatures of AHashes in the repository at ARoot: the headers
   first, then git's verdict on the signed ones alone, so an unsigned
   commit costs no gpg, and ApplyTrust with ATrusted; ACommits comes in
-  AHashes' order. ACancel, when given, is asked as git runs. False
+  AHashes' order; then CheckCommitters. ACancel, when given, is asked as git runs. False
   when git failed, with its reason in AError. For threads too. }
 function CommitSignatures(const ARoot: string; const AHashes: array of string;
   ACancel: TGittanCancelEvent; out ACommits: TGittanSignedCommits;
@@ -252,14 +262,49 @@ function CommitSignatures(const ARoot: string; const AHashes: array of string;
 {** Marks as trusted the commits whose valid signature git gives no
   trust (ssUnknownKey with a fingerprint) when the key's fingerprint,
   or its primary key's, is one of ATrusted: entries as TrustEntry makes
-  them, a fingerprint the user took on a forge's word, with the forge
-  and the user there. gpg's web of trust is left alone: the signature
-  itself gpg has checked, only the trust comes from the forge. }
+  them, a fingerprint the user took on a forge's word, with the forge,
+  the user there and the e-mails the forge vouches are the user's. The
+  committer's e-mail has to be one of those, else the commit is
+  ssOtherSigner; an entry without e-mails (made before they were kept)
+  trusts nothing, so the commit offers Trust again. gpg's web of trust
+  is left alone: the signature itself gpg has checked, only the trust
+  comes from the forge. }
 procedure ApplyTrust(var ACommits: TGittanSignedCommits; const ATrusted: array of string);
 
-{** An entry of the trusted keys: the fingerprint, the forge's host
-  and the user, at unit separators. }
-function TrustEntry(const AFingerprint, AHost, AUser: string): string;
+{** An entry of the trusted keys: the fingerprint, the forge's host,
+  the user and the e-mails (comma-separated) the forge vouches are the
+  user's, at unit separators. }
+function TrustEntry(const AFingerprint, AHost, AUser: string;
+  const AEmails: string = ''): string;
+
+{** Makes ssOtherSigner of the ssGood commits of ACommits whose key does
+  not stand for the committer's e-mail: for SSH, git's principal
+  (%GS) or a principal of another line of the allowed signers file with
+  the same key (SshPrincipalMatches); for OpenPGP, one of the key's user
+  ids (gpg --list-keys, GpgKeyEmails); for X.509, an e-mail in the
+  signer git names. ARoot is the repository, for its allowed signers
+  file and gpg. }
+procedure CheckCommitters(const ARoot: string; var ACommits: TGittanSignedCommits);
+
+{** Whether AEmail matches APrincipals, the principals field of an
+  allowed signers line: patterns with * and ? joined by commas, one with
+  a leading ! a negation that rules the e-mail out. Case is ignored. }
+function SshPrincipalMatches(const APrincipals, AEmail: string): boolean;
+
+{** The SHA256 fingerprint of an SSH public key ("type base64"), as
+  ssh-keygen and git's %GK write it ("SHA256:" and unpadded base64); ''
+  when it is no key. }
+function SshFingerprint(const AKey: string): string;
+
+{** The principals fields of the lines of AText, an allowed signers
+  file, whose key has the fingerprint AFingerprint; a cert-authority
+  line is none, its key signs no commit. }
+function AllowedSignerPrincipals(const AText, AFingerprint: string): TStringArray;
+
+{** The e-mails of the user ids, not revoked, of the key in AOutput (gpg
+  --with-colons --list-keys) whose primary key or a subkey has the
+  fingerprint AFingerprint. }
+function GpgKeyEmails(const AOutput, AFingerprint: string): TStringArray;
 {** The fingerprint of AEntry, upper case. }
 function TrustEntryKey(const AEntry: string): string;
 
@@ -273,9 +318,12 @@ function ImportGpgKeys(const AProgram, AArmored: string; out AFingerprints: TStr
 function ParseGpgImport(const AOutput: string): TStringArray;
 
 const
-  VerifyFormat = '--format=%H%x1f%G?%x1f%GS%x1f%GK%x1f%GT%x1f%GF%x1f%GP';
+  VerifyFormat = '--format=%H%x1f%G?%x1f%GS%x1f%GK%x1f%GT%x1f%GF%x1f%GP%x1f%ce';
 
 implementation
+
+uses
+  base64, gittan.sha256, gittan.textfile;
 
 function SignatureFormat(const ALine: string): TGittanSignFormat;
 var
@@ -366,13 +414,30 @@ begin
             Fingerprint := UpperCase(Trim(Fields[5]));
           if Length(Fields) > 6 then
             Primary := UpperCase(Trim(Fields[6]));
+          if Length(Fields) > 7 then
+            Committer := Trim(Fields[7]);
         end;
   end;
 end;
 
-function TrustEntry(const AFingerprint, AHost, AUser: string): string;
+function TrustEntry(const AFingerprint, AHost, AUser: string;
+  const AEmails: string): string;
 begin
-  Result := UpperCase(Trim(AFingerprint)) + #31 + Trim(AHost) + #31 + Trim(AUser);
+  Result := UpperCase(Trim(AFingerprint)) + #31 + Trim(AHost) + #31 + Trim(AUser) + #31 +
+    Trim(AEmails);
+end;
+
+{ Whether AEmail is one of AList, comma-separated, case ignored. }
+function EmailListed(const AList, AEmail: string): boolean;
+var
+  E: string;
+begin
+  Result := False;
+  if Trim(AEmail) = '' then
+    Exit;
+  for E in AList.Split([',']) do
+    if SameText(Trim(E), Trim(AEmail)) then
+      Exit(True);
 end;
 
 function TrustEntryKey(const AEntry: string): string;
@@ -395,11 +460,15 @@ begin
           Fpr := UpperCase(Trim(Parts[0]));
           if (Fpr <> '') and ((Fpr = Fingerprint) or (Fpr = Primary)) then
           begin
-            State := ssTrusted;
-            if Length(Parts) > 1 then
-              TrustedFrom := Parts[1];
-            if Length(Parts) > 2 then
-              TrustedUser := Parts[2];
+            { An entry from before the e-mails were kept: Trust again. }
+            if (Length(Parts) < 4) or (Trim(Parts[3]) = '') then
+              Break;
+            if EmailListed(Parts[3], Committer) then
+              State := ssTrusted
+            else
+              State := ssOtherSigner;
+            TrustedFrom := Parts[1];
+            TrustedUser := Parts[2];
             Break;
           end;
         end;
@@ -444,6 +513,323 @@ begin
     AError := 'gpg imported no key';
 end;
 
+{ ssh's match_pattern: * any run, ? one character. }
+function GlobMatches(const APattern, AText: string): boolean;
+
+  function Match(p, t: integer): boolean;
+  begin
+    while p <= Length(APattern) do
+    begin
+      case APattern[p] of
+        '*':
+          begin
+            while (p <= Length(APattern)) and (APattern[p] = '*') do
+              Inc(p);
+            if p > Length(APattern) then
+              Exit(True);
+            while t <= Length(AText) do
+            begin
+              if Match(p, t) then
+                Exit(True);
+              Inc(t);
+            end;
+            Exit(False);
+          end;
+        '?':
+          if t > Length(AText) then
+            Exit(False);
+      else
+        if (t > Length(AText)) or (APattern[p] <> AText[t]) then
+          Exit(False);
+      end;
+      Inc(p);
+      Inc(t);
+    end;
+    Result := t > Length(AText);
+  end;
+
+begin
+  Result := Match(1, 1);
+end;
+
+function SshPrincipalMatches(const APrincipals, AEmail: string): boolean;
+var
+  P, Email: string;
+begin
+  Result := False;
+  Email := LowerCase(Trim(AEmail));
+  if Email = '' then
+    Exit;
+  for P in LowerCase(Trim(APrincipals)).Split([',']) do
+    if (P <> '') and (P[1] = '!') then
+    begin
+      if GlobMatches(Copy(P, 2, MaxInt), Email) then
+        Exit(False);
+    end
+    else if (P <> '') and GlobMatches(P, Email) then
+      Result := True;
+end;
+
+function SshFingerprint(const AKey: string): string;
+var
+  Parts: TStringArray;
+  Blob: RawByteString;
+  Digest: TSHA256Digest;
+  Raw: RawByteString;
+begin
+  Result := '';
+  Parts := Trim(AKey).Split([' ', #9], TStringSplitOptions.ExcludeEmpty);
+  if Length(Parts) < 2 then
+    Exit;
+  try
+    Blob := DecodeStringBase64(Parts[1], True);
+  except
+    Exit;
+  end;
+  if Blob = '' then
+    Exit;
+  Digest := SHA256String(Blob);
+  SetLength(Raw, SizeOf(Digest));
+  Move(Digest[0], Raw[1], SizeOf(Digest));
+  Result := EncodeStringBase64(Raw);
+  while (Result <> '') and (Result[Length(Result)] = '=') do
+    SetLength(Result, Length(Result) - 1);
+  Result := 'SHA256:' + Result;
+end;
+
+{ The fields of an allowed signers line, a quoted option value kept
+  whole ("namespaces="git,file"" is one field). }
+function SignerFields(const ALine: string): TStringArray;
+var
+  i: integer;
+  Field: string;
+  Quoted: boolean;
+begin
+  Result := nil;
+  Field := '';
+  Quoted := False;
+  for i := 1 to Length(ALine) do
+    if ALine[i] = '"' then
+    begin
+      Quoted := not Quoted;
+      Field := Field + ALine[i];
+    end
+    else if not Quoted and (ALine[i] in [' ', #9]) then
+    begin
+      if Field <> '' then
+      begin
+        SetLength(Result, Length(Result) + 1);
+        Result[High(Result)] := Field;
+      end;
+      Field := '';
+    end
+    else
+      Field := Field + ALine[i];
+  if Field <> '' then
+  begin
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := Field;
+  end;
+end;
+
+function AllowedSignerPrincipals(const AText, AFingerprint: string): TStringArray;
+var
+  Line: string;
+  Fields: TStringArray;
+  i: integer;
+  Authority: boolean;
+begin
+  Result := nil;
+  if AFingerprint = '' then
+    Exit;
+  for Line in AdjustLineBreaks(AText, tlbsLF).Split([#10]) do
+  begin
+    if (Trim(Line) = '') or (Trim(Line)[1] = '#') then
+      Continue;
+    Fields := SignerFields(Trim(Line));
+    if Length(Fields) < 3 then
+      Continue;
+    { The options, if any, are the second field; the key is the first
+      field after the principals that a key's base64 follows. }
+    Authority := Pos('cert-authority', LowerCase(Fields[1])) > 0;
+    for i := 1 to High(Fields) - 1 do
+      if SshFingerprint(Fields[i] + ' ' + Fields[i + 1]) = AFingerprint then
+      begin
+        if not Authority then
+        begin
+          SetLength(Result, Length(Result) + 1);
+          Result[High(Result)] := Fields[0];
+        end;
+        Break;
+      end;
+  end;
+end;
+
+{ The e-mail of a user id: what is between < and >, else the whole when
+  it has an @. }
+function UidEmail(const AUid: string): string;
+var
+  a, b: integer;
+begin
+  a := Pos('<', AUid);
+  b := Pos('>', AUid);
+  if (a > 0) and (b > a) then
+    Result := Trim(Copy(AUid, a + 1, b - a - 1))
+  else if Pos('@', AUid) > 0 then
+    Result := Trim(AUid)
+  else
+    Result := '';
+end;
+
+function GpgKeyEmails(const AOutput, AFingerprint: string): TStringArray;
+var
+  Line, Fpr: string;
+  Fields, Uids: TStringArray;
+  Hit: boolean;
+begin
+  Result := nil;
+  Fpr := UpperCase(Trim(AFingerprint));
+  if Fpr = '' then
+    Exit;
+  Uids := nil;
+  Hit := False;
+  { A key is its pub line and what follows up to the next pub. }
+  for Line in (AdjustLineBreaks(AOutput, tlbsLF) + #10'pub:').Split([#10]) do
+  begin
+    Fields := Line.Split([':']);
+    if Length(Fields) = 0 then
+      Continue;
+    if Fields[0] = 'pub' then
+    begin
+      if Hit then
+        Exit(Uids);
+      Uids := nil;
+      Hit := False;
+    end
+    else if (Fields[0] = 'fpr') and (Length(Fields) > 9) and
+      (UpperCase(Fields[9]) = Fpr) then
+      Hit := True
+    else if (Fields[0] = 'uid') and (Length(Fields) > 9) and (Fields[1] <> 'r') and
+      (UidEmail(Fields[9]) <> '') then
+    begin
+      SetLength(Uids, Length(Uids) + 1);
+      Uids[High(Uids)] := UidEmail(Fields[9]);
+    end;
+  end;
+end;
+
+{ The e-mails an X.509 signer names: <...>, or E= / EMail= parts. }
+function X509Emails(const ASigner: string): TStringArray;
+var
+  Part, Key: string;
+begin
+  Result := nil;
+  if UidEmail(ASigner) <> '' then
+  begin
+    SetLength(Result, 1);
+    Result[0] := UidEmail(ASigner);
+  end;
+  for Part in ASigner.Split(['/', ',']) do
+  begin
+    Key := LowerCase(Trim(Copy(Part, 1, Pos('=', Part) - 1)));
+    if ((Key = 'e') or (Key = 'email') or (Key = 'emailaddress')) and (Pos('=', Part) > 0) then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Trim(Copy(Part, Pos('=', Part) + 1, MaxInt));
+    end;
+  end;
+end;
+
+function AnyEmail(const AList: TStringArray; const AEmail: string): boolean;
+var
+  E: string;
+begin
+  Result := False;
+  if Trim(AEmail) = '' then
+    Exit;
+  for E in AList do
+    if SameText(Trim(E), Trim(AEmail)) then
+      Exit(True);
+end;
+
+function ConfigValue(const ARoot: string; const AArgs: array of string): string; forward;
+
+procedure CheckCommitters(const ARoot: string; var ACommits: TGittanSignedCommits);
+var
+  i: integer;
+  Allowed, Path, Gpg, Listed, Output, Error, Fpr, P: string;
+  AllowedRead, GpgRead, Ok: boolean;
+  Status: integer;
+begin
+  AllowedRead := False;
+  GpgRead := False;
+  Allowed := '';
+  Gpg := '';
+  Listed := '';
+  for i := 0 to High(ACommits) do
+    with ACommits[i].Signature do
+    begin
+      if State <> ssGood then
+        Continue;
+      case Format of
+        sfSsh:
+          begin
+            Ok := SshPrincipalMatches(Signer, Committer);
+            if not Ok then
+            begin
+              { The key under more than one principal: git names the
+                first it verified with. }
+              if not AllowedRead then
+              begin
+                AllowedRead := True;
+                Path := AllowedSignersPath(ARoot,
+                  ConfigValue(ARoot, ['config', 'gpg.ssh.allowedSignersFile']));
+                if (Path <> '') and FileExists(Path) then
+                  try
+                    Allowed := ReadFileBytes(Path);
+                  except
+                    Allowed := '';
+                  end;
+              end;
+              for P in AllowedSignerPrincipals(Allowed, Key) do
+                if SshPrincipalMatches(P, Committer) then
+                begin
+                  Ok := True;
+                  Break;
+                end;
+            end;
+          end;
+        sfOpenPgp:
+          begin
+            if not GpgRead then
+            begin
+              GpgRead := True;
+              Gpg := GpgProgramFor(ARoot);
+            end;
+            Fpr := Primary;
+            if Fpr = '' then
+              Fpr := Fingerprint;
+            Ok := False;
+            if (Gpg <> '') and (Fpr <> '') then
+            begin
+              { Each key once a chunk: the listings so far are kept. }
+              if (Pos(Fpr, UpperCase(Listed)) = 0) and
+                RunTool(Gpg, '', ['--batch', '--with-colons', '--fixed-list-mode',
+                  '--list-keys', '--', Fpr], [], [], Output, Error, Status, nil) then
+                Listed := Listed + #10 + Output;
+              Ok := AnyEmail(GpgKeyEmails(Listed, Fpr), Committer);
+            end;
+          end;
+        sfX509:
+          Ok := AnyEmail(X509Emails(Signer), Committer);
+      else
+        Ok := False;
+      end;
+      if not Ok then
+        State := ssOtherSigner;
+    end;
+end;
+
 { The hashes go on stdin, so a chunk is not bound by the command line.
   --no-walk=unsorted keeps their order. }
 function CommitSignatures(const ARoot: string; const AHashes: array of string;
@@ -482,6 +868,7 @@ begin
       Exit;
     ApplyVerdicts(Output, Found);
     ApplyTrust(Found, ATrusted);
+    CheckCommitters(ARoot, Found);
   end;
   { In the order asked for; a hash git did not list is unsigned. }
   SetLength(ACommits, Length(AHashes));
@@ -805,18 +1192,21 @@ begin
 end;
 
 { mktree with nothing on its input gives the empty tree. commit-tree
-  signs only with -S, and the identity is Gittan's own so it runs
-  where none is set. }
+  signs only with -S, and the name is Gittan's own so it runs where
+  none is set. }
 function TestSigning(const ARoot: string; const ASetup: TGittanSigningSetup;
-  out AId, AError: string): boolean;
+  const AEmail: string; out AId, AError: string): boolean;
 var
-  Tree: string;
+  Tree, Email: string;
 begin
   AId := '';
+  Email := Trim(AEmail);
+  if Email = '' then
+    Email := 'gittan@localhost';
   Result := RunGitEnv(ARoot, ['mktree'], [], Tree, AError);
   if not Result then
     Exit;
-  Result := RunGitIn(ARoot, ['-c', 'user.name=Gittan', '-c', 'user.email=gittan@localhost',
+  Result := RunGitIn(ARoot, ['-c', 'user.name=Gittan', '-c', 'user.email=' + Email,
     '-c', 'gpg.format=' + SignFormatName(ASetup.Format), '-c', 'user.signingkey=' + ASetup.Key,
     'commit-tree', '-S', Trim(Tree), '-m', 'Gittan signing test'], AId, AError);
   AId := Trim(AId);
@@ -968,7 +1358,8 @@ begin
       if FileExists(AFile) then
         Lines.LoadFromFile(AFile);
       { The key under another e-mail is no line for this one: a commit
-        made under this e-mail would not verify. }
+        made under this e-mail would show as another signer's
+        (CheckCommitters). }
       for i := 0 to Lines.Count - 1 do
         if SignerLineHas(Lines[i], AEmail, Key) then
           Exit(True);

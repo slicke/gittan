@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- A signed commit shows as verified only when the key stands for the committer's e-mail; a commit signed with someone's trusted key but made out to another committer now says "Signed by X, not by the committer Y" with an outlined shield. A key trusted from GitHub before this asks to be trusted again, so its verified e-mails are kept, and the card names the GitHub user rather than the key's own user id.
 - A `.gittan/repo.toml` or commands file with a dotted key or table header tens of thousands of parts long is refused instead of ending Gittan when the repository opens.
 - A Lazarus `.lpi` or `.lpk` nested thousands of levels deep is not read, instead of ending Gittan when the repository opens.
 - JSON an extension passes nested thousands of levels deep is refused instead of ending Gittan.
