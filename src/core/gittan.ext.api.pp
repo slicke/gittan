@@ -1183,6 +1183,9 @@ type
     constructor Create;
     procedure Wrote(const AText: string);
     function Stop: boolean;
+    { After the run: past the output cap with what was read once the
+      program ended, which Stop no longer saw. }
+    function WroteTooMuch: boolean;
   end;
 
 resourcestring
@@ -1219,6 +1222,13 @@ begin
   Result := Why <> '';
 end;
 
+function TToolGuard.WroteTooMuch: boolean;
+begin
+  if (Why = '') and (FWritten > ExtToolOutputLimit) then
+    Why := Format(rsToolOutput, [ExtToolOutputLimit shr 20]);
+  Result := Why <> '';
+end;
+
 { Runs a tool and gives git.run's and exec.run's result: its exit code,
   128 and the signal when one ended it (as a shell says), -1 when it did
   not start or the guard ended it (its reason in stderr, and no stdout).
@@ -1235,7 +1245,7 @@ begin
   try
     Ran := RunTool(AExe, ADir, AArgs, ASkip, AEnv, Output, Error, Status, @Guard.Wrote,
       AInput, @Guard.Stop);
-    if Guard.Why <> '' then
+    if Guard.WroteTooMuch then
       Exit(RunJson(False, -1, '', Guard.Why));
   finally
     Guard.Free;

@@ -2428,8 +2428,14 @@ begin
         else
           Break;
     until False;
-    while ReadPipe(P.Output, AOutput, OutLen, AOnOutput) do;
-    while ReadPipe(P.Stderr, AError, ErrLen, AOnOutput) do;
+    { What the tool left in the pipes, until they are empty; the cancel
+      is asked here too, as the guard counts this output. }
+    while ReadPipe(P.Output, AOutput, OutLen, AOnOutput) do
+      if Assigned(ACancel) and ACancel() then
+        Exit(False);
+    while ReadPipe(P.Stderr, AError, ErrLen, AOnOutput) do
+      if Assigned(ACancel) and ACancel() then
+        Exit(False);
     AStatus := P.ExitStatus;
     Result := True;
   finally
