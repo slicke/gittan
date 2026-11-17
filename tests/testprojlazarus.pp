@@ -8,8 +8,8 @@ unit testprojlazarus;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.manifest, gittan.project, gittan.submodules,
-  gittan.proj.lazarus, testhelpers;
+  Classes, SysUtils, StrUtils, fpcunit, testregistry, gittan.manifest, gittan.project,
+  gittan.submodules, gittan.proj.lazarus, testhelpers;
 
 type
   TProjLazarusTest = class(TTestCase)
@@ -206,6 +206,13 @@ begin
     '</ProjectOptions></CONFIG>').Modes));
   { No modes listed: Lazarus's one. }
   AssertEquals('Default', ReadLazProject('<CONFIG><ProjectOptions/></CONFIG>').Modes[0].Name);
+  { 30 000 levels ended the process in Find's recursion. }
+  AssertEquals('nested too deep', 0, Length(ReadLazProject('<?xml version="1.0"?><CONFIG>' +
+    DupeString('<a>', 30000) + DupeString('</a>', 30000) +
+    '<ProjectOptions><Title Value="x"/></ProjectOptions></CONFIG>').Modes));
+  AssertEquals('a package nested too deep', '', ReadLazPackage('<CONFIG>' +
+    DupeString('<a>', 30000) + DupeString('</a>', 30000) +
+    '<Package><Name Value="p"/></Package></CONFIG>').Name);
 end;
 
 procedure TProjLazarusTest.TestReadPackage;

@@ -33,8 +33,9 @@ function NextLine(const S: string; var AStart: integer; out ALine: string): bool
   backslash before any other character for that character. }
 function UnescapeC(const S: string): string;
 
-{** The deepest a JSON or TOML file a repository holds may nest its
-  arrays and tables. fpjson and toml-fp read nesting by recursion, and
+{** The deepest a JSON, TOML or XML file a repository holds may nest its
+  arrays, tables and elements. fpjson, toml-fp and fcl-xml (with the
+  code that walks its tree) read nesting by recursion, and
   100 000 levels end the process on a stack overflow that no except
   catches, so a deeper text is refused before it is parsed. }
 const
@@ -51,6 +52,11 @@ function JsonTooDeep(const AJson: string): boolean;
   comments left out, inline tables and arrays counted, and the parts of
   a dotted key or table header (a.b.c, [a.b.c]) as one level each. }
 function TomlTooDeep(const AToml: string): boolean;
+
+{** The same for XML: its elements counted, an empty one (<a/>) not,
+  comments, CDATA sections, processing instructions and the quoted
+  values of attributes left out. }
+function XmlTooDeep(const AXml: string): boolean;
 
 {** S with every byte that does not start a valid UTF-8 character (a
   CP1252 é, a character cut in half, an overlong form or a surrogate)
@@ -394,6 +400,79 @@ begin
         else
           Inc(i);
       end;
+    end;
+  Result := False;
+end;
+
+function XmlTooDeep(const AXml: string): boolean;
+var
+  i, Depth: integer;
+
+  function At(const AText: string): boolean;
+  begin
+    Result := Copy(AXml, i, Length(AText)) = AText;
+  end;
+
+  { Past the first AEnd from i on, or to the end of the text. }
+  procedure SkipPast(const AEnd: string);
+  var
+    Found: SizeInt;
+  begin
+    Found := Pos(AEnd, AXml, i);
+    if Found = 0 then
+      i := Length(AXml) + 1
+    else
+      i := Found + Length(AEnd);
+  end;
+
+  { Past the tag opened at i, to its >; a > in a quoted value does not
+    end it. Whether it ends in />. }
+  function SkipTag: boolean;
+  var
+    Quote: char;
+  begin
+    Result := False;
+    Inc(i);
+    while (i <= Length(AXml)) and (AXml[i] <> '>') do
+    begin
+      if AXml[i] in ['"', ''''] then
+      begin
+        Quote := AXml[i];
+        Inc(i);
+        while (i <= Length(AXml)) and (AXml[i] <> Quote) do
+          Inc(i);
+      end;
+      Inc(i);
+    end;
+    Result := (i <= Length(AXml)) and (AXml[i - 1] = '/');
+    Inc(i);
+  end;
+
+begin
+  Depth := 0;
+  i := 1;
+  while i <= Length(AXml) do
+    if AXml[i] <> '<' then
+      Inc(i)
+    else if At('<!--') then
+      SkipPast('-->')
+    else if At('<![CDATA[') then
+      SkipPast(']]>')
+    else if At('<?') then
+      SkipPast('?>')
+    else if At('<!') then
+      SkipPast('>')
+    else if At('</') then
+    begin
+      if Depth > 0 then
+        Dec(Depth);
+      SkipPast('>');
+    end
+    else if not SkipTag then
+    begin
+      Inc(Depth);
+      if Depth > MaxNesting then
+        Exit(True);
     end;
   Result := False;
 end;

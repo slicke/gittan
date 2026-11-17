@@ -22,6 +22,7 @@ type
     procedure TestJsonTooDeep;
     procedure TestUtf8Clean;
     procedure TestTomlTooDeep;
+    procedure TestXmlTooDeep;
     procedure TestWriteThroughLink;
     procedure TestTempFileNamePrivate;
   end;
@@ -192,6 +193,26 @@ begin
   AssertFalse('floats in a long array',
     TomlTooDeep('x = [' + DupeString('1.5, ', 1000) + '2.5]'));
   AssertFalse('dots in a string key', TomlTooDeep('"' + DupeString('a.', 500) + '" = 1'));
+end;
+
+procedure TTextFileTest.TestXmlTooDeep;
+var
+  Deep: string;
+begin
+  Deep := DupeString('<a>', MaxNesting + 1);
+  AssertFalse(XmlTooDeep('<?xml version="1.0"?><CONFIG><A><B Value="1"/></A></CONFIG>'));
+  AssertFalse('at the limit', XmlTooDeep(DupeString('<a>', MaxNesting) +
+    DupeString('</a>', MaxNesting)));
+  AssertTrue('one deeper', XmlTooDeep(Deep));
+  AssertTrue(XmlTooDeep(DupeString('<a x="1">', 30000)));
+  AssertFalse('empty elements', XmlTooDeep('<r>' + DupeString('<a/>', 500) + '</r>'));
+  AssertFalse('closed ones', XmlTooDeep(DupeString('<a></a>', 500)));
+  AssertFalse('in a comment', XmlTooDeep('<r><!-- ' + Deep + ' --></r>'));
+  AssertFalse('in CDATA', XmlTooDeep('<r><![CDATA[' + Deep + ']]></r>'));
+  AssertFalse('in an instruction', XmlTooDeep('<?p ' + Deep + '?><r/>'));
+  { What would hide the nesting if the scan took these the wrong way. }
+  AssertTrue('a > in a value', XmlTooDeep('<r v="a>b/">' + Deep));
+  AssertTrue('/> in a value', XmlTooDeep(DupeString('<a v="/>">', MaxNesting + 1)));
 end;
 
 procedure TTextFileTest.TestUnescapeC;

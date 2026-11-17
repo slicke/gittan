@@ -165,14 +165,16 @@ resourcestring
 
 { No DOCTYPE is read: Lazarus writes none, and its entities would be
   expanded without a limit (a file under a kilobyte can ask for
-  gigabytes, the "billion laughs"). }
+  gigabytes, the "billion laughs"). A file nested deeper than MaxNesting
+  is not read either: the parser, the freeing of its tree and Find go
+  down it by recursion, and some 30 000 levels end the process. }
 function LoadXml(const AXml: string): TXMLDocument;
 var
   Parser: TDOMParser;
   Source: TXMLInputSource;
 begin
   Result := nil;
-  if Trim(AXml) = '' then
+  if (Trim(AXml) = '') or XmlTooDeep(AXml) then
     Exit;
   Parser := TDOMParser.Create;
   Source := TXMLInputSource.Create(AXml);
