@@ -30,6 +30,7 @@ type
     procedure TestNextVersion;
     procedure TestInit;
     procedure TestFeature;
+    procedure TestFeatureWithSameNamedTag;
     procedure TestRelease;
     procedure TestHotfixIntoRelease;
     procedure TestConflictResumes;
@@ -292,6 +293,27 @@ begin
   AssertEquals(0, Length(ListFlowBranches(FDir, Flow)));
   AssertFalse('gone', FinishFlowBranch(FDir, Flow, fkFeature, 'login', '', Conflicts, Stopped,
     Err));
+end;
+
+{ Git takes a tag before a branch of the same name: the branch is merged,
+  not the older commit the tag is on, and nothing is lost to -D. }
+procedure TGitFlowTest.TestFeatureWithSameNamedTag;
+var
+  Flow: TGittanFlow;
+  Err, Stopped, Tip: string;
+  Conflicts: boolean;
+begin
+  Flow := NewRepo;
+  AssertTrue(Err, StartFlowBranch(FDir, Flow, fkFeature, 'x', Err));
+  CommitFile('b.txt', 'b', 'first');
+  Git(['tag', 'feature/x']);
+  CommitFile('c.txt', 'c', 'second');
+  Tip := GitOut(['rev-parse', 'refs/heads/feature/x']);
+  AssertTrue(Err, FinishFlowBranch(FDir, Flow, fkFeature, 'x', '', Conflicts, Stopped, Err));
+  AssertEquals('deleted', '', GitOut(['branch', '--list', 'feature/x']));
+  AssertEquals('the branch is in', Tip, GitOut(['rev-parse', 'develop^2']));
+  AssertEquals('git''s message', 'Merge branch ''feature/x'' into develop',
+    GitOut(['log', '-1', '--format=%s']));
 end;
 
 procedure TGitFlowTest.TestRelease;

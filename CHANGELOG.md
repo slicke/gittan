@@ -3,6 +3,92 @@
 ## Unreleased
 
 ### Fixed
+
+- A branch's first push goes to the remote `branch.<name>.pushRemote` or `remote.pushDefault` names, as git would, where it went to the first remote.
+- On Windows, an extension's commands get the repository's environment when PATH and the like are spelled in another case.
+- An extension allowed to run commands or reach the forge is given the repository in its commands' context.
+- Outside Windows, temporary files go into a folder of Gittan's that only you can read.
+- An extension's console cuts a very long line and counts each line of a logged text toward its limit.
+- An AI fix is read as numbered lines only when its numbers run in order, so a line of the file that starts with a number keeps it.
+- Discard of a change at the end of a file says the file changed instead of putting back a last newline removed meanwhile; Leave Out of a file with CRLF line ends no longer adds a carriage return to a last line without a newline, and Keep holds which lines had none.
+- A Code History or Time-lapse still loading is dropped when the base or range changes, and Code History from a file changed on disk since it was opened says there is no history yet rather than count the wrong lines.
+- The uncommitted changes at the top of a Code History of lines inside a replaced block show the new lines in their places, not the block's first ones.
+- The project page reads npm's `^1.2.x` as `^1.2`, orders SemVer's `beta10` below `beta2`, takes Python's `>=1.0rc1` to mean `1.1rc1` too, `==1.0alpha1` to mean `1.0a1`, and reads Yarn lock entries in single quotes.
+- A pull request's notice that not all review comments were read comes when more come past the limit, too.
+- The Commit section's tip, hidden for room, is measured at the sidebar's width when it comes back.
+- A failed rebase, interactive rebase or merge reports git's reason, not that of a command run as the view refreshed.
+- Apply Patches on Linux takes two patches whose names differ only in case.
+- The Commands page reads a Makefile's targets after a recipe line with `define` in it, or a variable named `define`.
+- On Windows and Linux, the status bar's buttons and the check of a clean working tree have smooth edges.
+- On Windows, the commit message field shows its scroll bar only while the message is longer than the field.
+- At 125 % on Windows and Linux, the change badges, folders and check boxes are as large as the text around them, and sharp at 150 %.
+- On Windows, the file trees in the sidebar show their scroll bars only when there is something to scroll.
+- On Linux with GTK3, the empty band over the title bar (black on KDE's Wayland) is gone.
+- At a high DPI in a low window, the Changes and Commit headings and the tree of changed files no longer disappear under the Commit section: its tip goes and its message box shrinks first.
+- On Linux with GTK3, Gittan no longer stops at startup with "Division by zero" when no AI agent is installed.
+- A pull request with more review comments than Gittan reads (over 100 replies in a thread, or 2000 threads) says so, where the rest were left out unsaid.
+- At a display scale above 100 % on Windows and Linux, the rounded corners, check marks, close crosses and lines of the summary, banners, notices, popup lists and image view scale with the rest.
+- The Pull Requests page lists up to 200 open pull requests, where it stopped at 50 and could offer a second pull request for a branch that had one past them.
+- Approve and Request Changes are left off your own pull request when it is the only one, where they were offered until another came.
+- The project page reads npm's and Cargo's `<=1.2` as every 1.2.x and `>1.2` as from 1.3.0, as they mean it.
+- The summary of more changed files than fit in it (about a thousand) ends with how many more there are, where on Linux the rows past them could not be scrolled to.
+- Quitting with Don't Save in one tab and Cancel in another keeps the first tab's edits marked as unsaved.
+- A deleted file with a folder of its name in its place shows in the file tree as the file, so it can be shown and reverted.
+- A submodule whose path ends in parentheses, `lib (fork)`, is found when it is checked out at another commit.
+- Apply Patches no longer applies a patch picked twice twice.
+- A Code History or Time-lapse still loading is no longer dropped when a file saved meanwhile refreshes the view.
+- Code History from a file being edited counts its lines in the version compared against, where lines added in the work tree shifted the range.
+- The summary with thousands of changed files no longer lags on every move of the mouse.
+- A clone keeps running in its tab when another repository is opened, which now gets a tab of its own, where the clone never opened and a failure went unreported.
+- Rename or Move takes a change of case alone (`README.MD` to `README.md`) on macOS and Windows, where it said the name was taken.
+- A fetch, pull or push that waits for the background fetch runs after a commit started meanwhile, where it was dropped.
+- A tag made or a fetch run in a terminal shows in Gittan at once, where it waited for something else to change.
+- Branches whose names differ only in case are told apart in the branch lists and in the check for gone upstreams.
+- A font size, zoom or tab width edited by hand in settings.json past what the settings allow falls back to the default.
+- Discard and Leave Out of a change at the end of a file keep the file's last newline as the version compared against has it, where a discarded line added without a newline left the line before it without one, and the commit got a newline change nobody chose.
+- An image or SVG that claims more than 64 megapixels (a 100-byte SVG can claim 40000 × 40000) is not drawn, where Gittan froze or ran out of memory.
+- The project page reads a package.json or requirements.txt that starts with a byte order mark, and lists a requirement given as `name @ https://…`.
+- The project page matches `1.2.*` and `1.2.x` as 1.2.x and `!=1.4.*` as leaving 1.4.x out, leaves a pre-release such as 2.0.0-rc.1 out of `<2` and `^1` unless the range names one, and puts Python's `.devN` below the release it comes before.
+- Two tabs committing at the same moment no longer share temporary files, where one could commit the other's text.
+- An extension's review card shows its age right, where it was off by the time zone.
+- Push sends a branch made from another one's upstream (`git switch -c fix origin/main`) to a branch of its own name, where it pushed the commits onto main; it also honours `pushRemote` and `remote.pushDefault`, so in a fork setup the push goes to the fork.
+- An extension's `alert`, `Gittan.confirm` and `Gittan.log` with an object whose text changes each time it is read no longer overwrite Gittan's memory.
+- Saving a file in the editor that fails (a locked or read-only file) before going to another file asks again, where the edits were dropped.
+- Next Conflict in the merge editor with the last row at the top no longer reads before the start of the rows.
+- Quitting or closing a tab while a command from `.gittan` runs no longer reads the command after it was freed.
+- An extension's command no longer gets the file's path or the selected code without the data permission, nor the repository's folder unless it may also run programs.
+- Git Flow's Finish merges the branch when a tag has the same name, where git merged the tag's older commit and Finish then deleted the branch with the commits after it.
+- Discard is no longer offered on a renamed file, where it emptied the file, nor on a file taken out of the index with `git rm --cached` but still on disk, where it wrote the file's content in front of itself.
+- A file whose name holds `[`, `*` or `?` shows its own changes, where `[ab].txt` also showed those of `a.txt`, and Leave Out and Put into Its Commit wrote them into it.
+- Undo Discard, and a discard of deleted lines, refuse a file that changed around the block since, where they put the lines back at the old line number.
+- A rebase or pull whose local changes could not be put back cleanly says so, where it said it was done and left the files in conflict.
+- `Gittan.ui.openFile` opens only files inside the repository, where an extension without the data permission could show any file on disk.
+- Reload Extensions no longer keeps the memory of every extension it unloads, which after a few hundred reloads kept extensions from loading at all.
+- An extension that failed to load or was turned off can no longer register commands, forge tabs or Batch operations, or start git, exec or fetch, from a promise it left queued.
+- A branch with a tag of the same name is listed and switched to by its name, where the branch menu showed `heads/foo` and switching to it failed.
+- The check for branches whose upstream is gone reads a branch whose name holds a quote, and one with a tag of the same name, by its name.
+- On an orphan branch with no commit yet the commit graph, a file's history and the `change:` search show the other branches' history, where the graph was empty.
+- A commit that leaves out some lines of a deleted script keeps its executable bit.
+- Quitting with an unsaved file in another tab opens the tab that was shown at the next start.
+- A pull request comment or review sent after the repository's remote changed while it was being written no longer crashes Gittan.
+- Open on GitHub opens a file whose name starts with "-", where `-s` opened the repository's settings.
+- An AI fix whose answer numbered the lines it replaces no longer writes the numbers into the file.
+- The project page reads more of what lock and manifest files hold: Python packages whose names a lock spells otherwise (PyYAML as pyyaml, typing_extensions as typing-extensions), Cargo's dotted keys (`tokio.workspace = true`, which showed as a dependency named tokio.workspace) and renamed dependencies (`package = "bar"`), yarn berry's keys with several ranges, pnpm lockfile 5's peers, a pnpm-lock.yaml with Windows line ends (where a line of blanks also crashed Gittan), pip-compile's continued lines with hashes, a Lazarus package's minimum version with a release number or a 0 left out, and a go.mod `module` or `go` line with a comment after it.
+- Add to .gitignore on a file whose name holds `[`, `*` or `?` ignores that file, where `pages/[id].tsx` ignored `pages/d.tsx` instead.
+- A Makefile's `::=` assignments and the text of a `define` are no longer listed as commands.
+- Blame, Code History, review threads and AI Why on the old side of the change view find the right lines after a reviewed (kept) line that was only added or only deleted, where every old line after it was one off.
+- A reviewed deleted line in the middle of a block no longer splits the block, where Leave Out and the line selection then went to the wrong rows.
+- Code History shows the uncommitted lines added at the end of the range, such as the new text of a changed last line or lines added at the end of the file.
+- An SSH key a forge gives for a commit's author is added to the allowed signers only when it is one, and never read as a file of that name on this computer.
+- Settings an extension no longer defines leave its settings page after Reload Extensions.
+- Put into Its Commit with whitespace ignored no longer takes a change of blanks alone into the old commit with the change it puts there; it stays in the work tree.
+- Undo Discard after a conflict was resolved with a side that had no lines refuses a file that changed round it, where it put the conflict back at the old line.
+- The AI features run GitHub Copilot without `COPILOT_ALLOW_ALL` and the `GITHUB_COPILOT_PROMPT_MODE_` variables, which would let a cloned repository's hooks, MCP servers and extensions run when you asked for a commit message, review or summary.
+- The project page shows the right locked version of a Python package with a local label or a post-release: `==2.1.0` is met by 2.1.0+cu118 again, and 1.4.post1 is above 1.4, so `<=1.4` leaves it out and `!=1.4` takes it. Two pre-releases of one version are told apart (2.0.0-beta.2 is past 2.0.0-beta.1 and below 2.0.0-rc.1, Python's 1.4b2 below 1.4rc1, beta.10 past beta.2), `=2.0.0-beta.1` is that pre-release alone, and 2.0.0 meets `>2.0.0-beta.1`.
+
+## 0.20 (build-145, 2026-11-12)
+
+### Fixed
 - Opening a repository whose .github or .gittan folder holds a link to a folder no longer hangs Gittan: a link such as `.github/a -> .` was walked into for ever. Linked folders are left out of the Config section's files.
 - A repository can no longer crash Gittan or run it out of memory on open with a .lpi or .lpk whose DOCTYPE expands entities to gigabytes, a package.json, lock file, commands.toml or repo.toml nested many thousand levels deep, or a .po file with a plural index such as `msgstr[-1]`. A commands.toml or repo.toml nested too deep says so on the Commands page.
 - A package.json script whose name holds a line break is no longer listed, where running it ran the rest of its name as a second command, and a script name with spaces or other characters the shell reads is quoted. A Makefile target that starts with "-" is no longer listed, where `make -C..` would have run another folder's Makefile.

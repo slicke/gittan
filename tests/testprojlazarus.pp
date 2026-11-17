@@ -109,6 +109,15 @@ begin
     '</RequiredPackages></ProjectOptions></CONFIG>');
   AssertEquals('LCL LazUtils', Names(D));
   AssertEquals(0, Length(ParseLpiPackages('<CONFIG/>')));
+  { Lazarus leaves out the parts that are 0; Release counts. }
+  D := ParseLpiPackages('<CONFIG><ProjectOptions><RequiredPackages>' +
+    '<Item><PackageName Value="a"/><MinVersion Minor="1" Release="1" Valid="True"/></Item>' +
+    '<Item><PackageName Value="b"/><MinVersion Major="2" Minor="4" Release="1"/></Item>' +
+    '<Item><PackageName Value="c"/><MinVersion Major="3" Valid="True"/></Item>' +
+    '</RequiredPackages></ProjectOptions></CONFIG>');
+  AssertEquals('>= 0.1.1', Find(D, 'a').Version);
+  AssertEquals('>= 2.4.1', Find(D, 'b').Version);
+  AssertEquals('>= 3.0', Find(D, 'c').Version);
 end;
 
 procedure TProjLazarusTest.TestLpiVersion;

@@ -999,22 +999,10 @@ procedure TGittanExtEngine.SetOutput(ctx: JSContext; const vals: PJSValues;
 const len: integer);
 var
   i: integer;
-  totalLen: integer;
-  temp: rawutf8;
-  p: PAnsiChar;
 begin
-  if len < 0 then Exit;
-  totalLen := 0;
+  // One conversion a value: a toString may answer differently each time
   for i := 0 to len do
-    Inc(totalLen, Length(ctx^.ToUtf8(vals^[i])));
-  SetLength(temp, totalLen);
-  p := PAnsiChar(temp);
-  for i := 0 to len do
-  begin
-    Move(PAnsiChar(ctx^.ToUtf8(vals^[i]))^, p^, Length(ctx^.ToUtf8(vals^[i])));
-    Inc(p, Length(ctx^.ToUtf8(vals^[i])));
-  end;
-  output := output + temp;
+    output := output + ctx^.ToUtf8(vals^[i]);
 end;
 
 {** Clear accumulated output buffer. }
@@ -2224,8 +2212,11 @@ begin
     ExtError('Cannot locate the Gittan class while initializing extensions');
     Exit;
   end;
-
-  ctx^.SetFunction(this, pchar(id), func, argc);
+  try
+    ctx^.SetFunction(this, pchar(id), func, argc);
+  finally
+    JS_FreeValue(ctx, this);
+  end;
 end;
 
 {** Gated variant: only register if the permission group is granted. }
@@ -2456,6 +2447,7 @@ begin
     Exit;
   ctx := Ext^.Ctx;
   FRegistry.RemoveContext(ctx);
+  FRegistry.RemoveSettingsOf(Ext^.ExtId);
   { Its timers hold values of the context, so they go before it. }
   if Assigned(FJSTimers) then
     for i := FJSTimers.Count - 1 downto 0 do
@@ -2542,6 +2534,9 @@ begin
           if FExtContexts[i]^.Ctx <> nil then
           try
             FRegistry.RemoveContext(FExtContexts[i]^.Ctx);
+            { What the script defines on its next load is what it has: a
+              key it no longer defines goes. }
+            FRegistry.RemoveSettingsOf(FExtContexts[i]^.ExtId);
             JS_FreeContext(FExtContexts[i]^.Ctx);
           except
           end;
@@ -2576,10 +2571,10 @@ begin
   // Wire the engine pointer so native callbacks can locate us from a ctx.
   JS_SetContextOpaque(ctx, Self);
 
-  // Standard intrinsics so Promises/RegExp/Date work as in the legacy engine.
-  JS_AddIntrinsicPromise(ctx);
-  JS_AddIntrinsicRegExp(ctx);
-  JS_AddIntrinsicDate(ctx);
+  // JS_NewContext has every intrinsic (Promise, RegExp, Date and the rest).
+  // Adding one again replaced its prototypes without freeing them, and their
+  // functions keep the context, so JS_FreeContext never freed it: each
+  // reload kept every extension's heap.
 
   // Expose 'Gittan' constructor in this context's global scope so addClassFunction
   // calls during provisioning can attach methods to Gittan.*
@@ -3699,6 +3694,36 @@ begin
   end;
 end;
 
+{ What a command of an extension granted AGranted gets of its context:
+  without data no file's path and no selected code, and no repository's
+  root unless exec or forge gives it anyway (git and programs, and the
+  forge's tool, run there, which a Batch operation with either alone
+  needs to name its repository: forge-overview.js asks gh of each). }
+function CommandContextFor(AGranted: TExtPermSet; const AJson: string): string;
+var
+  Data: TJSONData;
+  Key: string;
+begin
+  if epData in AGranted then
+    Exit(AJson);
+  Result := '{}';
+  try
+    Data := GetJSON(AJson);
+  except
+    Exit;
+  end;
+  try
+    if not (Data is TJSONObject) then
+      Exit;
+    for Key in TStringArray.Create('path', 'selection', 'repo') do
+      if (Key <> 'repo') or ([epExec, epForge] * AGranted = []) then
+        TJSONObject(Data).Delete(Key);
+    Result := Data.AsJSON;
+  finally
+    Data.Free;
+  end;
+end;
+
 function TGittanExtEngine.GrantedForContext(ctx: JSContext): TExtPermSet;
 var
   i: integer;
@@ -3859,7 +3884,7 @@ begin
   Result := True;
   Func := JS_DupValue(Cmd.Ctx, Cmd.Func);
   try
-    arg := ParseJsonIn(Cmd.Ctx, AContextJson);
+    arg := ParseJsonIn(Cmd.Ctx, CommandContextFor(GrantedForContext(Cmd.Ctx), AContextJson));
     ret := JS_Call(Cmd.Ctx, Func, JS_UNDEFINED, 1, @arg);
     if JS_IsException(ret) then
       DumpJSError(Cmd.Ctx);

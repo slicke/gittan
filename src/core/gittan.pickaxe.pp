@@ -125,7 +125,7 @@ function ChangeCommits(const ARoot: string; const AChanges: array of string;
   out AError: string): boolean;
 var
   Option, Output, Err: string;
-  IgnoreCase, First: boolean;
+  IgnoreCase, First, HeadBorn: boolean;
   Args: array of string;
   Found: TStringList;
   i, j, n: integer;
@@ -134,6 +134,8 @@ begin
   AError := '';
   Result := True;
   First := True;
+  { An unborn HEAD (an orphan branch beside others) is no revision. }
+  HeadBorn := RunGitIn(ARoot, ['rev-parse', '--verify', '-q', 'HEAD'], Output, Err);
   Found := TStringList.Create;
   try
     Found.Sorted := True;
@@ -157,9 +159,14 @@ begin
       Args[n] := '--branches';
       Args[n + 1] := '--remotes';
       Args[n + 2] := '--tags';
-      Args[n + 3] := 'HEAD';
-      Args[n + 4] := '--';
-      SetLength(Args, n + 5);
+      Inc(n, 3);
+      if HeadBorn then
+      begin
+        Args[n] := 'HEAD';
+        Inc(n);
+      end;
+      Args[n] := '--';
+      SetLength(Args, n + 1);
       if not RunGitEnv(ARoot, Args, [], Output, Err, '', nil, ACancel) then
       begin
         AHashes.Clear;

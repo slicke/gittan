@@ -159,6 +159,9 @@ begin
     Svg := TBGRASVG.CreateFromString(AText);
     try
       Result := SvgSize(Svg);
+      { Too large to draw: shown as one that cannot be read. }
+      if ImageTooLarge(Result.X, Result.Y) then
+        Result := PointF(0, 0);
     finally
       Svg.Free;
     end;
@@ -167,8 +170,8 @@ begin
   end;
 end;
 
-{ AText, an SVG, drawn AZoom times its size; nil when it cannot be read
-  or has no size. }
+{ AText, an SVG, drawn AZoom times its size; nil when it cannot be read,
+  has no size or would be over MaxImagePixels. }
 function SvgBitmap(const AText: string; AZoom: single): TBGRABitmap;
 var
   Svg: TBGRASVG;
@@ -181,7 +184,7 @@ begin
     try
       Svg := TBGRASVG.CreateFromString(AText);
       Size := SvgSize(Svg);
-      if (Size.X < 1) or (Size.Y < 1) then
+      if (Size.X < 1) or (Size.Y < 1) or ImageTooLarge(Size.X * AZoom, Size.Y * AZoom) then
         Exit;
       Result := TBGRABitmap.Create(Ceil(Size.X * AZoom), Ceil(Size.Y * AZoom));
       C2d := TBGRACanvas2D.Create(Result);

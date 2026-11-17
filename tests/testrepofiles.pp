@@ -166,6 +166,9 @@ begin
   AssertEquals('a dotfile has no extension to generalize', 1, Length(P));
   AssertEquals('/.env', P[0]);
   AssertEquals(0, Length(IgnorePatterns('')));
+  { A glob character is the character itself. }
+  P := IgnorePatterns('pages/[id].tsx');
+  AssertEquals('/pages/\[id\].tsx', P[0]);
 end;
 
 procedure TRepoFilesTest.TestIsRepoFile;

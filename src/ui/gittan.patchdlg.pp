@@ -501,6 +501,18 @@ function PickPatchFiles(AFiles: TStrings; var AFolder: string): boolean;
 var
   D: TOpenDialog;
   Picked: TStringList;
+  i: integer;
+
+  function HasFile(const AName: string): boolean;
+  var
+    k: integer;
+  begin
+    for k := 0 to AFiles.Count - 1 do
+      if SameFileName(AFiles[k], AName) then
+        Exit(True);
+    Result := False;
+  end;
+
 begin
   D := TOpenDialog.Create(nil);
   Picked := TStringList.Create;
@@ -516,7 +528,11 @@ begin
       { format-patch numbers its files, so by name is their order. }
       Picked.Assign(D.Files);
       Picked.Sort;
-      AFiles.AddStrings(Picked);
+      { A patch picked again is not applied twice: the same file by the
+        system's case rules, where a TStringList ignores case. }
+      for i := 0 to Picked.Count - 1 do
+        if not HasFile(Picked[i]) then
+          AFiles.Add(Picked[i]);
       AFolder := ExtractFileDir(Picked[Picked.Count - 1]);
     end;
   finally

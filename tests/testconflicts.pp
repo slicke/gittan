@@ -33,6 +33,7 @@ type
     procedure TestResolveSkipsDeleted;
     procedure TestResolveOpenAtEnd;
     procedure TestResolveWrites;
+    procedure TestUndoEmptyPickStale;
   end;
 
 implementation
@@ -280,6 +281,61 @@ begin
     end;
     AssertEquals('a' + #10 + '<<<<<<< HEAD' + #10 + 'ours' + #10 + '=======' + #10 +
       'theirs' + #10 + '>>>>>>> other' + #10 + 'z' + #10, Text);
+  finally
+    DeleteFile(FileName);
+  end;
+end;
+
+{ A pick of a side with no lines leaves nothing of the block to check;
+  undoing it after lines went in above is refused by the lines beside
+  it, not put back one place off. }
+procedure TConflictsTest.TestUndoEmptyPickStale;
+var
+  FileName, Err, Text: string;
+  B: TGittanDiscard;
+  F: TFileStream;
+
+  procedure Put(const AText: string);
+  begin
+    F := TFileStream.Create(FileName, fmCreate);
+    try
+      F.WriteBuffer(AText[1], Length(AText));
+    finally
+      F.Free;
+    end;
+  end;
+
+  function Got: string;
+  begin
+    F := TFileStream.Create(FileName, fmOpenRead);
+    try
+      SetLength(Result, F.Size);
+      F.ReadBuffer(Result[1], F.Size);
+    finally
+      F.Free;
+    end;
+  end;
+
+begin
+  FileName := IncludeTrailingPathDelimiter(GetTempDir) + 'gittan-conflict-' +
+    IntToStr(GetProcessID) + '-' + IntToStr(Random(MaxInt)) + '.txt';
+  Text := 'a' + #10 + '<<<<<<< HEAD' + #10 + '=======' + #10 + 'theirs' + #10 +
+    '>>>>>>> other' + #10 + 'z' + #10;
+  Put(Text);
+  try
+    Fill([' a', '+<<<<<<< HEAD', '+=======', '+theirs', '+>>>>>>> other', ' z']);
+    B := ResolveBlock(FLines, ConflictRoles(FLines), 1, cpOurs, FileName);
+    AssertEquals('ours is empty', 0, Length(B.OldLines));
+    AssertTrue(Err, DiscardBlock(B, Err));
+    AssertEquals('a' + #10 + 'z' + #10, Got);
+    Put('new' + #10 + 'a' + #10 + 'z' + #10);
+    AssertFalse(DiscardBlock(Swapped(B), Err));
+    AssertEquals(rsDiscardStale, Err);
+    AssertEquals('new' + #10 + 'a' + #10 + 'z' + #10, Got);
+    { Unmoved, the undo puts the conflict back. }
+    Put('a' + #10 + 'z' + #10);
+    AssertTrue(Err, DiscardBlock(Swapped(B), Err));
+    AssertEquals(Text, Got);
   finally
     DeleteFile(FileName);
   end;

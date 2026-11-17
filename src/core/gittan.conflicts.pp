@@ -190,16 +190,24 @@ begin
   ALines[High(ALines)] := AText;
 end;
 
+{ The lines beside the block, as TGittanDiscard keeps them, so undoing a
+  pick of an empty side, which adds the block's lines back with none of
+  its own left to check, is refused when the file moved round it. }
 function ResolveBlock(ALines: TStrings; const ARoles: TIntegerDynArray; AStart: integer;
   APick: TGittanConflictPick; const AFileName: string): TGittanDiscard;
 var
-  i: integer;
+  i, After: integer;
   Ours, Theirs: TStringArray;
   Text: string;
 begin
   Result.FileName := AFileName;
   Result.Resolved := False;
   Result.OldLines := nil;
+  Result.Before := '';
+  Result.After := '';
+  Result.EndsKnown := False;
+  Result.OldEndsBare := False;
+  Result.NewEndsBare := False;
   Result.NewLines := nil;
   Result.Line := 1;
   Ours := nil;
@@ -207,12 +215,23 @@ begin
   for i := 0 to Min(AStart, ALines.Count) - 1 do
     if not Deleted(ALines, i) then
       Inc(Result.Line);
+  Result.Before := '^';
+  i := Min(AStart, ALines.Count) - 1;
+  while (i >= 0) and Deleted(ALines, i) do
+    Dec(i);
+  if i >= 0 then
+    Result.Before := '=' + Copy(ALines[i], 2, MaxInt);
+  After := ALines.Count;
   for i := AStart to Min(High(ARoles), ALines.Count - 1) do
   begin
+    After := i + 1;
     if Deleted(ALines, i) then
       Continue;
     if ARoles[i] = crNone then
+    begin
+      After := i;
       Break;
+    end;
     Text := Copy(ALines[i], 2, MaxInt);
     Append(Result.NewLines, Text);
     case ARoles[i] of
@@ -222,6 +241,12 @@ begin
     if (ARoles[i] = crMarker) and IsMarker(Text, '>') then
       Break;
   end;
+  while (After < ALines.Count) and Deleted(ALines, After) do
+    Inc(After);
+  if After < ALines.Count then
+    Result.After := '=' + Copy(ALines[After], 2, MaxInt)
+  else
+    Result.After := '$';
   case APick of
     cpOurs: Result.OldLines := Ours;
     cpTheirs: Result.OldLines := Theirs;

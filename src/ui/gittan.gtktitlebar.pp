@@ -289,9 +289,13 @@ begin
 end;
 
 procedure InstallTitleBar(AForm: TCustomForm; ABar: TGittanGtkTitleBar);
+const
+  NoTitleBarCss = '* { min-height: 0; padding: 0; margin: 0; border: none; ' +
+    'box-shadow: none; }';
 var
   Win: PGtkWindow;
   Box: PGtkWidget;
+  Css: PGtkCssProvider;
 begin
   LiveBar := ABar;
   Win := FormWindow(ABar, True);
@@ -301,6 +305,14 @@ begin
     not gtk_widget_get_mapped(PGtkWidget(Win)) then
     gtk_widget_unrealize(PGtkWidget(Win));
   Box := PGtkWidget(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0));
+  { GTK gives the title bar the class titlebar, which the theme makes a
+    header bar's height: an empty band over the own bar, unpainted, so
+    black on KDE's Wayland. Nothing in it, so no height. }
+  Css := gtk_css_provider_new;
+  gtk_css_provider_load_from_data(Css, NoTitleBarCss, -1, nil);
+  gtk_style_context_add_provider(gtk_widget_get_style_context(Box),
+    PGtkStyleProvider(Css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  g_object_unref(PGObject(Css));
   gtk_widget_show(Box);
   gtk_window_set_titlebar(Win, Box);
   { Realized again, with the decoration: the LCL's ShowHide reads the
@@ -573,6 +585,10 @@ begin
     Exit;
   for i := 0 to Menu.Items.Count - 1 do
   begin
+    { A hidden item, such as the AI menu without an agent, has no widget,
+      and the LCL refuses to make one for it. }
+    if not Menu.Items[i].Visible then
+      Continue;
     Menu.Items[i].HandleNeeded;
     if Menu.Items[i].HandleAllocated then
     begin

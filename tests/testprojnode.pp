@@ -30,6 +30,7 @@ type
     procedure TestNodeInfo;
     procedure TestNodeManager;
     procedure TestNodeSection;
+    procedure TestNodeSectionWithBom;
     procedure TestNodeLockOfManager;
     procedure TestNodeUnknownManager;
   end;
@@ -144,6 +145,18 @@ begin
   D := ParseYarnLock('"vue@npm:^3.4":' + LE + '  version: 3.4.21' + LE + '  resolution: "x"' + LE);
   AssertEquals('vue', Names(D));
   AssertEquals('3.4.21', Find(D, 'vue').Resolved);
+  { Berry quotes several descriptors together. }
+  D := ParseYarnLock('''vue@npm:^3'':' + LE + '  version: 3.4.21' + LE);
+  AssertEquals('single quotes', 'vue', Names(D));
+  AssertEquals('3.4.21', Find(D, 'vue').Resolved);
+  D := ParseYarnLock('"@babel/core@npm:^7.0.0, @babel/core@npm:^7.12.3":' + LE +
+    '  version: 7.20.0' + LE);
+  AssertEquals('@babel/core', Names(D));
+  AssertEquals('7.20.0', Find(D, '@babel/core').Resolved);
+  { v1 quotes each. }
+  D := ParseYarnLock('"@babel/core@^7.0.0", "@babel/core@^7.12.3":' + LE +
+    '  version "7.20.0"' + LE);
+  AssertEquals('@babel/core', Names(D));
 end;
 
 procedure TProjNodeTest.TestPnpmLock;
@@ -163,6 +176,16 @@ begin
     '  /@scope/name/1.0.0:' + LE);
   AssertEquals('vue @scope/name', Names(D));
   AssertEquals('1.0.0', Find(D, '@scope/name').Resolved);
+  { Lockfile 5's peers after "_". }
+  D := ParsePnpmLock('packages:' + LE + '  /react-dom/17.0.2_react@17.0.2:' + LE +
+    '  /@testing-library/react/12.1.5_react-dom@17.0.2+react@17.0.2:' + LE);
+  AssertEquals('react-dom @testing-library/react', Names(D));
+  AssertEquals('17.0.2', Find(D, 'react-dom').Resolved);
+  AssertEquals('12.1.5', Find(D, '@testing-library/react').Resolved);
+  { CRLF line ends, and a line of blanks in the packages. }
+  D := ParsePnpmLock('packages:'#13#10#13#10'  /vue@3.4.21:'#13#10'  '#9#13#10 +
+    '  /x@1.0.0:'#13#10);
+  AssertEquals('vue x', Names(D));
 end;
 
 procedure TProjNodeTest.TestNodeInfo;
@@ -212,6 +235,25 @@ begin
   AssertEquals('pnpm install', R.Cells[2].Command);
   AssertEquals('3.4.0', Sec.Blocks[1].Rows[0].Cells[2].Text);
   AssertEquals('no commands of its own', 0, Length(TGittanNodeKind.Commands(FDir)));
+end;
+
+{ Notepad's byte order mark in front of package.json: npm skips it, and
+  so does the page, where fpjson refused the whole file. }
+procedure TProjNodeTest.TestNodeSectionWithBom;
+var
+  C: TGittanProjectContext;
+  Sec: TGittanProjectSection;
+begin
+  Put('package.json', #$EF#$BB#$BF'{"name": "x", "packageManager": "pnpm@9.1.0", ' +
+    '"dependencies": {"vue": "^3"}}');
+  C := TGittanProjectContext.Create(FDir, '', nil);
+  try
+    Sec := TGittanNodeKind.Section(C, 'package.json');
+  finally
+    C.Free;
+  end;
+  AssertEquals('pnpm@9.1.0', Sec.Blocks[0].Rows[1].Cells[1].Text);
+  AssertEquals('vue', Sec.Blocks[1].Rows[0].Cells[0].Text);
 end;
 
 procedure TProjNodeTest.TestNodeLockOfManager;

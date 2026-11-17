@@ -8,7 +8,7 @@ unit testkeep;
 interface
 
 uses
-  Classes, SysUtils, Types, fpcunit, testregistry, gittan.keep;
+  Classes, SysUtils, Types, fpcunit, testregistry, gittan.keep, gittan.textfile;
 
 type
   TKeepTest = class(TTestCase)
@@ -28,9 +28,12 @@ type
     procedure TestKeepDeletedOnly;
     procedure TestKeepAddedOnly;
     procedure TestKeepWholeBlock;
+    procedure TestOldNumbers;
+    procedure TestKeptDeletionInMiddle;
     procedure TestNearestWins;
     procedure TestUnmatched;
     procedure TestNoBlocks;
+    procedure TestNoNewlineMarks;
     procedure TestKeeps;
     procedure TestMatch;
   end;
@@ -129,6 +132,37 @@ begin
   AssertEquals(0, FKeptOf[2]);
 end;
 
+{ The old file's lines: a kept added line has none and moves nothing
+  after it, a kept deleted line is still counted. }
+procedure TKeepTest.TestOldNumbers;
+var
+  OldNum: TIntegerDynArray;
+begin
+  Lines([' a', '+x', ' b', '-c', ' d']);
+  ApplyKeeps(FLines, [Keep('', 'x', 2), Keep('c', '', 4)], FKeptOf, OldNum);
+  AssertEquals(' a| x| b| d|', Joined);
+  AssertEquals(1, OldNum[0]);
+  AssertEquals('kept, not the old file''s', 0, OldNum[1]);
+  AssertEquals(2, OldNum[2]);
+  AssertEquals('after the kept deletion', 4, OldNum[3]);
+  { No keeps: git's numbers. }
+  Lines([' a', '-b', '+B', ' c']);
+  ApplyKeeps(FLines, [], FKeptOf, OldNum);
+  AssertEquals(' a|-b|+B| c|', Joined);
+  AssertEquals(2, OldNum[1]);
+  AssertEquals(0, OldNum[2]);
+  AssertEquals(3, OldNum[3]);
+end;
+
+{ A kept deletion in the middle of a block leaves the block whole, its
+  deleted lines before its added ones. }
+procedure TKeepTest.TestKeptDeletionInMiddle;
+begin
+  Lines([' x', '-a', '-b', '-c', '+A', ' y']);
+  ApplyKeeps(FLines, [Keep('b', '', 3)], FKeptOf);
+  AssertEquals(' x|-a|-c|+A| y|', Joined);
+end;
+
 { Every pair kept: the block is plain code of the new file. }
 procedure TKeepTest.TestKeepWholeBlock;
 var
@@ -169,6 +203,24 @@ begin
   AssertEquals(0, ApplyKeeps(FLines, [Keep('a', 'b', 1)], FKeptOf));
   AssertEquals(' a| b|', Joined);
   AssertEquals(2, Length(FKeptOf));
+end;
+
+{ The marks of a last line without a newline go through, kept or not,
+  so a discard after ends the file as git said. }
+procedure TKeepTest.TestNoNewlineMarks;
+begin
+  Lines([' a', '-old', '+new']);
+  FLines.Objects[1] := NoNewlineMark;
+  FLines.Objects[2] := NoNewlineMark;
+  AssertEquals(0, ApplyKeeps(FLines, [], FKeptOf));
+  AssertEquals(' a|-old|+new|', Joined);
+  AssertTrue('old side bare', FLines.Objects[1] = NoNewlineMark);
+  AssertTrue('new side bare', FLines.Objects[2] = NoNewlineMark);
+  Lines([' a', '-old', '+new']);
+  FLines.Objects[2] := NoNewlineMark;
+  AssertEquals(1, ApplyKeeps(FLines, [Keep('old', 'new', 2)], FKeptOf));
+  AssertEquals(' a| new|', Joined);
+  AssertTrue('kept line bare', FLines.Objects[1] = NoNewlineMark);
 end;
 
 { The keeps of a session by path: added, counted, removed by the index

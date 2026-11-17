@@ -46,7 +46,8 @@ implementation
 
 uses
   {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}BaseUnix,{$ENDIF}
-  gittan.ext.functions, gittan.ext.perm, gittan.ext.host, gittan.ext.registry,
+  { DateUtils for LocalTimeToUniversal: FPC 3.2.2 has it only there. }
+  DateUtils, gittan.ext.functions, gittan.ext.perm, gittan.ext.host, gittan.ext.registry,
   gittan.ext.promise, gittan.ext.modules, gittan.http, gittan.textfile, gittan.reviews,
   gittan.forge;
 
@@ -313,11 +314,13 @@ end;
   grant covers the repository, not the files around it. In the work tree
   (no ARef) a link on the way could lead out of it, so none may be there;
   at a commit git gives a link's own text. }
-function InsideRepo(ARepo: TGittanRepo; const APath, ARef: string): boolean;
+function InsideRoot(const ARoot, APath, ARef: string): boolean;
 var
   Root, Full: string;
 begin
-  Root := IncludeTrailingPathDelimiter(ExpandFileName(ARepo.Root));
+  if ARoot = '' then
+    Exit(False);
+  Root := IncludeTrailingPathDelimiter(ExpandFileName(ARoot));
   Full := ExpandFileName(Root + SetDirSeparators(APath));
   if FileNameCaseSensitive then
     Result := Copy(Full, 1, Length(Root)) = Root
@@ -330,6 +333,11 @@ begin
   Result := Result and (APath <> '') and
     (Pos('/../', '/' + StringReplace(APath, '\', '/', [rfReplaceAll]) + '/') = 0) and
     ((ARef <> '') or not PathHasLinkBelowRoot(Root, Full));
+end;
+
+function InsideRepo(ARepo: TGittanRepo; const APath, ARef: string): boolean;
+begin
+  Result := InsideRoot(ARepo.Root, APath, ARef);
 end;
 
 procedure JSDiff(res: PJSValue; ctx: JSContext; this_val: PJSValue;
@@ -833,11 +841,25 @@ begin
   ExtHost.SetStatus(ExtHost.ActiveRoot, Arg(ctx, argc, argv, 0), ArgInt(ctx, argc, argv, 1, 6));
 end;
 
+{ The ui grant shows the repository's files, as the user could pick them
+  in the tree, not any file on disk: the path must stay inside the
+  repository shown, as the data grant's reads must. }
 procedure JSOpenFile(res: PJSValue; ctx: JSContext; this_val: PJSValue;
   argc: integer; argv: PJSValues; magic: integer);
+var
+  Root, Path: string;
 begin
   res^ := JS_UNDEFINED;
-  ExtHost.OpenFile(ExtHost.ActiveRoot, Arg(ctx, argc, argv, 0), ArgInt(ctx, argc, argv, 1, 0));
+  Root := ExtHost.ActiveRoot;
+  Path := Arg(ctx, argc, argv, 0);
+  if Root = '' then
+    Exit;
+  if not InsideRoot(Root, Path, '') then
+  begin
+    res^ := JS_ThrowError(ctx, 'Gittan.ui.openFile: the path must be inside the repository');
+    Exit;
+  end;
+  ExtHost.OpenFile(Root, Path, ArgInt(ctx, argc, argv, 1, 0));
 end;
 
 procedure JSAddCard(res: PJSValue; ctx: JSContext; this_val: PJSValue;
@@ -876,7 +898,7 @@ begin
     SetLength(Card.Comments, 1);
     Card.Comments[0].Author := Card.Agent;
     Card.Comments[0].Body := O.Get('text', '');
-    Card.Comments[0].Created := Now;
+    Card.Comments[0].Created := LocalTimeToUniversal(Now);
     if O.Get('title', '') <> '' then
       Card.Comments[0].Body := '**' + O.Get('title', '') + '**' + LineEnding +
         LineEnding + Card.Comments[0].Body;

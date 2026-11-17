@@ -19,7 +19,7 @@ var
   Steps: TGittanRebaseSteps;
   Merges, Ok, Conflicts, Stopped: boolean;
   Pushed, i: integer;
-  Title, Note, StoppedAt: string;
+  Title, Note, StoppedAt, Err: string;
 begin
   if not RepoReady or (FBranch = '') then
     Exit;
@@ -65,6 +65,8 @@ begin
     finally
       Screen.Cursor := crDefault;
     end;
+    { The refresh's git commands may leave their own error. }
+    Err := FRepo.Error;
     FLoadError := '';
     FSummary.Notice := '';
     RefreshRepository;
@@ -78,6 +80,8 @@ begin
     if AFromGraph then
       ShowCommitGraph;
   end
+  else if Conflicts and (Err = StashClashMessage) then
+    BannerError(Format(rsRiDone, [FBranch]), Err)
   else if Conflicts then
     StatusNote(rsCaConflicts, True)
   else if Stopped then
@@ -86,8 +90,8 @@ begin
     if StoppedAt <> '' then
       StatusNote(Format(rsRebaseStoppedAt, [Copy(StoppedAt, 1, 7)]))
     else
-      BannerError(rsRiStopped, FRepo.Error);
+      BannerError(rsRiStopped, Err);
   end
   else
-    BannerError(rsCaFailed, FRepo.Error);
+    BannerError(rsCaFailed, Err);
 end;

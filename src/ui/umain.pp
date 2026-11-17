@@ -23,7 +23,7 @@ uses
   gittan.settingsdlg, gittan.findbar, gittan.worddiff, gittan.symbols, gittan.symbolbar,
   {$IFDEF LCLCocoa}gittan.memohint,{$ENDIF}
   {$IFDEF OWNBAR}gittan.owntitlebar,{$ENDIF}
-  {$IFDEF LCLWin32}gittan.wintitlebar,{$ENDIF}
+  {$IFDEF LCLWin32}gittan.wintitlebar, gittan.memoscroll,{$ENDIF}
   {$IFDEF LCLGtk3}gittan.gtktitlebar,{$ENDIF}
   gittan.symbolindex, gittan.snapshots, gittan.blame, gittan.history, gittan.timelapse, gittan.timelapsebar, gittan.pickaxe, gittan.signing, gittan.trustkeys, gittan.navhistory, gittan.undo, gittan.paletteside,
   gittan.syntaxthemes, gittan.cli, gittan.update, gittan.symbolchanges, gittan.callers,
@@ -31,7 +31,7 @@ uses
   gittan.forge, gittan.lfslocks, gittan.askdlg,
   gittan.discard, gittan.keep, gittan.leaveout, gittan.absorb, gittan.hoverpills, gittan.submodules, gittan.reviews, gittan.imagediff, gittan.graph,
   fpjson, gittan.ext.engine, gittan.ext.registry, gittan.ext.api, gittan.ext.loader,
-  gittan.app, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
+  gittan.app, gittan.smooth, gittan.searchbox, gittan.commitgraph, gittan.notice, gittan.banner, gittan.pofile, gittan.binaryview, gittan.commitjob, gittan.ai, gittan.remotejob, gittan.mdpreview,
   gittan.rebase, gittan.worktrees, gittan.gitflow, gittan.repolist, gittan.rebasedlg, gittan.cleandlg, gittan.absorbdlg, gittan.patchdlg, gittan.filespage, gittan.pullpage, gittan.clonedlg,
   gittan.remotesdlg, gittan.submoduledlg, gittan.identitydlg, gittan.coauthorsdlg, gittan.merge, gittan.mergeview,
   gittan.notedlg, gittan.issuelinks,
@@ -128,6 +128,11 @@ type
   TCommitMemo = class(TMemo)
   protected
     procedure InitializeWnd; override;
+    {$IFDEF LCLWin32}
+    { The scroll bar only while the text overflows (gittan.memoscroll). }
+    procedure Change; override;
+    procedure Resize; override;
+    {$ENDIF}
   end;
 
   {** The colors the self-painted controls share in one appearance
@@ -601,6 +606,11 @@ type
       tree while it chooses what to commit. }
     FTickSepItem, FTickAllItem, FUntickAllItem: TMenuItem;
     FCommitNote: TGittanHintBox;
+    { The tick tip is left out while the panel has no room for it
+      (FitCommitPanel), FTipHeight what it took when it last showed;
+      FFittingCommit keeps the panel's own resize out meanwhile. }
+    FTipNoRoom, FFittingCommit: boolean;
+    FTipHeight: integer;
     FCommitItem, FIdentityItem: TMenuItem;
     FCommitJob: TGittanCommitJob;
     { A commit running as a fixup of a commit from the graph's menu
@@ -731,6 +741,10 @@ type
     FKeeps: TGittanKeeps;
     FRawChangeLines: TStringList;
     FKeptOf: TIntegerDynArray;
+    { The old file's line of each line of FChangeLines once the keeps
+      are applied (0 for none), which counting the rewritten diff would
+      get wrong after a kept added or deleted line. }
+    FKeptOldNum: TIntegerDynArray;
     FHotKeep: integer;
     FHeaderUnkeep: integer;
     { Leaving changes out of the commit (umain.leaveout.inc): the
@@ -1282,8 +1296,8 @@ type
     { View > Review Comments (see umain.reviews.inc): whether it is on,
       its menu item, the job that fetches the threads, the threads of the
       pull request FThreadsNumber of FThreadsRepo with its head commit,
-      what they hold (FThreadsKey) and gh's message when the last fetch
-      failed; the diff line of each thread in the shown file
+      what they hold (FThreadsKey), whether the last read was cut short
+      (FThreadsCut) and gh's message when the last fetch failed; the diff line of each thread in the shown file
       (FThreadRows), the diff from the head to the work tree the lines
       are mapped through (for FMapDiffKey, head and path), the threads
       folded or unfolded against their default, the width the cards of
@@ -1297,6 +1311,7 @@ type
       the gaps' Tags index it. }
     FShown: TGittanReviewThreads;
     FThreadsNumber: integer;
+    FThreadsCut: boolean;
     FThreadsRepo, FThreadsHead, FThreadsKey, FReviewError: string;
     FThreadRows: TIntegerDynArray;
     FMapDiff, FMapDiffKey: string;
@@ -1513,6 +1528,7 @@ type
     procedure LfsPullClick(Sender: TObject);
     procedure AutoFetchTimerTimer(Sender: TObject);
     procedure AutoFetchDone(Sender: TObject);
+    procedure RunPendingRemote;
     procedure ShowBinaryFile(const AFileName: string);
     function SidesShown: boolean;
     function ShowsChangedFile: boolean;
@@ -2053,6 +2069,7 @@ type
     procedure ColorRepoHeader;
     procedure FillRepoFiles;
     procedure LayoutRepoFiles;
+    procedure FitCommitPanel;
     procedure RepoHeaderToggle(Sender: TObject);
     procedure FileTreeFolded(Sender: TObject; Node: TTreeNode);
     procedure TreePanelResize(Sender: TObject);
@@ -2498,7 +2515,7 @@ type
     {** The window shows this frame now: its menu, its caption, the
       shade and band of the title bar. }
     procedure Activated;
-    {** Nothing shown: no repository, none opening and no file; the
+    {** Nothing shown: no repository, none opening or cloning and no file; the
       window opens a repository in such a frame rather than in a new
       one. }
     function IsBlank: boolean;
@@ -3805,6 +3822,8 @@ resourcestring
   rsRevertAsk = 'Drop the changes to %s and load it from disk again?';
   rsSaved = 'Saved %s';
   rsSaveFailed = 'Could not save %s: %s';
+  rsSaveFailedAsk = 'Could not save %s. Try again, or drop the changes?';
+  rsSaveAgain = 'Save Again';
   rsChangedOnDisk = 'changed on disk';
   rsDiscardChange = '&Discard Change';
   rsUndoDiscard = '&Undo Discard';
@@ -4018,6 +4037,7 @@ resourcestring
   rsReviewOpenOne = '1 open review thread';
   rsReviewFailed = 'Could not fetch the review comments';
   rsConversation = 'Conversation of pull request #%d';
+  rsReviewsCut = 'Pull request #%d has more review comments than Gittan reads; the rest are on the forge';
   rsTreeThreadOpen = ' · 1 open review thread';
   rsTreeThreadsOpen = ' · %d open review threads';
   rsTreeThreadsDone = ' · review comments, all resolved';
@@ -4033,6 +4053,12 @@ const
   navProject = 6;
   { The tag of Automatic in the list of the kinds of project. }
   KindsAutomatic = -2;
+  { The least the tree of changed files keeps of the tree panel, and the
+    message box's height, which it shrinks to at least CommitMemoMin
+    while the panel is short of room (FitCommitPanel); 96-DPI pixels. }
+  MinFileTree = 80;
+  CommitMemoHeight = 84;
+  CommitMemoMin = 44;
   { Scrolling on past the bottom of a file goes to the next one, and
     past the top to the previous: the wheel delta the pull needs (120 is
     one notch of a mouse wheel, 8 one pixel of a trackpad on macOS), the
@@ -4321,7 +4347,24 @@ begin
   {$IFDEF LCLCocoa}
   SetMemoPlaceholder(Handle, TextHint);
   {$ENDIF}
+  {$IFDEF LCLWin32}
+  FitMemoScrollBar(Self);
+  {$ENDIF}
 end;
+
+{$IFDEF LCLWin32}
+procedure TCommitMemo.Change;
+begin
+  inherited Change;
+  FitMemoScrollBar(Self);
+end;
+
+procedure TCommitMemo.Resize;
+begin
+  inherited Resize;
+  FitMemoScrollBar(Self);
+end;
+{$ENDIF}
 
 { TTreeView }
 
@@ -4833,7 +4876,10 @@ end;
 
 function TRepoFrame.IsBlank: boolean;
 begin
-  Result := (FRepo.Root = '') and (FOpenJob = nil) and (FView = gvSummary);
+  { A clone runs with no repository open yet: the frame is taken, or
+    opening another one in it would stop the clone's job unseen. }
+  Result := (FRepo.Root = '') and (FOpenJob = nil) and (FRemoteJob = nil) and
+    (FView = gvSummary);
 end;
 
 procedure TRepoFrame.ClearOpenError;
@@ -8326,8 +8372,13 @@ end;
 { FView is set before the call: the layout depends on it. }
 procedure TRepoFrame.ShowEditor;
 begin
-  { A history still being fetched is for a view that is no longer shown. }
-  if FView <> gvHistory then
+  { A history still being fetched is for a view that is no longer shown,
+    unless the same file is shown again in the same comparison, as a
+    refresh does while git log runs: that one would never come. A new
+    base or range reads the file at another commit, so its job goes. }
+  if (FView <> gvHistory) and not (((FHistoryJob <> nil) or (FTimelapseJob <> nil)) and
+    (FHistoryPath <> '') and (ShownRelPath = FHistoryPath) and
+    (FHistoryRef = HistoryRef)) then
   begin
     AbandonHistoryJob;
     EndTimelapse;
@@ -8664,7 +8715,7 @@ begin
   end;
   { The changes kept as code this session are plain lines from here on
     (see umain.discard.inc). }
-  FKeeps.Apply(APath, FChangeLines, FKeptOf);
+  FKeeps.Apply(APath, FChangeLines, FKeptOf, FKeptOldNum);
   if APath <> FCurrentPath then
     FExpanded := nil;
   { The file may have changed since the head was mapped onto it. }
@@ -8799,7 +8850,9 @@ begin
         LastDirPath := Dir;
       end;
       Node := FileTree.Items.AddChild(DirNode, ExtractFileName(Path));
-      if DirectoryExists(IncludeTrailingPathDelimiter(FRepo.Root) +
+      { A submodule is a folder on disk; a deleted file is not one, even
+        when a folder of its name came in its place. }
+      if (AStats[i].Kind <> ckDeleted) and DirectoryExists(IncludeTrailingPathDelimiter(FRepo.Root) +
         SetDirSeparators(Path)) then
         Node.ImageIndex := iconFolder
       else
@@ -8850,7 +8903,8 @@ const
   Gap = 10;
 var
   C: TCanvas;
-  X, Y, CenterY, TextH: integer;
+  X, Y, TextH: integer;
+  DiscColor: TColor;
 begin
   DefaultDraw := True;
   if (Stage <> cdPostPaint) or not FTreeClean or (Sender.Items.Count > 0) then
@@ -8860,21 +8914,12 @@ begin
   TextH := C.TextHeight('Xg');
   X := (Sender.ClientWidth - Disc) div 2;
   Y := (Sender.ClientHeight - Disc - Gap - TextH) div 2;
-  C.Pen.Style := psClear;
-  C.Brush.Style := bsSolid;
   if FDark then
-    C.Brush.Color := RGBToColor(85, 85, 87)
+    DiscColor := RGBToColor(85, 85, 87)
   else
-    C.Brush.Color := RGBToColor(196, 196, 198);
-  C.Ellipse(X, Y, X + Disc, Y + Disc);
-  CenterY := Y + Disc div 2;
-  C.Pen.Style := psSolid;
-  C.Pen.Color := Sender.BackgroundColor;
-  C.Pen.Width := 4;
-  C.Polyline([Point(X + Disc * 27 div 100, CenterY),
-    Point(X + Disc * 44 div 100, CenterY + Disc * 17 div 100),
-    Point(X + Disc * 74 div 100, CenterY - Disc * 17 div 100)]);
-  C.Pen.Width := 1;
+    DiscColor := RGBToColor(196, 196, 198);
+  SmoothCheckDisc(C, X, Y, Disc, DiscColor, Sender.BackgroundColor, 4,
+    Sender.GetCanvasScaleFactor);
   C.Brush.Style := bsClear;
   if FDark then
     C.Font.Color := RGBToColor(150, 150, 150)

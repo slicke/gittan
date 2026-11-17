@@ -851,23 +851,29 @@ begin
   FActive.FormClose(Sender, CloseAction);
 end;
 
-{ A frame with unsaved changes is shown before it asks. }
+{ A frame with unsaved changes is shown before it asks. Once all may
+  close, the frame shown before is shown again, so the tabs are saved
+  with it active and its view options are the ones kept. }
 procedure TGittanWindow.FormCloseQuery(Sender: TObject; var CanClose: boolean);
 var
   i: integer;
+  Shown: TRepoFrame;
 begin
+  Shown := FActive;
   FActive.FormCloseQuery(Sender, CanClose);
   for i := 0 to FFrames.Count - 1 do
   begin
     if not CanClose then
       Exit;
-    if Frames[i] <> FActive then
+    if Frames[i] <> Shown then
     begin
       if Frames[i].NeedsSave then
         ActivateFrame(Frames[i]);
       Frames[i].FormCloseQuery(Sender, CanClose);
     end;
   end;
+  if CanClose and (FActive <> Shown) and (FFrames.IndexOf(Shown) >= 0) then
+    ActivateFrame(Shown);
 end;
 
 { The shown frame's keys; on GTK Alt and a letter shows the menu bar

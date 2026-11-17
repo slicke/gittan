@@ -1043,21 +1043,22 @@ begin
   if (FGoneRow >= 0) and (FGoneRow <= High(FRows)) and FRows[FGoneRow].Header and
     (TopRow = FGoneTop) then
     TopRow := FGoneRow;
-  i := -1;
+  { The loops step by hand: a for loop's counter is undefined after it,
+    and one that never ran left it -1, read as FRows[-1]. }
   if ANext then
   begin
-    for i := TopRow + 1 to High(FRows) do
-      if FRows[i].Header then
-        Break;
-    if (i > High(FRows)) or not FRows[i].Header then
+    i := Max(TopRow + 1, 0);
+    while (i <= High(FRows)) and not FRows[i].Header do
+      Inc(i);
+    if i > High(FRows) then
       Exit;
   end
   else
   begin
-    for i := TopRow - 1 downto 0 do
-      if FRows[i].Header then
-        Break;
-    if (i < 0) or not FRows[i].Header then
+    i := Min(TopRow - 1, High(FRows));
+    while (i >= 0) and not FRows[i].Header do
+      Dec(i);
+    if i < 0 then
       Exit;
   end;
   ShowConflictRow(i);

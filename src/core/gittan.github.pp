@@ -65,7 +65,7 @@ const
     'reviewThreads(first:100,after:$after){' +
     'pageInfo{hasNextPage endCursor} nodes{' +
     'isResolved isOutdated path line startLine originalLine diffSide subjectType ' +
-    'comments(first:100){nodes{author{login} body createdAt url}}}}}}}';
+    'comments(first:100){totalCount nodes{author{login} body createdAt url}}}}}}}';
 
 {** Reads the object gh pr view --json prints. }
 function ParsePullRequest(const AJson: string; out APull: TGittanPullRequest): boolean;
@@ -94,6 +94,11 @@ function ParseForgeAnswer(const AJson: string; out ALogin, AAvatarUrl: string;
   the text is not such an answer. }
 function ParseReviewThreads(const AJson: string; var AThreads: TGittanReviewThreads;
   out AHeadOid: string; out AHasNext: boolean; out ACursor: string): boolean;
+{** As above, ACut set when a thread has more comments than the page
+  carries (100). }
+function ParseReviewThreads(const AJson: string; var AThreads: TGittanReviewThreads;
+  out AHeadOid: string; out AHasNext: boolean; out ACursor: string;
+  var ACut: boolean): boolean;
 
 {** Reads the conversation of the pull request from an answer to
   ReviewThreadsQuery into ANotes, oldest first: its comments, and its
@@ -1008,7 +1013,17 @@ end;
 function ParseReviewThreads(const AJson: string; var AThreads: TGittanReviewThreads;
   out AHeadOid: string; out AHasNext: boolean; out ACursor: string): boolean;
 var
-  Data, Pull, Threads, Info, Nodes: TJSONData;
+  Cut: boolean;
+begin
+  Cut := False;
+  Result := ParseReviewThreads(AJson, AThreads, AHeadOid, AHasNext, ACursor, Cut);
+end;
+
+function ParseReviewThreads(const AJson: string; var AThreads: TGittanReviewThreads;
+  out AHeadOid: string; out AHasNext: boolean; out ACursor: string;
+  var ACut: boolean): boolean;
+var
+  Data, Pull, Threads, Info, Nodes, Comments, Total: TJSONData;
   Thread: TGittanReviewThread;
   i: integer;
 begin
@@ -1039,12 +1054,20 @@ begin
     Nodes := Dig(Threads, ['nodes']);
     if (Nodes <> nil) and (Nodes.JSONType = jtArray) then
       for i := 0 to Nodes.Count - 1 do
+      begin
         if (Nodes.Items[i].JSONType = jtObject) and
           ReadThread(TJSONObject(Nodes.Items[i]), Thread) and (Length(Thread.Comments) > 0) then
         begin
           SetLength(AThreads, Length(AThreads) + 1);
           AThreads[High(AThreads)] := Thread;
         end;
+        { More replies than the page carries: the rest are not read. }
+        Total := Dig(Nodes.Items[i], ['comments', 'totalCount']);
+        Comments := Dig(Nodes.Items[i], ['comments', 'nodes']);
+        if (Total <> nil) and (Total.JSONType = jtNumber) and (Comments <> nil) and
+          (Comments.JSONType = jtArray) and (Total.AsInt64 > Comments.Count) then
+          ACut := True;
+      end;
     Result := True;
   finally
     Data.Free;
@@ -1178,12 +1201,14 @@ begin
       Target := ATarget.Path;
       if ATarget.Line > 0 then
         Target := Target + ':' + IntToStr(ATarget.Line);
+      { The path after "--", so one that starts with "-" (-s, the
+        settings) is not taken for a flag. }
       if ATarget.Commit <> '' then
-        Result := [Target, '--commit=' + ATarget.Commit]
+        Result := ['--commit=' + ATarget.Commit, '--', Target]
       else if ATarget.Branch <> '' then
-        Result := [Target, '--branch', ATarget.Branch]
+        Result := ['--branch=' + ATarget.Branch, '--', Target]
       else
-        Result := [Target];
+        Result := ['--', Target];
     end;
     wtCommit:
       Result := [ATarget.Commit];
@@ -1290,7 +1315,10 @@ var
   Output: string;
 begin
   APulls := nil;
-  Result := RunGh(FExe, Root, ['pr', 'list', '--state', 'open', '--limit', '50', '--json',
+  { 200, gh asking a page at a time: with 50 a busy repository's list
+    lost the rest unsaid, and a branch with a pull request past them was
+    offered a second one. }
+  Result := RunGh(FExe, Root, ['pr', 'list', '--state', 'open', '--limit', '200', '--json',
     PullRequestFields], Output, AError);
   if not Result then
     Exit;
@@ -1357,7 +1385,7 @@ begin
       Exit;
     if not HasNext then
       Exit(False);
-    if not ParseReviewThreads(Output, FThreads, Head, HasNext, Cursor) then
+    if not ParseReviewThreads(Output, FThreads, Head, HasNext, Cursor, FCut) then
     begin
       AError := 'Could not read the review comments gh fetched.';
       Exit(False);
@@ -1369,6 +1397,9 @@ begin
     end;
     Inc(Pages);
   until not HasNext or (Pages >= 20);
+  { 2000 threads read and more there. }
+  if HasNext then
+    FCut := True;
 end;
 
 constructor TGitHubAccountJob.Create(const AExe, AForgeName, ARoot: string);

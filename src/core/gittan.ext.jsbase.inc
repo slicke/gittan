@@ -49,8 +49,6 @@ argc: integer; argv: PJSValues; magic: integer);
 var
   i: integer;
   output: rawutf8;
-  totalLen: integer;
-  p: PAnsiChar;
 begin
   res^ := JS_UNDEFINED;
   if argc <= 0 then
@@ -58,16 +56,10 @@ begin
     TGittanExtEngine.Instance.alert('', TGittanExtEngine.Instance.ExtensionNameForContext(ctx));
     Exit;
   end;
-  totalLen := 0;
+  // One conversion an argument: a toString may answer differently each time
+  output := '';
   for i := 0 to argc - 1 do
-    Inc(totalLen, Length(ctx^.ToUtf8(argv^[i])));
-  SetLength(output, totalLen);
-  p := PAnsiChar(output);
-  for i := 0 to argc - 1 do
-  begin
-    Move(PAnsiChar(ctx^.ToUtf8(argv^[i]))^, p^, Length(ctx^.ToUtf8(argv^[i])));
-    Inc(p, Length(ctx^.ToUtf8(argv^[i])));
-  end;
+    output := output + ctx^.ToUtf8(argv^[i]);
   TGittanExtEngine.Instance.alert(Output, TGittanExtEngine.Instance.ExtensionNameForContext(ctx));
 end;
 
@@ -86,24 +78,11 @@ argc: integer; argv: PJSValues; magic: integer);
 var
   i: integer;
   output: rawutf8;
-  totalLen: integer;
-  p: PAnsiChar;
 begin
   try
     output := '';
-    if argc > 0 then
-    begin
-      totalLen := 0;
-      for i := 0 to argc - 1 do
-        Inc(totalLen, Length(ctx^.ToUtf8(argv^[i])));
-      SetLength(output, totalLen);
-      p := PAnsiChar(output);
-      for i := 0 to argc - 1 do
-      begin
-        Move(PAnsiChar(ctx^.ToUtf8(argv^[i]))^, p^, Length(ctx^.ToUtf8(argv^[i])));
-        Inc(p, Length(ctx^.ToUtf8(argv^[i])));
-      end;
-    end;
+    for i := 0 to argc - 1 do
+      output := output + ctx^.ToUtf8(argv^[i]);
 
     if ExtHost.Confirm(TGittanExtEngine.Instance.ExtensionNameForContext(ctx), output) then
       res^ := JS_TRUE
@@ -210,107 +189,6 @@ begin
   res^ := JS_UNDEFINED;
 end;
 
-{ Replacements for mORMot's StringFromFile / FileFromString, which went away
-  with the rest of the mORMot dependency. Both swallow IO errors and report
-  through their result, matching the behaviour the callers below expect. }
-
-function ExtReadFile(const FileName: string): RawUtf8;
-var
-  fs: TFileStream;
-begin
-  Result := '';
-  if not FileExists(FileName) then
-    Exit;
-  try
-    fs := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
-    try
-      SetLength(Result, fs.Size);
-      if fs.Size > 0 then
-        fs.ReadBuffer(Result[1], fs.Size);
-    finally
-      fs.Free;
-    end;
-  except
-    Result := '';
-  end;
-end;
-
-function ExtWriteFile(const Content: RawUtf8; const FileName: string): boolean;
-var
-  fs: TFileStream;
-begin
-  Result := false;
-  try
-    fs := TFileStream.Create(FileName, fmCreate);
-    try
-      if Length(Content) > 0 then
-        fs.WriteBuffer(Content[1], Length(Content));
-      Result := true;
-    finally
-      fs.Free;
-    end;
-  except
-    Result := false;
-  end;
-end;
-
-// const data = readFile('test.txt');
-
-{** Read a whole file and return its contents as a JS string.
-    Expects argv[0] = file name (UTF-8). Returns @code(JS_UNDEFINED) if
-    no file name argument is provided.
-
-    @param(ctx)      Pointer to QuickJS context
-    @param(this_val) The 'this' value (unused)
-    @param(argc)     Number of arguments (expects 1)
-    @param(argv)     argv[0] = file path string
-    @returns         JS string with file contents or @code(JS_UNDEFINED)
-}
-procedure JSReadFile(res: PJSValue; ctx: JSContext; this_val: PJSValue;
-argc: integer; argv: PJSValues; magic: integer);
-var
-  FileName, FileContent: RawUtf8;
-begin
-  res^ := JS_UNDEFINED;
-  if argc > 0 then
-  begin
-    FileName := TGittanExtEngine.Instance.ParseArgv(@ctx, argv, 0);
-    FileContent := ExtReadFile(UTF8ToString(FileName));
-    res^ := JS_NewString(ctx, pansichar(FileContent));
-  end;
-end;
-
-// writeFile('test.txt', 'Hello from JavaScript!');
-
-{** Write a string to a file; return JS boolean for success.
-    Expects:
-      - argv[0] = file name (UTF-8)
-      - argv[1] = content (UTF-8)
-    Returns @code(true) on success, @code(false) on failure, or @code(JS_UNDEFINED)
-    if insufficient arguments.
-
-    @param(ctx)      Pointer to QuickJS context
-    @param(this_val) The 'this' value (unused)
-    @param(argc)     Number of arguments (expects 2)
-    @param(argv)     argv[0]=file name, argv[1]=content
-    @returns         JS boolean indicating write success
-}
-procedure JSWriteFile(res: PJSValue; ctx: JSContext; this_val: PJSValue;
-argc: integer; argv: PJSValues; magic: integer);
-var
-  FileName, FileContent: RawUtf8;
-begin
-  res^ := JS_UNDEFINED;
-  if argc > 1 then
-  begin
-    FileName := TGittanExtEngine.Instance.ParseArgv(@ctx, argv, 0);
-    FileContent := TGittanExtEngine.Instance.ParseArgv(@ctx, argv, 1);
-    // Was JS_ToBool, which yields an int rather than a JS value; the result is
-    // handed straight back to JavaScript, so build a real boolean value.
-    res^ := JS_NewBool(ctx, ExtWriteFile(FileContent, UTF8ToString(FileName)));
-  end;
-end;
-
 {**
   Promise rejection tracker callback for QuickJS.
 
@@ -390,6 +268,17 @@ begin
   end;
 end;
 
+{** Whether ctx may still set things up: the engine's own context, or an
+  extension's that is loaded. A dropped one (its script threw as it
+  loaded) can still run a promise reaction it queued, since a queued job
+  keeps its context alive; what that reaction registers would outlive
+  the drop, and a failed load must run nothing. }
+function ContextAccepts(Engine: TGittanExtEngine; ctx: JSContext): boolean;
+begin
+  Result := (Engine <> nil) and ((ctx = Engine.FContext) or
+    (Engine.GenerationForContext(ctx) > 0));
+end;
+
 {**
   Async entry-point wrapper exposed to JavaScript as a function that returns a Promise.
 
@@ -438,6 +327,13 @@ begin
   func := string(NativeName(magic));
   if func = '' then
     raise Exception.Create('Missing function to run!');
+  { A dropped or unloaded extension's queued reaction starts nothing more:
+    a git or exec run, a fetch, settled in a context that is gone. }
+  if not ContextAccepts(TGittanExtEngine.Instance, ctx) then
+  begin
+    res^ := JS_ThrowError(ctx, RawUtf8(func + ': this extension is not loaded'));
+    Exit;
+  end;
 
   // 2) Resolve the callback metadata by name; ensure it exists and is valid.
   try
@@ -531,17 +427,6 @@ end;
                        required so clearTimeout's JS_ToInt32 can parse it —
                        BigInt IDs made clearing timers fail)
 }
-{** Whether ctx may still set things up: the engine's own context, or an
-  extension's that is loaded. A dropped one (its script threw as it
-  loaded) can still run a promise reaction it queued, since a queued job
-  keeps its context alive; what that reaction registers would outlive
-  the drop, and a failed load must run nothing. }
-function ContextAccepts(Engine: TGittanExtEngine; ctx: JSContext): boolean;
-begin
-  Result := (Engine <> nil) and ((ctx = Engine.FContext) or
-    (Engine.GenerationForContext(ctx) > 0));
-end;
-
 function JSSetTimerImpl(ctx: JSContext; argc: integer; argv: PJSValues;
 IsInterval: boolean): JSValueRaw;
 var
@@ -828,6 +713,11 @@ begin
   end;
   if eng = nil then
     Exit;
+  if not ContextAccepts(eng, ctx) then
+  begin
+    res^ := JS_ThrowError(ctx, 'Gittan.commands.register: this extension is not loaded');
+    Exit;
+  end;
   eng.Registry.AddCommand(eng.ExtensionIdForContext(ctx), string(ctx^.ToUtf8(argv^[0])),
     string(ctx^.ToUtf8(argv^[1])), ParseCommandWheres(string(ctx^.ToUtf8(argv^[2]))),
     ctx, JS_DupValue(ctx, argv^[3]));
@@ -871,6 +761,11 @@ begin
   end;
   if eng = nil then
     Exit;
+  if not ContextAccepts(eng, ctx) then
+  begin
+    res^ := JS_ThrowError(ctx, RawUtf8(AWho + ': this extension is not loaded'));
+    Exit;
+  end;
   eng.Registry.AddCommand(eng.ExtensionIdForContext(ctx), string(ctx^.ToUtf8(argv^[0])),
     string(ctx^.ToUtf8(argv^[1])), [AWhere], ctx, JS_DupValue(ctx, argv^[3]),
     string(ctx^.ToUtf8(argv^[2])));

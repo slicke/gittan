@@ -86,10 +86,13 @@ type
     procedure TestHeadPaths;
     procedure TestCommitUnborn;
     procedure TestCommitParts;
+    procedure TestCommitPartOfDeletedScript;
     procedure TestCommitMerge;
     procedure TestToolSearchPath;
     procedure TestNodeManagerBins;
     procedure TestPushFetchPull;
+    procedure TestPushTarget;
+    procedure TestDiscardFinalNewline;
     procedure TestPushHook;
     procedure TestPullDiverged;
     procedure TestCommitTemplate;
@@ -113,6 +116,10 @@ type
     procedure TestRevertFiles;
     procedure TestRevertLinks;
     procedure TestFileChangesLoneCR;
+    procedure TestFileChangesLiteral;
+    procedure TestBranchBesideTag;
+    procedure TestGraphOnOrphanBranch;
+    procedure TestRebaseStashClash;
     procedure TestMoveAndRemove;
     procedure TestRebaseOnto;
     procedure TestBehindDefault;
@@ -2148,6 +2155,36 @@ end;
   what was left out shows as not staged, and a staged file not chosen
   stays staged. A hook that fails leaves the index as it was; an amend
   takes parts too. }
+{ A deleted file with lines left out of the commit is gone from the
+  temporary index after add -A; its part keeps the mode HEAD has. }
+procedure TGitRepoTest.TestCommitPartOfDeletedScript;
+var
+  Paths: TStringList;
+  Parts: TGittanCommitParts;
+  Id: string;
+begin
+  MakeHistory;
+  WriteFile('run.sh', 'one'#10'two'#10);
+  Git(['add', 'run.sh']);
+  Git(['update-index', '--chmod=+x', 'run.sh']);
+  Git(['commit', '-q', '-m', 'script']);
+  DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'run.sh');
+  AssertTrue(FRepo.Open(FDir));
+  Parts := nil;
+  SetLength(Parts, 1);
+  Parts[0].Path := 'run.sh';
+  Parts[0].Text := 'one'#10;
+  Paths := TStringList.Create;
+  try
+    Paths.Add('run.sh');
+    AssertTrue(FRepo.Error, FRepo.Commit('part', Paths, False, Id, Parts));
+    AssertEquals('one'#10, HeadFile(FDir, 'run.sh'));
+    AssertEquals('100755', Copy(Git(['ls-tree', 'HEAD', 'run.sh']), 1, 6));
+  finally
+    Paths.Free;
+  end;
+end;
+
 procedure TGitRepoTest.TestCommitParts;
 var
   Paths: TStringList;
@@ -2460,6 +2497,119 @@ begin
   finally
     RemoveTree(Remote);
     RemoveTree(Other);
+  end;
+end;
+
+{ FileChanges marks a side's last line without a newline, so Discard
+  of a block at the end gives the file back as HEAD has it: git sees no
+  change left. }
+procedure TGitRepoTest.TestDiscardFinalNewline;
+
+  procedure Check(const AHead, AWork, AName: string);
+  var
+    Lines: TStringList;
+    Err: string;
+    i: integer;
+  begin
+    WriteFile('a.txt', AHead);
+    Commit(AName);
+    WriteFile('a.txt', AWork);
+    Lines := TStringList.Create;
+    try
+      AssertTrue(FRepo.Error, FRepo.FileChanges('a.txt', Lines));
+      i := 0;
+      while (i < Lines.Count) and (Lines[i][1] = ' ') do
+        Inc(i);
+      AssertTrue(AName + ': a block', i < Lines.Count);
+      AssertTrue(AName + ': ' + Err, DiscardBlock(DiffBlock(Lines, i,
+        IncludeTrailingPathDelimiter(FDir) + 'a.txt'), Err));
+    finally
+      Lines.Free;
+    end;
+    AssertEquals(AName, '', Git(['status', '--porcelain', '--', 'a.txt']));
+  end;
+
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Check('a'#10'b'#10, 'a'#10'b'#10'c', 'a line added without a newline');
+  Check('a'#10'b', 'a'#10'b'#10'c'#10, 'lines added after one without');
+  Check('a'#10'b'#10, 'a'#10'b', 'the newline taken away');
+  Check('a'#10'b', 'a'#10'b'#10, 'a newline added');
+end;
+
+{ A branch made from origin/main tracks main but is pushed under its own
+  name, as git's push.default simple would have it, unless push.default
+  is upstream; remote.pushDefault sends it to another remote. }
+procedure TGitRepoTest.TestPushTarget;
+var
+  Remote, Fork, Output, Main, MainTip: string;
+  Code: integer;
+  Rejected, Stale, Unseen: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  AssertTrue(FRepo.Open(FDir));
+  Remote := FDir + '-remote';
+  Fork := FDir + '-fork';
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Remote], Output, Code,
+    [poStderrToOutPut]);
+  RunCommandIndir(FDir, 'git', ['init', '-q', '--bare', Fork], Output, Code,
+    [poStderrToOutPut]);
+  try
+    Git(['remote', 'add', 'origin', Remote]);
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    Main := Trim(Git(['branch', '--show-current']));
+    MainTip := Trim(Git(['rev-parse', 'HEAD']));
+    Git(['checkout', '-q', '-b', 'fix', '--track', 'origin/' + Main]);
+    WriteFile('a.txt', 'fix'#10);
+    Commit('fix');
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    AssertEquals('main untouched', MainTip,
+      Trim(Git(['--git-dir=' + Remote, 'rev-parse', 'refs/heads/' + Main])));
+    AssertEquals('pushed as fix', Trim(Git(['rev-parse', 'HEAD'])),
+      Trim(Git(['--git-dir=' + Remote, 'rev-parse', 'refs/heads/fix'])));
+    Git(['commit', '-q', '--amend', '-m', 'fix again']);
+    AssertTrue(FRepo.Error, FRepo.ForcePush(Stale, Unseen));
+    AssertEquals('force left main alone', MainTip,
+      Trim(Git(['--git-dir=' + Remote, 'rev-parse', 'refs/heads/' + Main])));
+    AssertEquals('force moved fix', Trim(Git(['rev-parse', 'HEAD'])),
+      Trim(Git(['--git-dir=' + Remote, 'rev-parse', 'refs/heads/fix'])));
+
+    Git(['remote', 'add', 'fork', Fork]);
+    Git(['config', 'remote.pushDefault', 'fork']);
+    AssertEquals('fork', FRepo.PushRemote);
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    AssertEquals('pushed to the fork', Trim(Git(['rev-parse', 'HEAD'])),
+      Trim(Git(['--git-dir=' + Fork, 'rev-parse', 'refs/heads/fix'])));
+    Git(['config', '--unset', 'remote.pushDefault']);
+    AssertEquals('origin', FRepo.PushRemote);
+
+    { A new branch with no upstream goes where pushRemote says, not to
+      origin. }
+    Git(['checkout', '-q', '-b', 'fresh']);
+    Git(['config', 'branch.fresh.pushRemote', 'fork']);
+    AssertEquals('fork', FRepo.PushRemote);
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    AssertEquals('fresh on the fork', Trim(Git(['rev-parse', 'HEAD'])),
+      Trim(Git(['--git-dir=' + Fork, 'rev-parse', 'refs/heads/fresh'])));
+    AssertEquals('fresh not on origin', '',
+      Trim(Git(['--git-dir=' + Remote, 'branch', '--list', 'fresh'])));
+    Git(['checkout', '-q', 'fix']);
+
+    Git(['config', 'push.default', 'upstream']);
+    Git(['reset', '-q', '--hard', 'origin/' + Main]);
+    WriteFile('a.txt', 'onto main'#10);
+    Commit('onto main');
+    AssertTrue(FRepo.Error, FRepo.Push(Rejected));
+    AssertEquals('upstream mode pushes onto main', Trim(Git(['rev-parse', 'HEAD'])),
+      Trim(Git(['--git-dir=' + Remote, 'rev-parse', 'refs/heads/' + Main])));
+  finally
+    RemoveTree(Remote);
+    RemoveTree(Fork);
   end;
 end;
 
@@ -4078,6 +4228,104 @@ end;
 { A lone CR is part of its line: TStrings.Text broke the line there, so
   the rows below it were counted one line too far down and Discard put a
   deleted line back one line low. }
+{ A path is a file name, not a pattern: [ab].txt is not also a.txt, and
+  an untracked n*.txt is new beside a tracked nx.txt. }
+procedure TGitRepoTest.TestFileChangesLiteral;
+var
+  Lines: TStringList;
+begin
+  MakeHistory;
+  WriteFile('[ab].txt', 'y'#10);
+  WriteFile('nx.txt', 'x'#10);
+  Commit('glob names');
+  WriteFile('a.txt', 'changed'#10);
+  WriteFile('[ab].txt', 'y2'#10);
+  {$IFNDEF WINDOWS}
+  WriteFile('n*.txt', 'n'#10);
+  {$ENDIF}
+  AssertTrue(FRepo.Open(FDir));
+  Lines := TStringList.Create;
+  try
+    AssertTrue(FRepo.FileChanges('[ab].txt', Lines));
+    AssertEquals('-y|+y2|', Joined(Lines));
+    { Windows takes no * in a file name. }
+    {$IFNDEF WINDOWS}
+    AssertTrue(FRepo.FileChanges('n*.txt', Lines));
+    AssertEquals('untracked, so new', '+n|', Joined(Lines));
+    {$ENDIF}
+  finally
+    Lines.Free;
+  end;
+end;
+
+{ A branch with a tag of the same name is listed by its name, which git
+  switch takes, not as heads/foo. }
+procedure TGitRepoTest.TestBranchBesideTag;
+var
+  Local, Remote: TStringList;
+begin
+  MakeHistory;
+  Git(['branch', 'foo']);
+  Git(['tag', 'foo']);
+  AssertTrue(FRepo.Open(FDir));
+  Local := TStringList.Create;
+  Remote := TStringList.Create;
+  try
+    AssertTrue(FRepo.Branches(Local, Remote));
+    AssertTrue(Local.Text, Local.IndexOf('foo') >= 0);
+    AssertEquals(-1, Local.IndexOf('heads/foo'));
+  finally
+    Local.Free;
+    Remote.Free;
+  end;
+end;
+
+{ On an orphan branch with no commit yet the other branches' history is
+  still there to show. }
+procedure TGitRepoTest.TestGraphOnOrphanBranch;
+var
+  Commits: TGittanGraphCommits;
+  Hashes: TStringList;
+begin
+  MakeHistory;
+  Git(['checkout', '-q', '--orphan', 'pages']);
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.GraphCommits(Commits));
+  AssertTrue(Length(Commits) > 0);
+  Hashes := TStringList.Create;
+  try
+    AssertTrue(FRepo.Error, FRepo.PathCommits('a.txt', Hashes));
+    AssertTrue(Hashes.Count > 0);
+  finally
+    Hashes.Free;
+  end;
+end;
+
+{ --autostash puts the local change back after the rebase; a clash there
+  exits 0 with the file in conflict, which is no success. }
+procedure TGitRepoTest.TestRebaseStashClash;
+var
+  Main: string;
+  Conflicts: boolean;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Main := FRepo.Branch;
+  Git(['checkout', '-q', '-b', 'side']);
+  WriteFile('b.txt', 'b'#10);
+  Commit('side');
+  Git(['checkout', '-q', Main]);
+  WriteFile('a.txt', 'main'#10);
+  Commit('main');
+  Git(['checkout', '-q', 'side']);
+  WriteFile('a.txt', 'local'#10);
+  AssertFalse('reported as done', FRepo.RebaseOnto(Main, Conflicts));
+  AssertTrue(Conflicts);
+  AssertEquals(StashClashMessage, FRepo.Error);
+  AssertEquals('the rebase itself went through', '', FRepo.Operation);
+  AssertEquals('side', Trim(Git(['log', '-1', '--format=%s'])));
+end;
+
 procedure TGitRepoTest.TestFileChangesLoneCR;
 var
   Lines: TStringList;
@@ -5049,7 +5297,7 @@ begin
   try
     Start := GetTickCount64;
     AssertFalse(RunAgentCli('/bin/sh', FDir, ['-c', 'sleep 30'], '', @Deadline.Passed,
-      Output, Err));
+      Output, Err, []));
     AssertTrue('ended at the deadline', GetTickCount64 - Start < 10000);
   finally
     Deadline.Free;
@@ -5060,8 +5308,18 @@ begin
   try
     Start := GetTickCount64;
     AssertFalse(RunAgentCli('/bin/sh', FDir, ['-c', 'exec >&- 2>&-; sleep 30'], '',
-      @Deadline.Passed, Output, Err));
+      @Deadline.Passed, Output, Err, []));
     AssertTrue('ended at the deadline, its output closed', GetTickCount64 - Start < 10000);
+  finally
+    Deadline.Free;
+  end;
+  { A variable a skip prefix names is not in the tool's environment
+    (Copilot's COPILOT_ALLOW_ALL and GITHUB_COPILOT_PROMPT_MODE_*). }
+  Deadline := TGittanDeadline.Create(10);
+  try
+    AssertTrue(Err, RunAgentCli('/bin/sh', FDir, ['-c', 'printf "[%s]" "$HOME"'], '',
+      @Deadline.Passed, Output, Err, ['HOM']));
+    AssertEquals('[]', Output);
   finally
     Deadline.Free;
   end;

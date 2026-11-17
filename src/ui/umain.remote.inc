@@ -815,16 +815,22 @@ begin
     RefreshRepository;
     StartLfsLocks;
   end;
-  if FPendingRemote then
-  begin
-    FPendingRemote := False;
-    FStatus.ShowMessage('', stNormal, 0);
-    if FPendingKind = rkFetchPull then
-      StartPullFetch(StrToIntDef(FPendingArg, 0), FPendingRemoteName, FPendingBranch)
-    else
-      StartRemote(FPendingKind, FPendingMode, FPendingArg, FPendingRemoteName,
-        FPendingNoVerify);
-  end;
+  { A commit started while the action waited: it waits for that too,
+    and CommitJobDone runs it, where StartRemote refused it unsaid. }
+  if FPendingRemote and (FCommitJob = nil) then
+    RunPendingRemote;
+end;
+
+{ The fetch, pull or push asked for while the background fetch ran. }
+procedure TRepoFrame.RunPendingRemote;
+begin
+  FPendingRemote := False;
+  FStatus.ShowMessage('', stNormal, 0);
+  if FPendingKind = rkFetchPull then
+    StartPullFetch(StrToIntDef(FPendingArg, 0), FPendingRemoteName, FPendingBranch)
+  else
+    StartRemote(FPendingKind, FPendingMode, FPendingArg, FPendingRemoteName,
+      FPendingNoVerify);
 end;
 
 { The file's versions ARefs (an empty one for the work tree) from Git

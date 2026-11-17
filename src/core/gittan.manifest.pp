@@ -25,8 +25,10 @@ type
     (Resolved, '' when there is no lock or it is not in it), and its
     group: '' for a plain dependency, "dev", "build", "optional",
     "peer", "indirect", or an extras group's name in Python. }
+  {** Package is the name the lock file lists it by, when that is not
+    Name (Cargo's package = "bar" under another name); '' otherwise. }
   TGittanDependency = record
-    Name, Version, Resolved, Group: string;
+    Name, Version, Resolved, Group, Package: string;
   end;
   TGittanDependencies = array of TGittanDependency;
 

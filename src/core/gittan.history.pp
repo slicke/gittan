@@ -82,6 +82,18 @@ type
     property Commits: TGittanHistoryCommits read FCommits;
   end;
 
+{** The work tree's changes to the lines AFrom..ATo of the base, from
+  ALines, the file's diff against it with a ' ', '+' or '-' marker on
+  every line: the lines of the range, and the lines added in place of
+  them or right after the last one, as one hunk. A deleted block is
+  paired in order with the block added in its place, so a range that
+  starts or ends inside it keeps only the added lines that stand where
+  its own deleted lines did; the added lines beyond a deleted block's
+  last line go with that line. False when no line in the range changed. }
+function UncommittedHunk(ALines: TStrings; AFrom, ATo: integer;
+  out AHunk: TGittanHistoryHunk): boolean;
+
+type
   { TGittanHistoryJob }
 
   {** Runs TGittanRepo.LineHistory for the lines AFrom..ATo of APath as
@@ -115,6 +127,119 @@ implementation
 
 uses
   gittan.textfile;
+
+function UncommittedHunk(ALines: TStrings; AFrom, ATo: integer;
+  out AHunk: TGittanHistoryHunk): boolean;
+var
+  OldNum, NewNum, Picked: array of integer;
+  First, Last, BlockStart, BlockEnd, AddEnd, DropFrom, DropTo, Upto, i, o, n, k: integer;
+  AnyChange: boolean;
+
+  procedure Pick(AIndex: integer);
+  begin
+    Picked[k] := AIndex;
+    Inc(k);
+  end;
+
+begin
+  AHunk := Default(TGittanHistoryHunk);
+  SetLength(OldNum, ALines.Count);
+  SetLength(NewNum, ALines.Count);
+  o := 0;
+  n := 0;
+  First := -1;
+  Last := -1;
+  for i := 0 to ALines.Count - 1 do
+  begin
+    OldNum[i] := 0;
+    NewNum[i] := 0;
+    if ALines[i][1] <> '+' then
+    begin
+      Inc(o);
+      OldNum[i] := o;
+      if (o >= AFrom) and (o <= ATo) then
+      begin
+        if First < 0 then
+          First := i;
+        Last := i;
+      end;
+    end;
+    if ALines[i][1] <> '-' then
+    begin
+      Inc(n);
+      NewNum[i] := n;
+    end;
+  end;
+  if First < 0 then
+    Exit(False);
+  SetLength(Picked, ALines.Count);
+  k := 0;
+  { A range that starts inside a deleted block leaves out the added lines
+    in the places of the block's lines before it. }
+  DropFrom := 0;
+  DropTo := -1;
+  if (ALines[First][1] = '-') and (First > 0) and (ALines[First - 1][1] = '-') then
+  begin
+    BlockStart := First;
+    while (BlockStart > 0) and (ALines[BlockStart - 1][1] = '-') do
+      Dec(BlockStart);
+    BlockEnd := First;
+    while (BlockEnd + 1 < ALines.Count) and (ALines[BlockEnd + 1][1] = '-') do
+      Inc(BlockEnd);
+    DropFrom := BlockEnd + 1;
+    DropTo := BlockEnd + First - BlockStart;
+  end;
+  if ALines[Last][1] = '-' then
+  begin
+    { A range that ends inside a deleted block leaves out the added lines
+      in the places of the block's lines after it; one that takes the
+      block's last line takes the added lines beyond it too. }
+    BlockEnd := Last;
+    while (BlockEnd + 1 < ALines.Count) and (ALines[BlockEnd + 1][1] = '-') do
+      Inc(BlockEnd);
+    BlockStart := Last;
+    while (BlockStart > 0) and (ALines[BlockStart - 1][1] = '-') do
+      Dec(BlockStart);
+    AddEnd := BlockEnd;
+    while (AddEnd + 1 < ALines.Count) and (ALines[AddEnd + 1][1] = '+') do
+      Inc(AddEnd);
+    for i := First to Last do
+      if (i < DropFrom) or (i > DropTo) then
+        Pick(i);
+    if Last = BlockEnd then
+      Upto := AddEnd
+    else
+      Upto := Min(AddEnd, BlockEnd + 1 + Last - BlockStart);
+    for i := BlockEnd + 1 to Upto do
+      if (i < DropFrom) or (i > DropTo) then
+        Pick(i);
+  end
+  else
+  begin
+    { Lines added right after the range's last line go with it. }
+    while (Last + 1 < ALines.Count) and (ALines[Last + 1][1] = '+') do
+      Inc(Last);
+    for i := First to Last do
+      if (i < DropFrom) or (i > DropTo) then
+        Pick(i);
+  end;
+  AnyChange := False;
+  for i := 0 to k - 1 do
+    if ALines[Picked[i]][1] <> ' ' then
+      AnyChange := True;
+  if not AnyChange then
+    Exit(False);
+  SetLength(AHunk.Lines, k);
+  for i := 0 to k - 1 do
+  begin
+    AHunk.Lines[i] := ALines[Picked[i]];
+    if (AHunk.OldStart = 0) and (OldNum[Picked[i]] > 0) then
+      AHunk.OldStart := OldNum[Picked[i]];
+    if (AHunk.NewStart = 0) and (NewNum[Picked[i]] > 0) then
+      AHunk.NewStart := NewNum[Picked[i]];
+  end;
+  Result := True;
+end;
 
 { ---------------------------------------------------------------------------
   Parsing

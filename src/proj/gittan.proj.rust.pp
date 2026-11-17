@@ -34,6 +34,7 @@ type
   TGittanRustKind = class(TGittanProjectKind)
   public
     class function Name: string; override;
+    class function SemverRanges: boolean; override;
     class function Identify(const ARoot: string; out AManifest: string): boolean; override;
     class function Commands(const ARoot: string): TGittanProjectCommands; override;
     class function DependencyFile(const ARoot: string): string; override;
@@ -146,23 +147,18 @@ end;
 function ParseCargoDependencies(const AText: string): TGittanDependencies;
 var
   E: TGittanTomlEntry;
-  Group, Name: string;
+  Group, Name, Key: string;
+  Dot, i: integer;
 
-  { A key of a [dependencies.name] table: the dependency once, with the
-    version of whichever key gives one, path and git before version
-    as well as after. }
-  procedure TakeKey(const AVersion: string);
-  var
-    i: integer;
+  { The dependency Name of Group, added once. }
+  function Entry: integer;
   begin
-    for i := 0 to High(Result) do
-      if (Result[i].Name = Name) and (Result[i].Group = Group) then
-      begin
-        if AVersion <> '' then
-          Result[i].Version := AVersion;
+    for Result := 0 to High(ParseCargoDependencies) do
+      if (ParseCargoDependencies[Result].Name = Name) and
+        (ParseCargoDependencies[Result].Group = Group) then
         Exit;
-      end;
-    AddDependency(Result, Name, AVersion, '', Group);
+    AddDependency(ParseCargoDependencies, Name, '', '', Group);
+    Result := High(ParseCargoDependencies);
   end;
 
 begin
@@ -171,14 +167,36 @@ begin
   begin
     if not CargoTable(E.Table, Group, Name) then
       Continue;
+    { A dotted key (serde.version = "1", tokio.workspace = true) is a
+      key of the dependency's own table. }
+    Key := E.Key;
+    if (Name = '') and (Key <> '') and not (Key[1] in ['"', '''']) then
+    begin
+      Dot := Pos('.', Key);
+      if Dot > 0 then
+      begin
+        Name := BareKey(Copy(Key, 1, Dot - 1));
+        Key := BareKey(Copy(Key, Dot + 1, MaxInt));
+      end;
+    end;
     if Name = '' then
-      AddDependency(Result, E.Key, CargoRequirement(E.Value), '', Group)
-    else if E.Key = 'version' then
-      TakeKey(TomlString(E.Value))
-    else if (E.Key = 'workspace') and (Trim(E.Value) = 'true') then
-      TakeKey('workspace')
-    else if (E.Key = 'path') or (E.Key = 'git') then
-      TakeKey('');
+    begin
+      Name := BareKey(E.Key);
+      i := Entry;
+      Result[i].Version := CargoRequirement(E.Value);
+      Result[i].Package := TomlString(TomlInlineValue(E.Value, 'package'));
+      Continue;
+    end;
+    { A key of a [dependencies.name] table: the dependency once, with the
+      version of whichever key gives one, path and git before version as
+      well as after, and the name the lock lists a renamed one by. }
+    i := Entry;
+    if Key = 'version' then
+      Result[i].Version := TomlString(E.Value)
+    else if (Key = 'workspace') and (Trim(E.Value) = 'true') then
+      Result[i].Version := 'workspace'
+    else if Key = 'package' then
+      Result[i].Package := TomlString(E.Value);
   end;
 end;
 
@@ -250,6 +268,11 @@ end;
 class function TGittanRustKind.Name: string;
 begin
   Result := 'Rust';
+end;
+
+class function TGittanRustKind.SemverRanges: boolean;
+begin
+  Result := True;
 end;
 
 class function TGittanRustKind.Identify(const ARoot: string; out AManifest: string): boolean;

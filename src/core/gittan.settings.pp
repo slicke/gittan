@@ -372,6 +372,15 @@ begin
     + ConfigFolder;
 end;
 
+{ AValue when it is in AMin..AMax, else 0. }
+function InRangeOrZero(AValue, AMin, AMax: integer): integer;
+begin
+  if (AValue >= AMin) and (AValue <= AMax) then
+    Result := AValue
+  else
+    Result := 0;
+end;
+
 function DefaultFontSize(AHeight: integer): integer;
 begin
   Result := {$IFDEF DARWIN}9{$ELSE}10{$ENDIF};
@@ -701,9 +710,11 @@ begin
 
   O := ObjOf(FSettingsDoc, 'editor');
   FontName := StrOf(O, 'fontName');
-  FontSize := IntOf(O, 'fontSize');
-  Zoom := IntOf(O, 'zoom');
-  TabSize := IntOf(O, 'tabSize');
+  { A value edited by hand past what the settings dialog and the zoom
+    give is the default (0), not a font of 5000 points. }
+  FontSize := InRangeOrZero(IntOf(O, 'fontSize'), 6, 72);
+  Zoom := InRangeOrZero(IntOf(O, 'zoom'), 10, 1000);
+  TabSize := InRangeOrZero(IntOf(O, 'tabSize'), 1, 16);
   WordWrap := BoolOf(O, 'wordWrap', False);
   SyntaxTheme := StrOf(O, 'syntaxTheme');
   O := ObjOf(FSettingsDoc, 'diff');

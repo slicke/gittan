@@ -693,6 +693,14 @@ var
     Result := D[0].Resolved;
   end;
 
+  function ResolvedIn(AKind: TGittanProjectKindClass; const AVersion: string): string;
+  begin
+    D := nil;
+    AddDependency(D, 'syn', AVersion, '', '');
+    ResolveDependencies(D, L, AKind);
+    Result := D[0].Resolved;
+  end;
+
 begin
   L := nil;
   AddLocked(L, 'syn', '1.0.109');
@@ -714,7 +722,8 @@ begin
   AssertEquals('0.x keeps its minor', '0.4.2', Resolved('0.4'));
   L := nil;
   AddLocked(L, 'syn', '1.0.0');
-  AssertEquals('one version locked: that one', '1.0.0', Resolved('^3'));  L := nil;
+  AssertEquals('one version locked: that one', '1.0.0', Resolved('^3'));
+  L := nil;
   AddLocked(L, 'syn', '1.4');
   AddLocked(L, 'syn', '1.4.5');
   AssertEquals('Python''s == is that version alone', '1.4', Resolved('==1.4'));
@@ -727,11 +736,21 @@ begin
   AddLocked(L, 'syn', '2.0.0-beta.1');
   AssertEquals('a pre-release is below its release', '2.0.0', Resolved('>=1'));
   AssertEquals('and does not meet it', '2.0.0', Resolved('<=2.0.0'));
-  AssertEquals('one asked for', '2.0.0-beta.1', Resolved('=2.0.0-beta.1'));  L := nil;
+  AssertEquals('one asked for', '2.0.0-beta.1', Resolved('=2.0.0-beta.1'));
+  L := nil;
   AddLocked(L, 'syn', '1.4');
   AddLocked(L, 'syn', '1.4.post1');
   AssertEquals('a post-release is above its release', '1.4.post1', Resolved('>=1.4'));
   AssertEquals('==1.4 is not its post-release', '1.4', Resolved('==1.4'));
+  AssertEquals('nor is <=1.4', '1.4', Resolved('<=1.4'));
+  AssertEquals('!=1.4 is', '1.4.post1', Resolved('!=1.4'));
+  AssertEquals('>1.4 leaves it out', '', Resolved('>1.4'));
+  AssertEquals('a post-release asked for', '1.4.post1', Resolved('>=1.4.post1'));
+  L := nil;
+  AddLocked(L, 'syn', '2.0.0');
+  AddLocked(L, 'syn', '2.1.0+cu118');
+  AssertEquals('==2.1.0 is 2.1.0 with a local label', '2.1.0+cu118', Resolved('==2.1.0'));
+  AssertEquals('one named is matched whole', '', Resolved('==2.1.0+cpu'));
   L := nil;
   AddLocked(L, 'syn', '1.4.post1');
   AddLocked(L, 'syn', '1.4.5');
@@ -745,6 +764,81 @@ begin
   AddLocked(L, 'syn', '2.0.0');
   AssertEquals('a pre-release ends a hyphen range whole', '1.5.0',
     Resolved('1.0.0 - 2.0.0-beta.1'));
+  AssertEquals('and its release is past it', '2.0.0', Resolved('>2.0.0-beta.1'));
+  L := nil;
+  AddLocked(L, 'syn', '2.0.0-beta.1');
+  AddLocked(L, 'syn', '2.0.0-beta.2');
+  AssertEquals('pre-releases by their suffixes', '2.0.0-beta.2', Resolved('>=2.0.0-beta.1'));
+  AssertEquals('beta.2 is past a range to beta.1', '2.0.0-beta.1',
+    Resolved('1.0.0 - 2.0.0-beta.1'));
+  AssertEquals('= of a pre-release is that one', '2.0.0-beta.1', Resolved('=2.0.0-beta.1'));
+  AssertEquals('below beta.2', '2.0.0-beta.1', Resolved('<2.0.0-beta.2'));
+  L := nil;
+  AddLocked(L, 'syn', '1.0.0-beta.10');
+  AddLocked(L, 'syn', '1.0.0-beta.2');
+  AssertEquals('numbers by value', '1.0.0-beta.10', Resolved('>=1.0.0-beta.1'));
+  L := nil;
+  AddLocked(L, 'syn', '1.4b2');
+  AddLocked(L, 'syn', '1.4rc1');
+  AddLocked(L, 'syn', '1.4.dev1');
+  AssertEquals('Python''s rc is past b', '1.4rc1', Resolved('>=1.4a1'));
+  AssertEquals('b is below rc', '1.4b2', Resolved('>1.4a1, <1.4rc1'));
+  AssertEquals('dev is below a', '1.4.dev1', Resolved('<1.4a1'));
+  L := nil;
+  AddLocked(L, 'syn', '1.2.9');
+  AddLocked(L, 'syn', '1.3.0');
+  AssertEquals('1.2.* is 1.2.x, not ^1.2', '1.2.9', Resolved('1.2.*'));
+  AssertEquals('so is 1.2.x', '1.2.9', Resolved('1.2.x'));
+  AssertEquals('and ~1.2.x', '1.2.9', Resolved('~1.2.x'));
+  AssertEquals('!=1.3.* leaves 1.3.x out', '1.2.9', Resolved('!=1.3.*'));
+  L := nil;
+  AddLocked(L, 'syn', '1.9.0');
+  AddLocked(L, 'syn', '2.0.0-rc.1');
+  AssertEquals('<2 leaves out 2.0.0-rc.1', '1.9.0', Resolved('>=1.5, <2'));
+  AssertEquals('as ^1 does', '1.9.0', Resolved('^1'));
+  AssertEquals('one named lets it in', '2.0.0-rc.1', Resolved('>=2.0.0-rc.1'));
+  L := nil;
+  AddLocked(L, 'syn', '1.5.0');
+  AddLocked(L, 'syn', '1.6.0-beta');
+  AssertEquals('^1.2 leaves out a pre-release of 1.6.0', '1.5.0', Resolved('^1.2'));
+  L := nil;
+  AddLocked(L, 'syn', '1.0a1');
+  AddLocked(L, 'syn', '1.0a1.dev1');
+  AssertEquals('.dev1 is below what it follows', '1.0a1', Resolved('>=1.0a1.dev1'));
+  AssertEquals('so <1.0a1 is the dev one', '1.0a1.dev1', Resolved('<1.0a1'));
+  L := nil;
+  AddLocked(L, 'syn', '1.1.0');
+  AddLocked(L, 'syn', '1.2.5');
+  AddLocked(L, 'syn', '1.3.0');
+  AssertEquals('Python''s <=1.2 is up to 1.2.0', '1.1.0', Resolved('<=1.2'));
+  AssertEquals('npm''s is every 1.2.x', '1.2.5', ResolvedIn(TGittanNodeKind, '<=1.2'));
+  AssertEquals('Cargo''s too', '1.2.5', ResolvedIn(TGittanRustKind, '<=1.2'));
+  AssertEquals('npm''s >1.2 is past them', '1.3.0', ResolvedIn(TGittanNodeKind, '>1.2, <1.4'));
+  AssertEquals('Python''s >1.2 takes 1.2.5', '1.2.5', Resolved('>1.2, <1.3'));
+  AssertEquals('and npm''s does not', '', ResolvedIn(TGittanNodeKind, '>1.2, <1.3'));
+  L := nil;
+  AddLocked(L, 'syn', '1.2.9');
+  AddLocked(L, 'syn', '1.3.0');
+  AssertEquals('npm''s ^1.2.x is ^1.2', '1.3.0', ResolvedIn(TGittanNodeKind, '^1.2.x'));
+  AssertEquals('while 1.2.x is 1.2.x', '1.2.9', ResolvedIn(TGittanNodeKind, '1.2.x'));
+  L := nil;
+  AddLocked(L, 'syn', '1.0.0-beta2');
+  AddLocked(L, 'syn', '1.0.0-beta10');
+  AssertEquals('SemVer''s beta10 is below beta2', '1.0.0-beta2',
+    ResolvedIn(TGittanNodeKind, '>=1.0.0-beta2'));
+  L := nil;
+  AddLocked(L, 'syn', '1.0rc1');
+  AddLocked(L, 'syn', '1.1rc1');
+  AssertEquals('Python''s pre-release of other numbers', '1.1rc1', Resolved('>=1.0rc1'));
+  L := nil;
+  AddLocked(L, 'syn', '1.0.0-rc.1');
+  AddLocked(L, 'syn', '1.1.0-rc.1');
+  AssertEquals('npm''s only of the same numbers', '1.0.0-rc.1',
+    ResolvedIn(TGittanNodeKind, '>=1.0.0-rc.1'));
+  L := nil;
+  AddLocked(L, 'syn', '1.0a1');
+  AddLocked(L, 'syn', '2.0');
+  AssertEquals('Python''s alpha1 is a1', '1.0a1', Resolved('==1.0alpha1'));
 end;
 
 procedure TProjectTest.TestPickedChecks;

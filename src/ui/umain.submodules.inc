@@ -58,6 +58,7 @@ begin
   FSubTree.Images := TreeImages;
   FSubTree.ReadOnly := True;
   FSubTree.Options := FileTree.Options;
+  FSubTree.ScrollBars := FileTree.ScrollBars;
   FSubTree.OnSelectionChanged := @SubTreeSelectionChanged;
   FSubTree.ShowHint := True;
   FSubTree.OnMouseMove := @SubTreeMouseMove;

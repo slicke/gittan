@@ -248,6 +248,7 @@ type
     procedure SetBaseHot(AValue: boolean);
     procedure SetBaseClickable(AValue: boolean);
     function RowAt(Y: integer): integer;
+    function ShownRows: integer;
     function CommitAt(Y: integer): integer;
     procedure SetCommitHot(AValue: integer);
     function ShowsCommits: boolean;
@@ -299,7 +300,7 @@ type
     function PaintSync(X, Y: integer; ADraw: boolean = True): integer;
     function HasSyncLine: boolean;
     procedure PaintHeader(var Y: integer);
-    procedure PaintRow(AIndex, ATop: integer);
+    procedure PaintRow(AIndex, ATop, AMaxChange: integer);
     procedure PaintBar(X, Y: integer; const AStat: TGittanFileStat; AMax: integer);
     procedure PaintKinds(Y, ALeft, ARight: integer);
     function BarWidth: integer;
@@ -448,13 +449,14 @@ function ReviewPullLine(const APull: TGittanPullRequest): string;
 implementation
 
 uses
-  Math, DateUtils, LazUTF8, StrUtils, InkMarkdown, gittan.textfit, gittan.theme, Forms,
+  Math, DateUtils, LazUTF8, StrUtils, InkMarkdown, gittan.textfit, gittan.theme, gittan.smooth, Forms,
   gittan.signmark;
 
 resourcestring
   rsCardNote = 'Note';
   rsOneFile = '1 changed file';
   rsManyFiles = '%d changed files';
+  rsMoreFiles = '%d more in the file tree';
   rsClean = 'Working tree clean';
   rsCleanVs = 'No changes %s';
   rsRecentCommits = 'Recent commits';
@@ -496,6 +498,10 @@ const
   Pad = 24;
   RowHeight = 30;
   IconSize = 16;
+  { The tallest the summary gets: the LCL sends a size in 16 bits, so a
+    control over 32767 px fails (on GTK the rows past it cannot be
+    scrolled to). The rows that do not fit are left to the file tree. }
+  MaxSummaryHeight = 32000;
   { The row bars take a share of the width, within these. }
   MinBarWidth = 96;
   MaxBarWidth = 200;
@@ -752,7 +758,17 @@ begin
   else if CentersClean then
     FContentHeight := FRowsTop + CenterBlockHeight(FMeasure.Canvas) + 2 * Px(Pad)
   else
-    FContentHeight := FRowsTop + Max(Length(FStats), 2) * Px(RowHeight) + Px(Pad);
+    FContentHeight := FRowsTop + Max(ShownRows + Ord(ShownRows < Length(FStats)), 2) *
+      Px(RowHeight) + Px(Pad);
+end;
+
+{ How many of the files get a row: all that fit under MaxSummaryHeight,
+  one row kept for the line that tells how many more there are. }
+function TGittanSummary.ShownRows: integer;
+begin
+  Result := Length(FStats);
+  if FRowsTop + (Result + 1) * Px(RowHeight) + Px(Pad) > MaxSummaryHeight then
+    Result := Max(0, (MaxSummaryHeight - FRowsTop - Px(Pad)) div Px(RowHeight) - 1);
 end;
 
 { A clean tree with nothing else to show: no commits, no conversation. }
@@ -1161,10 +1177,10 @@ begin
     Canvas.Pen.Color := FLine;
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := FSelectedBack;
-    Canvas.RoundRect(Card, 8, 8);
+    Canvas.RoundRect(Card, Px(8), Px(8));
     Canvas.Pen.Style := psClear;
     Canvas.Brush.Color := Tone;
-    Canvas.RoundRect(Card.Left, Card.Top, Card.Left + 2 * Px(NoteStripe), Card.Bottom, 4, 4);
+    Canvas.RoundRect(Card.Left, Card.Top, Card.Left + 2 * Px(NoteStripe), Card.Bottom, Px(4), Px(4));
     Canvas.Brush.Color := FSelectedBack;
     Canvas.FillRect(Card.Left + Px(NoteStripe), Card.Top + 1, Card.Left + 2 * Px(NoteStripe),
       Card.Bottom - 1);
@@ -1351,7 +1367,7 @@ begin
       X + IconW + Canvas.TextWidth(Line) + Px(ChevronWidth) + Px(ChipPadX),
       TextY + BodyHeight + Px(ChipPadY));
     if FReviewHot then
-      FillHover(Canvas, FReviewRect, 8, FHover);
+      FillHover(Canvas, FReviewRect, Px(8), FHover);
   end;
   DrawStatusIcon(Canvas, HintPull, X, TextY, BodyHeight, FDim);
   Canvas.Pen.Width := 1;
@@ -1551,10 +1567,10 @@ begin
   Canvas.Pen.Color := FLine;
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FSelectedBack;
-  Canvas.RoundRect(Card, 8, 8);
+  Canvas.RoundRect(Card, Px(8), Px(8));
   Canvas.Pen.Style := psClear;
   Canvas.Brush.Color := FLink;
-  Canvas.RoundRect(Card.Left, Card.Top, Card.Left + 2 * Px(NoteStripe), Card.Bottom, 4, 4);
+  Canvas.RoundRect(Card.Left, Card.Top, Card.Left + 2 * Px(NoteStripe), Card.Bottom, Px(4), Px(4));
   Canvas.Brush.Color := FSelectedBack;
   Canvas.FillRect(Card.Left + Px(NoteStripe), Card.Top + 1, Card.Left + 2 * Px(NoteStripe),
     Card.Bottom - 1);
@@ -1952,7 +1968,7 @@ begin
   if Y < FRowsTop then
     Exit;
   Result := (Y - FRowsTop) div Px(RowHeight);
-  if Result > High(FStats) then
+  if Result >= ShownRows then
     Result := -1;
 end;
 
@@ -2034,7 +2050,7 @@ begin
         X + IconW + Canvas.TextWidth(FBranch) + Px(ChevronWidth) + Px(ChipPadX),
         TextY + BodyHeight + Px(ChipPadY));
       if FBranchHot then
-        FillHover(Canvas, FBranchRect, 8, FHover);
+        FillHover(Canvas, FBranchRect, Px(8), FHover);
     end;
     DrawStatusIcon(Canvas, HintBranch, X, TextY, BodyHeight, FDim);
     Canvas.Pen.Width := 1;
@@ -2062,7 +2078,7 @@ begin
       FBaseRect := Rect(X - Px(ChipPadX), TextY - Px(ChipPadY),
         X + Canvas.TextWidth(FBase) + Px(ChevronWidth) + Px(ChipPadX), TextY + BodyHeight + Px(ChipPadY));
       if FBaseHot then
-        FillHover(Canvas, FBaseRect, 8, FHover);
+        FillHover(Canvas, FBaseRect, Px(8), FHover);
     end;
     Canvas.Font.Color := FText;
     Canvas.TextOut(X, TextY, FBase);
@@ -2112,7 +2128,7 @@ begin
         Canvas.TextWidth('−' + IntToStr(Deleted)) + Px(ChevronWidth) + Px(ChipPadX),
         Y + BodyHeight + Px(ChipPadY));
       if FTotalsHot then
-        FillHover(Canvas, FTotalsRect, 8, FHover);
+        FillHover(Canvas, FTotalsRect, Px(8), FHover);
       Canvas.Brush.Style := bsClear;
     end;
     Canvas.Font.Color := FDim;
@@ -2270,10 +2286,12 @@ end;
 { Badge, directory in dim and file name in full color, then the counts and
   the bar on the right. A path too long for the room loses its directory
   first, then its end. }
-procedure TGittanSummary.PaintRow(AIndex, ATop: integer);
+{ AMaxChange, the most lines a row with a bar changed, scales the bar:
+  Paint works it out once, not each row over all of them. }
+procedure TGittanSummary.PaintRow(AIndex, ATop, AMaxChange: integer);
 var
   Stat: TGittanFileStat;
-  X, CountsX, TextY, BodyHeight, Room, MaxChange, i, W: integer;
+  X, CountsX, TextY, BodyHeight, Room, W: integer;
   Dir, FileName, Count, RowText, RowAction: string;
   R: TRect;
 begin
@@ -2294,7 +2312,7 @@ begin
       Canvas.Brush.Color := FHover
     else
       Canvas.Brush.Color := FSelectedBack;
-    Canvas.RoundRect(Px(Pad) div 2, ATop, Width - Px(Pad) div 2, ATop + Px(RowHeight), 8, 8);
+    Canvas.RoundRect(Px(Pad) div 2, ATop, Width - Px(Pad) div 2, ATop + Px(RowHeight), Px(8), Px(8));
     Canvas.Pen.Style := psSolid;
   end;
   X := Px(Pad);
@@ -2388,32 +2406,15 @@ begin
       TextY, Count);
   end;
 
-  MaxChange := 0;
-  for i := 0 to High(FStats) do
-    if (i > High(FRowTexts)) or (FRowTexts[i] = '') then
-      MaxChange := Max(MaxChange, FStats[i].Added + FStats[i].Deleted);
   PaintBar(Width - Px(Pad) - BarWidth, ATop + (Px(RowHeight) - Px(BarHeight)) div 2, Stat,
-    MaxChange);
+    AMaxChange);
 end;
 
 { A green disc ASize across at X, Y with a check mark cut out of it. }
 procedure TGittanSummary.DrawCheck(X, Y, ASize: integer);
-var
-  CenterY: integer;
 begin
-  CenterY := Y + ASize div 2;
-  Canvas.Pen.Style := psClear;
-  Canvas.Brush.Style := bsSolid;
-  Canvas.Brush.Color := FAdded;
-  Canvas.Ellipse(X, Y, X + ASize, Y + ASize);
-  Canvas.Pen.Style := psSolid;
-  Canvas.Pen.Color := FBack;
-  Canvas.Pen.Width := Max(2, ASize div 10);
-  Canvas.Polyline([Point(X + ASize * 27 div 100, CenterY),
-    Point(X + ASize * 44 div 100, CenterY + ASize * 17 div 100),
-    Point(X + ASize * 74 div 100, CenterY - ASize * 17 div 100)]);
-  Canvas.Pen.Width := 1;
-  Canvas.Brush.Style := bsClear;
+  SmoothCheckDisc(Canvas, X, Y, ASize, FAdded, FBack, Max(2, ASize div 10),
+    GetCanvasScaleFactor);
 end;
 
 { The clean state in the header, in place of the totals: a large check,
@@ -2500,7 +2501,7 @@ begin
     FSyncRect := Rect(X - Px(ChipPadX), Y - Px(ChipPadY), X + PaintSync(0, 0, False) + Px(ChipPadX),
       Y + Canvas.TextHeight('Xg') + Px(ChipPadY));
     if FSyncHot then
-      FillHover(Canvas, FSyncRect, 8, FHover);
+      FillHover(Canvas, FSyncRect, Px(8), FHover);
   end;
   if FHasUpstream and FUpstreamGone then
     Part(rsUpstreamGone, FDeleted)
@@ -2554,7 +2555,7 @@ begin
   begin
     LineX := Px(Pad) + Px(IconSize) div 2;
     Canvas.Pen.Color := FLine;
-    Canvas.Pen.Width := 2;
+    Canvas.Pen.Width := Px(2);
     Canvas.Line(LineX, FCommitsTop + Px(RowHeight) div 2, LineX,
       FCommitsTop + High(FCommits) * Px(RowHeight) + Px(RowHeight) div 2);
     Canvas.Pen.Width := 1;
@@ -2592,7 +2593,7 @@ begin
     else
       Canvas.Brush.Color := FBack;
   end;
-  Canvas.Pen.Width := 2;
+  Canvas.Pen.Width := Px(2);
   Canvas.Ellipse(CenterX - Px(DotSize) div 2 - 1, CenterY - Px(DotSize) div 2 - 1,
     CenterX + Px(DotSize) div 2 + 1, CenterY + Px(DotSize) div 2 + 1);
   Canvas.Pen.Width := 1;
@@ -2636,7 +2637,8 @@ end;
 
 procedure TGittanSummary.Paint;
 var
-  Y, i: integer;
+  Y, i, First, Last, MaxChange: integer;
+  Clip: TRect;
 begin
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FBack;
@@ -2660,8 +2662,26 @@ begin
     PaintCleanCentered;
   if ShowsCommits then
     PaintCommits;
+  { Only the rows in the part to paint: a hover repaints one row, and
+    thousands of untracked files made every move draw them all. }
+  MaxChange := 0;
   for i := 0 to High(FStats) do
-    PaintRow(i, FRowsTop + i * Px(RowHeight));
+    if (i > High(FRowTexts)) or (FRowTexts[i] = '') then
+      MaxChange := Max(MaxChange, FStats[i].Added + FStats[i].Deleted);
+  Clip := Canvas.ClipRect;
+  First := Max(0, (Clip.Top - FRowsTop) div Px(RowHeight));
+  Last := Min(ShownRows - 1, (Clip.Bottom - FRowsTop) div Px(RowHeight));
+  for i := First to Last do
+    PaintRow(i, FRowsTop + i * Px(RowHeight), MaxChange);
+  if ShownRows < Length(FStats) then
+  begin
+    Canvas.Font := Font;
+    Canvas.Font.Color := FDim;
+    Canvas.Brush.Style := bsClear;
+    Canvas.TextOut(Px(Pad), FRowsTop + ShownRows * Px(RowHeight) +
+      (Px(RowHeight) - Canvas.TextHeight('Xg')) div 2,
+      Format(rsMoreFiles, [Length(FStats) - ShownRows]));
+  end;
 end;
 
 procedure TGittanSummary.MouseMove(Shift: TShiftState; X, Y: integer);

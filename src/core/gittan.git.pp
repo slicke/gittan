@@ -328,8 +328,10 @@ type
     function EmptyTree: string;
     procedure SplitRange(out ALeft, ARight: string);
     function RunDiff(const AArgs: array of string; out AOutput: string): boolean;
+    function StashClashed: boolean;
     function FullPath(const APath: string): string;
-    function RefGroup(const AGroup: string; AList: TStrings): boolean;
+    function RefGroup(const AGroup: string; AList: TStrings;
+      AFullName: boolean = False): boolean;
   public
     {** Opens the repository that contains ADir. Returns false, with the git
       message in Error, when ADir is not inside a work tree. }
@@ -503,7 +505,9 @@ type
       rebasing, as on the command line. }
     function Pull(AMode: TGittanPullMode; out ADiverged: boolean): boolean;
     {** Pushes the branch to its upstream (`git push <remote>
-      HEAD:<branch>`, whatever push.default says), or, without one, to a
+      HEAD:<branch>`), to its pushRemote or remote.pushDefault when one
+      is set, and under its own name when the upstream's differs (unless
+      push.default is upstream), or, without an upstream, to a
       branch of the same name on the remote RemoteFor gives, which then
       becomes its upstream (-u). False, with git's reason in Error, when
       nothing was pushed: ARejected is then set when the remote has
@@ -547,8 +551,9 @@ type
       pushes to to APushUrl (`git remote set-url`, with --push); with
       APushUrl empty or AUrl it pushes to AUrl, any push URL unset. }
     function SetRemoteUrls(const AName, AUrl, APushUrl: string): boolean;
-    {** The remote a push goes to: that of the current branch's upstream,
-      else the one RemoteFor gives; empty when there is none. }
+    {** The remote a push of the current branch goes to: its pushRemote,
+      else remote.pushDefault, else its upstream's remote, else the one
+      RemoteFor gives; empty when there is none. }
     function PushRemote: string;
     {** Whether the repository has the hook AName (pre-push, say): a file
       of that name in its hooks folder, `core.hooksPath` (husky's
@@ -1043,7 +1048,8 @@ type
     {** One changed file as the lines of a unified diff against HEAD with the
       whole file as context: every line starts with ' ', '+' or '-'. A file
       git does not know yet is returned as all added lines; a binary file
-      gives no lines. Returns false when git failed. }
+      gives no lines. The last line of a side that ends without a newline
+      has NoNewlineMark as its object. Returns false when git failed. }
     function FileChanges(const APath: string; ALines: TStrings): boolean;
     {** The two commits a diff of a file is between: ALeft is Base (HEAD
       by default), ARight the right commit of a range, or empty for the
@@ -1225,6 +1231,10 @@ const
     'then run "git lfs install" once.';
   MinGitMajor = 2;
   MinGitMinor = 30;
+  {** Why a rebase or pull that went through is reported as failed:
+    --autostash could not put the work tree's changes back cleanly. }
+  StashClashMessage = 'Done, but putting back the changes the work tree had ' +
+    'gave conflicts; git keeps them in the stash too.';
 
 {** Reads what `git --version` prints ("git version 2.39.5 (Apple
   Git-154)", "git version 2.30.1.windows.1") into AVersion (2.39.5),
@@ -1327,9 +1337,11 @@ function RunCli(const AExe, ADir: string; const AArgs, AEnv: array of string;
   exited with 0, with its standard output in AOutput, kept on failure
   too (claude -p --output-format json says why there), and its standard
   error in AError. ACancel is asked as it runs; when it
-  answers True claude is ended and the result is False. }
+  answers True claude is ended and the result is False. The variables
+  ASkip's prefixes name are left out of its environment. }
 function RunAgentCli(const AExe, ADir: string; const AArgs: array of string;
-  const AInput: string; ACancel: TGittanCancelEvent; out AOutput, AError: string): boolean;
+  const AInput: string; ACancel: TGittanCancelEvent; out AOutput, AError: string;
+  const ASkip: array of string): boolean;
 
 {** The files a refused switch or checkout names in AError, git's
   message, as those it "would overwrite" (local changes, or untracked
@@ -1429,6 +1441,10 @@ function ParseLfsPointer(const AData: RawByteString; out AOid: string;
   root, such as a submodule, and for threads, which keep no repository. }
 function RunGitIn(const ADir: string; const AArgs: array of string;
   out AOutput, AError: string; const AIndexFile: string = ''): boolean;
+
+{** The fields of output from a command run with -z, into AFields: a
+  trailing NUL ends the last field and adds none. }
+procedure SplitNul(const AOutput: string; AFields: TStrings);
 
 {** The branch HEAD is on in ADir, by its full ref with refs/heads/ taken
   off: symbolic-ref --short gives heads/main when a tag main exists too,
@@ -1987,7 +2003,9 @@ end;
   TProcess turns into the Unicode environment the process gets) without
   the variables whose names (with the equals sign) are in ASkip, so the
   caller can set those, and with ToolSearchPath as its PATH outside
-  Windows (whose variable is "Path", and whose PATH is kept as it is). }
+  Windows (whose variable is "Path", and whose PATH is kept as it is).
+  Windows takes a name in any case, so there ASkip is matched so too:
+  Copilot_Allow_All is the COPILOT_ALLOW_ALL it would read. }
 procedure CopyEnvironment(P: TProcess; const ASkip: array of string);
 var
   Env, Prefix: string;
@@ -1997,7 +2015,11 @@ begin
   begin
     Keep := True;
     for Prefix in ASkip do
+      {$ifdef windows}
+      if SameText(Copy(Env, 1, Length(Prefix)), Prefix) then
+      {$else}
       if Pos(Prefix, Env) = 1 then
+      {$endif}
         Keep := False;
     {$ifndef windows}
     if Pos('PATH=', Env) = 1 then
@@ -2621,31 +2643,34 @@ end;
 
 { Each line of for-each-ref is "branch<TAB>remote<TAB>refs/heads/x",
   the last two empty without an upstream; each of ls-remote's is
-  "<id><TAB>refs/heads/x". }
+  "<id><TAB>refs/heads/x". Split at tabs alone: DelimitedText reads a
+  quote, which a branch name may hold. }
 procedure GoneUpstreamsIn(const ADir: string; AList: TStrings);
 var
   Output, Err, Line, Remote: string;
-  Tracks, Fields, Heads, Asked: TStringList;
+  Fields: TStringArray;
+  Tracks, Heads, Asked: TStringList;
   i: integer;
 begin
   AList.Clear;
   if not RunGitIn(ADir, ['for-each-ref',
-    '--format=%(refname:short)%09%(upstream:remotename)%09%(upstream:remoteref)',
+    '--format=%(refname:lstrip=2)%09%(upstream:remotename)%09%(upstream:remoteref)',
     'refs/heads'], Output, Err) then
     Exit;
   Tracks := TStringList.Create;
-  Fields := TStringList.Create;
   Heads := TStringList.Create;
   Asked := TStringList.Create;
   try
     Tracks.Text := Output;
-    Fields.Delimiter := #9;
-    Fields.StrictDelimiter := True;
+    { Branch and remote names are case-sensitive: Feature gone while
+      feature is still there is gone. }
+    Heads.CaseSensitive := True;
+    Asked.CaseSensitive := True;
     Heads.Sorted := True;
     for i := 0 to Tracks.Count - 1 do
     begin
-      Fields.DelimitedText := Tracks[i];
-      if (Fields.Count < 3) or (Fields[1] = '') or (Fields[2] = '') then
+      Fields := Tracks[i].Split([#9]);
+      if (Length(Fields) < 3) or (Fields[1] = '') or (Fields[2] = '') then
         Continue;
       Remote := Fields[1];
       if Asked.IndexOf(Remote) < 0 then
@@ -2668,7 +2693,6 @@ begin
     end;
   finally
     Tracks.Free;
-    Fields.Free;
     Heads.Free;
     Asked.Free;
   end;
@@ -2715,11 +2739,12 @@ begin
 end;
 
 function RunAgentCli(const AExe, ADir: string; const AArgs: array of string;
-  const AInput: string; ACancel: TGittanCancelEvent; out AOutput, AError: string): boolean;
+  const AInput: string; ACancel: TGittanCancelEvent; out AOutput, AError: string;
+  const ASkip: array of string): boolean;
 var
   Status: integer;
 begin
-  if not RunTool(AExe, ADir, AArgs, [], [], AOutput, AError, Status, nil, AInput,
+  if not RunTool(AExe, ADir, AArgs, ASkip, [], AOutput, AError, Status, nil, AInput,
     ACancel) then
   begin
     if (AError = '') and not (Assigned(ACancel) and ACancel()) then
@@ -3016,10 +3041,9 @@ begin
 end;
 
 { Copies the repository's index to ATarget; no index (nothing staged
-  since init) leaves ATarget absent, which git takes as empty. On
-  Windows GetTempFileName has made the file already, and git refuses
-  an empty one ("index file smaller than expected"), so it is
-  deleted. }
+  since init) leaves ATarget absent, which git takes as empty: a file
+  there, even an empty one, git refuses ("index file smaller than
+  expected"), so it is deleted. }
 function TGittanRepo.CopyIndex(const ATarget: string): boolean;
 var
   Source: string;
@@ -3082,7 +3106,7 @@ begin
     Exit;
   if FTempIndex = '' then
   begin
-    FTempIndex := GetTempFileName(GetTempDir, 'gittan-index-');
+    FTempIndex := TempFileName('gittan-index-');
     if not CopyIndex(FTempIndex) then
     begin
       DropTempIndex;
@@ -3469,7 +3493,7 @@ begin
   AId := '';
   if FRoot = '' then
     Exit(False);
-  Index := GetTempFileName(GetTempDir, 'gittan-snapshot-');
+  Index := TempFileName('gittan-snapshot-');
   try
     Result := CopyIndex(Index) and
       RunGit(FRoot, ['add', '-A'], Tree, Index) and
@@ -3496,19 +3520,21 @@ var
   Sep, i: integer;
 
   { "diff", -w when whitespace is ignored, then AArgs with ABase put
-    before its "--" (or last, without one). A file in Git LFS (its
+    before its "--" (or last, without one). A path after "--" is a file
+    name, not a pattern: [ab].txt is that file alone. A file in Git LFS (its
     attribute diff=lfs) is binary, as what it holds is, not the pointer
     text git would compare. }
   procedure Build(const ABase: string);
   var
     i, n: integer;
   begin
-    SetLength(Args, Length(AArgs) + 5);
+    SetLength(Args, Length(AArgs) + 6);
     n := 0;
-    Args[n] := '-c';
-    Args[n + 1] := 'diff.lfs.binary=true';
-    Args[n + 2] := 'diff';
-    Inc(n, 3);
+    Args[n] := '--literal-pathspecs';
+    Args[n + 1] := '-c';
+    Args[n + 2] := 'diff.lfs.binary=true';
+    Args[n + 3] := 'diff';
+    Inc(n, 4);
     if FIgnoreWhitespace then
     begin
       Args[n] := '-w';
@@ -3569,18 +3595,31 @@ end;
   no committerdate and sorted last. A symbolic ref such as
   origin/HEAD (short name "origin") is skipped: it only points at
   another one in the list. }
-function TGittanRepo.RefGroup(const AGroup: string; AList: TStrings): boolean;
+{ refname:short gives heads/foo for a branch foo beside a tag foo, which
+  git switch does not take, so AFullName gives the name under the group
+  whole (lstrip=2: foo, origin/foo). }
+function TGittanRepo.RefGroup(const AGroup: string; AList: TStrings;
+  AFullName: boolean): boolean;
 var
-  Output, Line, Name: string;
-  Raw: TStringList;
+  Output, Line, Name, Fmt: string;
+  Raw, Seen: TStringList;
   Tab: integer;
 begin
-  Result := RunGit(FRoot, ['for-each-ref', '--format=%(refname:short)%09%(symref)',
-    '--sort=-creatordate', AGroup], Output);
+  if AFullName then
+    Fmt := '--format=%(refname:lstrip=2)%09%(symref)'
+  else
+    Fmt := '--format=%(refname:short)%09%(symref)';
+  Result := RunGit(FRoot, ['for-each-ref', Fmt, '--sort=-creatordate', AGroup], Output);
   if not Result then
     Exit;
   Raw := TStringList.Create;
+  Seen := TStringList.Create;
   try
+    { Fix and fix are two branches (on a file system that tells them
+      apart): the names are compared as they are, whatever AList does. }
+    Seen.CaseSensitive := True;
+    Seen.Sorted := True;
+    Seen.AddStrings(AList);
     Raw.Text := Output;
     for Line in Raw do
     begin
@@ -3588,10 +3627,14 @@ begin
       if (Tab = 0) or (Tab < Length(Line)) then
         Continue;
       Name := Copy(Line, 1, Tab - 1);
-      if (Name <> '') and (AList.IndexOf(Name) < 0) then
+      if (Name <> '') and (Seen.IndexOf(Name) < 0) then
+      begin
+        Seen.Add(Name);
         AList.Add(Name);
+      end;
     end;
   finally
+    Seen.Free;
     Raw.Free;
   end;
 end;
@@ -3613,7 +3656,7 @@ begin
   ARemote.Clear;
   if FRoot = '' then
     Exit(False);
-  Result := RefGroup('refs/heads', ALocal) and RefGroup('refs/remotes', ARemote);
+  Result := RefGroup('refs/heads', ALocal, True) and RefGroup('refs/remotes', ARemote, True);
 end;
 
 function TGittanRepo.GoneBranches(AList: TStrings): boolean;
@@ -3709,7 +3752,7 @@ begin
   InHead := TStringList.Create;
   Restore := TStringList.Create;
   Remove := TStringList.Create;
-  ListFile := GetTempFileName(GetTempDir, 'gittan-revert-');
+  ListFile := TempFileName('gittan-revert-');
   try
     Chosen.CaseSensitive := True;
     Chosen.Sorted := True;
@@ -3888,7 +3931,7 @@ var
 begin
   if (FRoot = '') or (APaths.Count = 0) then
     Exit(False);
-  SpecFile := GetTempFileName(GetTempDir, 'gittan-rm-');
+  SpecFile := TempFileName('gittan-rm-');
   try
     WriteBytes(SpecFile, NulList(APaths));
     Args := ['--literal-pathspecs', 'rm', '-q'];
@@ -3932,7 +3975,7 @@ begin
       Nul := '';
       for i := 0 to APaths.Count - 1 do
         Nul := Nul + APaths[i] + #0;
-      SpecFile := GetTempFileName(GetTempDir, 'gittan-stash-');
+      SpecFile := TempFileName('gittan-stash-');
       WriteBytes(SpecFile, Nul);
       AddArg(Args, '--pathspec-from-file=' + SpecFile);
       AddArg(Args, '--pathspec-file-nul');
@@ -4144,7 +4187,7 @@ begin
   Empty := EmptyTree;
   if Trim(Third) = Empty then
     Exit;
-  Index := GetTempFileName(GetTempDir, 'gittan-stash-index-');
+  Index := TempFileName('gittan-stash-index-');
   try
     DeleteFile(Index);
     if RunGit(FRoot, ['read-tree', '-i', '-m', Empty, AId, AId + '^3'], Output, Index) and
@@ -4213,7 +4256,7 @@ var
   { Writes AParts over their paths in the index AIndex ('' for the
     repository's): each text goes in as a blob, through the filters of
     its path, with the mode the index has for the path, which git add
-    gave it from the work tree. }
+    gave it from the work tree, or HEAD's for a file deleted there. }
   function WriteParts(const AIndex: string): boolean;
   var
     j: integer;
@@ -4229,6 +4272,11 @@ var
         Exit(False);
       Blob := Trim(Blob);
       Mode := Copy(Mode, 1, Pos(' ', Mode) - 1);
+      { A deleted file is gone from the index after add -A: the mode
+        HEAD has, so a script keeps its executable bit. }
+      if (Mode = '') and RunGit(FRoot, ['--literal-pathspecs', 'ls-tree', 'HEAD', '--',
+        AParts[j].Path], Mode) then
+        Mode := Copy(Mode, 1, Pos(' ', Mode) - 1);
       if Mode = '' then
         Mode := '100644';
       if not RunGit(FRoot, ['update-index', '--add', '--cacheinfo',
@@ -4248,7 +4296,7 @@ var
   function CommitThroughIndex: boolean;
   begin
     Result := False;
-    Index := GetTempFileName(GetTempDir, 'gittan-commit-index-');
+    Index := TempFileName('gittan-commit-index-');
     DeleteFile(Index);
     if HasCommit('HEAD') then
       Result := RunGit(FRoot, ['read-tree', 'HEAD'], Output, Index)
@@ -4300,10 +4348,10 @@ begin
   Spec := TStringList.Create;
   Added := TStringList.Create;
   Untrack := TStringList.Create;
-  SpecFile := GetTempFileName(GetTempDir, 'gittan-paths-');
-  AddFile := GetTempFileName(GetTempDir, 'gittan-add-');
-  MsgFile := GetTempFileName(GetTempDir, 'gittan-message-');
-  PartFile := GetTempFileName(GetTempDir, 'gittan-part-');
+  SpecFile := TempFileName('gittan-paths-');
+  AddFile := TempFileName('gittan-add-');
+  MsgFile := TempFileName('gittan-message-');
+  PartFile := TempFileName('gittan-part-');
   Index := '';
   try
     Chosen.CaseSensitive := True;
@@ -4762,12 +4810,50 @@ begin
   end;
   if not Result then
     ADiverged := (Pos('Not possible to fast-forward', FError) > 0) or
-      (Pos('divergent branches', FError) > 0);
+      (Pos('divergent branches', FError) > 0)
+  else if (AMode <> pmMerge) and StashClashed then
+    Result := False;
+end;
+
+{ A config value of ARoot, trimmed; '' when it is not set. }
+function ConfigIn(const ARoot, AKey: string): string;
+var
+  Err: string;
+begin
+  if not RunGitIn(ARoot, ['config', AKey], Result, Err) then
+    Result := '';
+  Result := Trim(Result);
+end;
+
+{ The remote a push of branch AName goes to, as git picks it:
+  branch.<name>.pushRemote, else remote.pushDefault, else AUpRemote (the
+  upstream's remote). ADest is the branch there: the upstream's (AMerge)
+  only when the push goes to the upstream's remote and the upstream has
+  the branch's own name, or push.default is upstream; else the branch's
+  own name. So a branch made from origin/main is never pushed onto main,
+  which git's own push (push.default simple) refuses as well. }
+function PushTarget(const ARoot, AName, AUpRemote, AMerge: string;
+  out ADest: string): string;
+var
+  Mode: string;
+begin
+  Result := ConfigIn(ARoot, 'branch.' + AName + '.pushRemote');
+  if Result = '' then
+    Result := ConfigIn(ARoot, 'remote.pushDefault');
+  if Result = '' then
+    Result := AUpRemote;
+  ADest := 'refs/heads/' + AName;
+  if (Result = AUpRemote) and (AMerge <> '') then
+  begin
+    Mode := LowerCase(ConfigIn(ARoot, 'push.default'));
+    if (AMerge = ADest) or (Mode = 'upstream') or (Mode = 'tracking') then
+      ADest := AMerge;
+  end;
 end;
 
 function TGittanRepo.Push(out ARejected: boolean): boolean;
 var
-  Name, Remote, Merge: string;
+  Name, Remote, Merge, Dest: string;
 begin
   ARejected := False;
   Result := False;
@@ -4779,26 +4865,36 @@ begin
     Exit;
   end;
   Name := Trim(Name);
-  if RunGit(FRoot, ['config', 'branch.' + Name + '.remote'], Remote) and
-    RunGit(FRoot, ['config', 'branch.' + Name + '.merge'], Merge) and
-    (Trim(Remote) <> '') and (Trim(Merge) <> '') and (Trim(Remote) <> '.') then
-    Result := RunRemote(['push', '--progress', Trim(Remote), 'HEAD:' + Trim(Merge)])
-  else if Trim(Remote) = '.' then
+  Remote := ConfigIn(FRoot, 'branch.' + Name + '.remote');
+  Merge := ConfigIn(FRoot, 'branch.' + Name + '.merge');
+  if (Remote = '.') or ((Remote <> '') and (Merge <> '')) then
   begin
-    { A branch tracking a local one: "." is the repository itself, and
-      a push there would move the local branch, not reach a server. The
-      branch goes to the remote under its own name, its upstream kept. }
-    Remote := RemoteFor('');
+    { "." is the repository itself (a branch tracking a local one): a push
+      there would move the local branch, not reach a server. The branch
+      goes to the remote under its own name, its upstream kept. }
+    if Remote = '.' then
+    begin
+      Remote := RemoteFor('');
+      Merge := '';
+    end;
+    if Remote <> '' then
+      Remote := PushTarget(FRoot, Name, Remote, Merge, Dest);
     if Remote = '' then
     begin
       FError := 'The repository has no remote to push to.';
       Exit;
     end;
-    Result := RunRemote(['push', '--progress', Remote, 'HEAD:refs/heads/' + Name]);
+    Result := RunRemote(['push', '--progress', Remote, 'HEAD:' + Dest]);
   end
   else
   begin
-    Remote := RemoteFor('');
+    { No upstream yet: where git would push it (branch.<name>.pushRemote,
+      remote.pushDefault), else the one remote or origin. }
+    Remote := ConfigIn(FRoot, 'branch.' + Name + '.pushRemote');
+    if Remote = '' then
+      Remote := ConfigIn(FRoot, 'remote.pushDefault');
+    if (Remote = '') or (Remote = '.') then
+      Remote := RemoteFor('');
     if Remote = '' then
     begin
       FError := 'The repository has no remote to push to.';
@@ -4815,7 +4911,7 @@ end;
   with "stale info" when the remote's branch is not there. }
 function TGittanRepo.ForcePush(out AStale, AUnseen: boolean): boolean;
 var
-  Name, Remote, Merge: string;
+  Name, Remote, Merge, Dest: string;
 begin
   AStale := False;
   AUnseen := False;
@@ -4843,15 +4939,17 @@ begin
   if Remote = '.' then
   begin
     Remote := RemoteFor('');
-    if Remote = '' then
-    begin
-      FError := 'The repository has no remote to push to.';
-      Exit;
-    end;
-    Merge := 'refs/heads/' + Name;
+    Merge := '';
+  end;
+  if Remote <> '' then
+    Remote := PushTarget(FRoot, Name, Remote, Merge, Dest);
+  if Remote = '' then
+  begin
+    FError := 'The repository has no remote to push to.';
+    Exit;
   end;
   Result := RunRemote(['push', '--progress', '--force-with-lease', '--force-if-includes',
-    Remote, 'HEAD:' + Merge]);
+    Remote, 'HEAD:' + Dest]);
   if not Result then
   begin
     AStale := Pos('stale info', FError) > 0;
@@ -4938,9 +5036,15 @@ begin
   Result := '';
   if FRoot = '' then
     Exit;
-  if HeadBranchIn(FRoot, Name) and
-    RunGit(FRoot, ['config', 'branch.' + Trim(Name) + '.remote'], Result) then
-    Result := Trim(Result);
+  if HeadBranchIn(FRoot, Name) then
+  begin
+    Name := Trim(Name);
+    Result := ConfigIn(FRoot, 'branch.' + Name + '.pushRemote');
+    if Result = '' then
+      Result := ConfigIn(FRoot, 'remote.pushDefault');
+    if Result = '' then
+      Result := ConfigIn(FRoot, 'branch.' + Name + '.remote');
+  end;
   { "." is the repository itself, for a branch tracking a local one. }
   if (Result = '') or (Result = '.') then
     Result := RemoteFor('');
@@ -5784,6 +5888,19 @@ begin
     AFastForward := IsAncestor('HEAD', ARef);
 end;
 
+{ --autostash puts the work tree's changes back after the rebase or pull,
+  and a clash there leaves files in conflict with git's exit code still 0
+  and git in the middle of nothing. }
+function TGittanRepo.StashClashed: boolean;
+var
+  Output, Ignored: string;
+begin
+  Result := (Operation = '') and RunGitIn(FRoot, ['ls-files', '-u'], Output, Ignored) and
+    (Trim(Output) <> '');
+  if Result then
+    FError := StashClashMessage;
+end;
+
 function TGittanRepo.RebaseOnto(const AOnto: string; out AConflicts: boolean): boolean;
 var
   Err: string;
@@ -5793,7 +5910,12 @@ begin
     Exit(False);
   Result := RunCommitting(Self, FRoot, ['rebase', '--autostash', AOnto], AConflicts, Err);
   if not Result then
-    FError := Err;
+    FError := Err
+  else if StashClashed then
+  begin
+    AConflicts := True;
+    Result := False;
+  end;
 end;
 
 { ---------------------------------------------------------------------------
@@ -5938,7 +6060,12 @@ begin
   end;
   CleanRebaseFiles;
   if not Result then
-    FError := Err;
+    FError := Err
+  else if StashClashed then
+  begin
+    AConflicts := True;
+    Result := False;
+  end;
 end;
 
 { git appends each todo line it has done to "done" in the rebase's
@@ -7651,6 +7778,7 @@ var
   Output, Ahead, Behind: string;
   Args: array of string;
   i: integer;
+  Born: boolean;
 begin
   ACommits := nil;
   SetLength(Args, Length(GraphLogArgs));
@@ -7661,8 +7789,13 @@ begin
     Args := Concat(Args, ['--first-parent']);
   if ANoMerges then
     Args := Concat(Args, ['--no-merges']);
-  Args := Concat(Args, ['--branches', '--remotes', '--tags', 'HEAD']);
-  Result := (FRoot <> '') and RunGit(FRoot, Args, Output);
+  Args := Concat(Args, ['--branches', '--remotes', '--tags']);
+  { An unborn HEAD (an orphan branch beside others) is no revision; with
+    no other branch either there is no history, as git log says. }
+  Born := CommitId('HEAD') <> '';
+  if Born then
+    Args := Concat(Args, ['HEAD']);
+  Result := (FRoot <> '') and RunGit(FRoot, Args, Output) and (Born or (Output <> ''));
   if not Result then
     Exit;
   if not RunGit(FRoot, ['rev-list', '-n', IntToStr(AMax), '@{upstream}..HEAD'], Ahead) then
@@ -7765,9 +7898,10 @@ end;
 function TGittanRepo.PathCommits(const APath: string; AHashes: TStrings;
   AMax: integer): boolean;
 var
-  Output: string;
+  Output, RefList: string;
   Args: array of string;
   n: integer;
+  Born: boolean;
 begin
   AHashes.Clear;
   if (FRoot = '') or (APath = '') then
@@ -7787,11 +7921,20 @@ begin
   Args[n] := '--branches';
   Args[n + 1] := '--remotes';
   Args[n + 2] := '--tags';
-  Args[n + 3] := 'HEAD';
-  Args[n + 4] := '--';
-  Args[n + 5] := APath;
-  SetLength(Args, n + 6);
-  Result := RunGit(FRoot, Args, Output);
+  Inc(n, 3);
+  { An unborn HEAD (an orphan branch beside others) is no revision; with
+    no other branch either there is no history, as git log says. }
+  Born := CommitId('HEAD') <> '';
+  if Born then
+  begin
+    Args[n] := 'HEAD';
+    Inc(n);
+  end;
+  Args[n] := '--';
+  Args[n + 1] := APath;
+  SetLength(Args, n + 2);
+  Result := RunGit(FRoot, Args, Output) and (Born or
+    (RunGit(FRoot, ['for-each-ref', '--count=1'], RefList) and (Trim(RefList) <> '')));
   if Result then
     AHashes.Text := Output;
 end;
@@ -8102,6 +8245,12 @@ begin
       touching HEAD changes alone, and Undo follows. }
     if RunGit(FRoot, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads'], Id) then
       Result := Result + Trim(Id) + #10;
+    { The tags and the remote branches, which the snapshot lists as well:
+      a tag made or a fetch run in a terminal changes them alone. A hash,
+      as a repository may have thousands. }
+    if RunGit(FRoot, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/tags',
+      'refs/remotes'], Id) then
+      Result := Result + 'refs ' + MD5Print(MD5String(Id)) + #10;
     { The stashes, which the status bar counts and lists. }
     if RunGit(FRoot, ['stash', 'list', '--format=%H'], Id) then
       Result := Result + 'stash ' + StringReplace(Trim(Id), #10, ' ', [rfReplaceAll]) + #10;
@@ -8202,7 +8351,8 @@ begin
       FileName := FullPath(APath);
       if FileExists(FileName) then
       begin
-        if RunGit(FRoot, ['ls-files', '--', APath], Tracked, CompareIndex) and
+        if RunGit(FRoot, ['--literal-pathspecs', 'ls-files', '--', APath], Tracked,
+          CompareIndex) and
           (Tracked <> '') then
           Marker := ' '
         else
@@ -8223,7 +8373,11 @@ begin
       if not InHunk then
         InHunk := Copy(Line, 1, 2) = '@@'
       else if (Line <> '') and (Line[1] in [' ', '+', '-']) then
-        ALines.Add(BareLine(Line));
+        ALines.Add(BareLine(Line))
+      else if (Line <> '') and (Line[1] = '\') and (ALines.Count > 0) then
+        { "\ No newline at end of file": the line before ends its side
+          without one, which Discard and Leave Out keep (NoNewlineMark). }
+        ALines.Objects[ALines.Count - 1] := NoNewlineMark;
   finally
     Raw.Free;
   end;

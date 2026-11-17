@@ -28,6 +28,7 @@ type
   TGittanNodeKind = class(TGittanProjectKind)
   public
     class function Name: string; override;
+    class function SemverRanges: boolean; override;
     class function Identify(const ARoot: string; out AManifest: string): boolean; override;
     class function DependencyFile(const ARoot: string): string; override;
     class function LockFile(const ARoot: string): string; override;
@@ -226,10 +227,17 @@ begin
       Key := Line;
       if Key[Length(Key)] = ':' then
         SetLength(Key, Length(Key) - 1);
+      { The first of several: berry quotes them together ("a@x, a@y"),
+        v1 each by itself ("a@x", "a@y"), so a quote is left at one end. }
       P := Pos(',', Key);
       if P > 0 then
         Key := Copy(Key, 1, P - 1);
-      Key := BareKey(Key);
+      { YAML lets berry's quotes be single ones too. }
+      Key := Trim(Key);
+      if (Key <> '') and (Key[1] in ['"', '''']) then
+        Delete(Key, 1, 1);
+      if (Key <> '') and (Key[Length(Key)] in ['"', '''']) then
+        SetLength(Key, Length(Key) - 1);
       Name := NameOfLockKey(Key);
       Continue;
     end;
@@ -249,7 +257,7 @@ end;
 
 function ParsePnpmLock(const AText: string): TGittanDependencies;
 var
-  Start, P, i: integer;
+  Start, P, Scope, Slash: integer;
   Line, Key, Name, Version: string;
   InPackages: boolean;
 begin
@@ -258,7 +266,10 @@ begin
   Start := 1;
   while NextLine(AText, Start, Line) do
   begin
-    if Line = '' then
+    { A blank line, or one of blanks, says nothing; a CRLF file's CR is
+      not part of the line. }
+    Line := BareLine(Line);
+    if Trim(Line) = '' then
       Continue;
     if Line[1] <> ' ' then
     begin
@@ -268,8 +279,8 @@ begin
     if not InPackages then
       Continue;
     { A key two spaces in: "/name@1.2.3:", "'name@1.2.3':",
-      "/name/1.2.3:" (the older form), with "(peer)" after the
-      version. }
+      "/name/1.2.3:" (the older form, "_peer@1.0.0" after the version
+      in lockfile 5), with "(peer)" after the version. }
     if (Length(Line) < 3) or (Line[1] <> ' ') or (Line[2] <> ' ') or (Line[3] = ' ') then
       Continue;
     Key := Trim(Line);
@@ -282,20 +293,24 @@ begin
     P := Pos('(', Key);
     if P > 0 then
       Key := Copy(Key, 1, P - 1);
-    Name := NameOfLockKey(Key);
-    if Name <> '' then
-      Version := Copy(Key, Length(Name) + 2, MaxInt)
+    { The older form has a slash after the name (and its scope); its
+      peers follow the version after "_" and hold an "@" of their own. }
+    Scope := 0;
+    if (Key <> '') and (Key[1] = '@') then
+      Scope := Pos('/', Key);
+    Slash := Pos('/', Copy(Key, Scope + 1, MaxInt));
+    if Slash > 1 then
+    begin
+      Name := Copy(Key, 1, Scope + Slash - 1);
+      Version := Copy(Key, Scope + Slash + 1, MaxInt);
+      P := Pos('_', Version);
+      if P > 0 then
+        SetLength(Version, P - 1);
+    end
     else
     begin
-      { "name/1.2.3": the version after the last slash that is not the
-        scope's. }
-      i := Length(Key);
-      while (i > 0) and (Key[i] <> '/') do
-        Dec(i);
-      if i < 2 then
-        Continue;
-      Name := Copy(Key, 1, i - 1);
-      Version := Copy(Key, i + 1, MaxInt);
+      Name := NameOfLockKey(Key);
+      Version := Copy(Key, Length(Name) + 2, MaxInt);
     end;
     if (Name <> '') and (Version <> '') then
       AddLocked(Result, Name, Version);
@@ -402,6 +417,11 @@ const
 class function TGittanNodeKind.Name: string;
 begin
   Result := 'Node';
+end;
+
+class function TGittanNodeKind.SemverRanges: boolean;
+begin
+  Result := True;
 end;
 
 class function TGittanNodeKind.Identify(const ARoot: string; out AManifest: string): boolean;

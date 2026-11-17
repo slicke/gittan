@@ -191,6 +191,15 @@ type
     class function Dependencies(const AText: string): TGittanDependencies; virtual;
     {** The packages the text of the lock file AName resolved. }
     class function Locked(const AName, AText: string): TGittanDependencies; virtual;
+    {** What two names of a package are compared by: the name as it is,
+      Python's normalized (PyYAML and pyyaml, typing_extensions and
+      typing-extensions are one package). }
+    class function NameKey(const AName: string): string; virtual;
+    {** Whether the manifest's ranges are SemVer's (npm, Cargo), where
+      a partial version with <= or > stands for all of its versions:
+      <=1.2 is below 1.3.0, >1.2 from 1.3.0. False: Python's, where 1.2
+      is 1.2.0. }
+    class function SemverRanges: boolean; virtual;
     {** The project's own version from the dependency file's text. }
     class function Version(const AText: string): string; virtual;
     {** The page of the package AName on the kind's registry; ''. }
@@ -289,13 +298,15 @@ function ChecksBlock(const AChecks: TGittanProjectChecks): TGittanProjectBlock;
 function DependencyShown(const ADependency: TGittanDependency): string;
 
 {** Fills each dependency's Resolved from the locked packages of the
-  same name. }
+  same name (its Package when it has one), as AKind's NameKey compares
+  them (as they are without a kind). }
 procedure ResolveDependencies(var ADependencies: TGittanDependencies;
-  const ALocked: TGittanDependencies);
+  const ALocked: TGittanDependencies; AKind: TGittanProjectKindClass = nil);
 
 {** How ANew's dependencies differ from AOld's, by name and group: the
   ones added and changed in ANew's order, then the ones removed. }
-function DependencyChanges(const AOld, ANew: TGittanDependencies): TGittanDependencyChanges;
+function DependencyChanges(const AOld, ANew: TGittanDependencies;
+  AKind: TGittanProjectKindClass = nil): TGittanDependencyChanges;
 
 {** The dependencies of AKind at the context's root, resolved by the
   lock file, and how they differ from those at Since (none without a
@@ -685,25 +696,153 @@ begin
   Result := 0;
 end;
 
-{ CompareVersionParts of two versions as written, a pre-release below
-  the release with the same numbers and a post-release above it. }
-function CompareVersions(const A, B: string): integer;
+{ -1 for a pre-release, 0 for the release, 1 for a post-release. }
+function VersionRank(const AVersion: string): integer;
+begin
+  if IsPreRelease(AVersion) then
+    Result := -1
+  else if IsPostRelease(AVersion) then
+    Result := 1
+  else
+    Result := 0;
+end;
 
-  { A pre-release, the release, a post-release. }
-  function Rank(const AVersion: string): integer;
+{ The parts of a suffix (VersionSuffix), without its local label or
+  build metadata: "beta", "2" of "beta.2", "rc", "1" of Python's "rc1".
+  SemVer's identifiers are split at dots alone: "beta2" is one. }
+function SuffixParts(const ASuffix: string; ASemver: boolean): TStringArray;
+var
+  S, Part: string;
+  i: integer;
+
+  procedure Add;
   begin
-    if IsPreRelease(AVersion) then
-      Result := -1
-    else if IsPostRelease(AVersion) then
-      Result := 1
-    else
-      Result := 0;
+    if Part <> '' then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Part;
+    end;
+    Part := '';
   end;
 
 begin
+  Result := nil;
+  S := ASuffix;
+  if Pos('+', S) > 0 then
+    S := Copy(S, 1, Pos('+', S) - 1);
+  Part := '';
+  for i := 1 to Length(S) do
+    if (S[i] = '.') or (not ASemver and (S[i] in ['-', '_'])) then
+      Add
+    else
+    begin
+      { A number and a word written together are two parts. }
+      if not ASemver and (Part <> '') and
+        ((S[i] in ['0'..'9']) <> (Part[1] in ['0'..'9'])) then
+        Add;
+      Part := Part + S[i];
+    end;
+  Add;
+end;
+
+{ -1, 0 or 1 as the suffix of a pre- or post-release A (VersionSuffix)
+  is below, equal to or above that of B, as SemVer and Python order
+  them: part by part, a number below a word, numbers by value, words
+  in the order dev, alpha (a), beta (b), rc (c, pre, preview), the
+  others by their letters; when one runs out first it is the lower.
+  SemVer (ASemver) has no such words: its identifiers that are not
+  numbers go by their letters alone, beta10 below beta2, and no dev. }
+function CompareSuffixes(const A, B: string; ASemver: boolean): integer;
+var
+  X, Y: TStringArray;
+  i: integer;
+
+  function KnownWord(const APart: string): string;
+  begin
+    if ASemver then
+      Result := APart
+    else if APart = 'dev' then
+      Result := #1
+    else if (APart = 'a') or (APart = 'alpha') then
+      Result := 'alpha'
+    else if (APart = 'b') or (APart = 'beta') then
+      Result := 'beta'
+    else if (APart = 'c') or (APart = 'pre') or (APart = 'preview') then
+      Result := 'rc'
+    else
+      Result := APart;
+  end;
+
+  function Number(const APart: string): string;
+  begin
+    { By value without overflow: no leading zeros, then the longer is
+      the greater. }
+    Result := APart;
+    while (Length(Result) > 1) and (Result[1] = '0') do
+      Delete(Result, 1, 1);
+  end;
+
+  function ComparePart(const P, Q: string): integer;
+  var
+    PNum, QNum: boolean;
+  begin
+    PNum := P[1] in ['0'..'9'];
+    QNum := Q[1] in ['0'..'9'];
+    if PNum <> QNum then
+      Exit(Ord(QNum) - Ord(PNum));
+    if PNum then
+    begin
+      Result := Length(Number(P)) - Length(Number(Q));
+      if Result = 0 then
+        Result := CompareStr(Number(P), Number(Q));
+    end
+    else
+      Result := CompareStr(KnownWord(P), KnownWord(Q));
+    if Result < 0 then
+      Result := -1
+    else if Result > 0 then
+      Result := 1;
+  end;
+
+begin
+  X := SuffixParts(A, ASemver);
+  Y := SuffixParts(B, ASemver);
+  { The longer is the higher (beta.1 past beta), but Python's .devN
+    goes before what it follows: 1.0a1.dev1 is below 1.0a1. }
+  for i := 0 to High(X) do
+  begin
+    if i > High(Y) then
+    begin
+      if not ASemver and (X[i] = 'dev') then
+        Exit(-1);
+      Exit(1);
+    end;
+    Result := ComparePart(X[i], Y[i]);
+    if Result <> 0 then
+      Exit;
+  end;
+  if Length(Y) > Length(X) then
+  begin
+    if not ASemver and (Y[Length(X)] = 'dev') then
+      Result := 1
+    else
+      Result := -1;
+  end
+  else
+    Result := 0;
+end;
+
+{ CompareVersionParts of two versions as written, a pre-release below
+  the release with the same numbers and a post-release above it; two
+  pre-releases (or post-releases) of it by their suffixes, beta.1 below
+  beta.2 and rc1, in SemVer's way or Python's (CompareSuffixes). }
+function CompareVersions(const A, B: string; ASemver: boolean): integer;
+begin
   Result := CompareVersionParts(VersionParts(A), VersionParts(B));
   if Result = 0 then
-    Result := Rank(A) - Rank(B);
+    Result := VersionRank(A) - VersionRank(B);
+  if (Result = 0) and (VersionRank(A) <> 0) then
+    Result := CompareSuffixes(VersionSuffix(A), VersionSuffix(B), ASemver);
 end;
 
 { Whether AVersion starts with the numbers of APrefix. }
@@ -719,15 +858,24 @@ begin
   Result := True;
 end;
 
+{ The local label of a suffix, what follows its "+". }
+function LocalLabel(const ASuffix: string): string;
+begin
+  if Pos('+', ASuffix) = 0 then
+    Result := ''
+  else
+    Result := Copy(ASuffix, Pos('+', ASuffix) + 1, MaxInt);
+end;
+
 { Whether AVersion meets one constraint of a requirement: ">=1.2",
   "<2", "==1.4", "~1.2" (or ~= of Python: the same 1.2), "^1.2" or a
   bare "1.2" (Cargo's and npm's caret: the same major, the same 0.x
   below 1), "!=1.3". One without a number ("*", "workspace", "latest")
   is met by every version. }
 function MeetsConstraint(const AVersion: TStringArray; const AText: string;
-  APreRelease: boolean; const AConstraint: string): boolean;
+  const AConstraint: string; ASemver: boolean): boolean;
 var
-  Op: string;
+  Op, Text, Suffix: string;
   Want, Prefix: TStringArray;
   i, c: integer;
   WantPre: boolean;
@@ -742,16 +890,39 @@ begin
   Want := VersionParts(Copy(AConstraint, i, MaxInt));
   if Length(Want) = 0 then
     Exit(True);
-  c := CompareVersionParts(AVersion, Want);
-  { 1.2.3-beta is below 1.2.3, unless the constraint names a pre-release
-    itself. }
-  WantPre := IsPreRelease(Copy(AConstraint, i, MaxInt));
-  if (c = 0) and APreRelease and not WantPre then
-    c := -1;
+  Text := Copy(AConstraint, i, MaxInt);
+  { A wildcard, 1.2.* or 1.2.x, is the versions that start so (npm's
+    ~1.2.x, Python's !=1.4.*), but npm's ^1.2.x is ^1.2, which goes on to
+    1.3.0: the caret below takes the numbers before the wildcard. }
+  if (Pos('*', Text) > 0) or (Pos('.x', LowerCase(Text)) > 0) then
+    if Op = '!=' then
+      Exit(not HasVersionPrefix(AVersion, Want))
+    else if (Op = '') or (Op = '=') or (Op = '==') or (Op = '~') or (Op = '~=') then
+      Exit(HasVersionPrefix(AVersion, Want));
+  WantPre := IsPreRelease(Text);
+  { 1.2.3-beta is below 1.2.3 and beta.2, Python's 1.4.post1 above 1.4
+    (<=1.4 and !=1.4 see it so). }
+  c := CompareVersions(AText, Text, ASemver);
+  { But 1.4.post1 is not >1.4: > leaves out the post-releases of the
+    version it names. }
+  if (Op = '>') and (VersionRank(AText) = 1) and (VersionRank(Text) = 0) and
+    (CompareVersionParts(AVersion, Want) = 0) then
+    c := 0;
+  Suffix := VersionSuffix(AText);
+  { ==1.4 is 1.4+cu118 too: a local label counts only when the
+    constraint has one. }
+  if (Op = '==') and (Pos('+', AConstraint) = 0) and (Pos('+', Suffix) > 0) then
+    Suffix := Copy(Suffix, 1, Pos('+', Suffix) - 1);
   if Op = '>=' then
     Result := c >= 0
+  else if ASemver and (Op = '>') and (Length(Want) < 3) and not WantPre then
+    { npm's and Cargo's >1.2 is past every 1.2.x. }
+    Result := (c > 0) and not HasVersionPrefix(AVersion, Want)
   else if Op = '>' then
     Result := c > 0
+  else if ASemver and (Op = '<=') and (Length(Want) < 3) and not WantPre then
+    { And <=1.2 is every 1.2.x too. }
+    Result := (c <= 0) or HasVersionPrefix(AVersion, Want)
   else if Op = '<=' then
     Result := c <= 0
   else if Op = '<' then
@@ -760,11 +931,15 @@ begin
     Result := c <> 0
   else if (Op = '===') or ((Op = '==') and (Pos('*', AConstraint) = 0)) then
     { Python's ==1.4 is 1.4 alone; ==1.4.* is 1.4.x. }
-    { 1.4.post1 is not ==1.4 either: what follows the numbers is the same. }
-    Result := (c = 0) and (VersionSuffix(AText) = VersionSuffix(Copy(AConstraint, i, MaxInt)))
+    { 1.4.post1 is not ==1.4 either: CompareVersions holds the suffixes
+      the same, alpha1 as a1; a local label must be the one asked for. }
+    Result := (c = 0) and (LocalLabel(Suffix) = LocalLabel(VersionSuffix(Text)))
+  else if ((Op = '=') or (Op = '==')) and WantPre then
+    { Cargo's and npm's =2.0.0-beta.1 is that pre-release alone. }
+    Result := c = 0
   else if (Op = '=') or (Op = '==') then
-    { Cargo's and npm's =1.2 is 1.2.x; =2.0.0-beta.1 a pre-release. }
-    Result := HasVersionPrefix(AVersion, Want) and (APreRelease or not WantPre)
+    { Cargo's and npm's =1.2 is 1.2.x. }
+    Result := HasVersionPrefix(AVersion, Want)
   else if (Op = '~') or (Op = '~=') then
   begin
     { ~1.2 is 1.2.x, ~1 is 1.x; Python's ~=1.4.2 is 1.4.x. }
@@ -786,15 +961,41 @@ end;
 { Whether AVersion meets a requirement as a manifest writes it: any of
   its "||" alternatives, each a list of constraints by commas or spaces
   (">=1.2, <2", ">=1.2 <2"). }
-function MeetsRequirement(const AVersion, ARequirement: string): boolean;
+{ Whether the pre-release AVersion may meet a range whose constraints
+  are AConstraints: only when one of them names a pre-release, of the
+  same numbers in SemVer (ASemver) as npm and Cargo have it, so <2 and
+  ^1.2 leave out 2.0.0-rc.1 and 1.6.0-beta; of any numbers in Python,
+  whose >=1.0rc1 takes 1.1rc1. Any other version may. }
+function PreReleaseAllowed(const AVersion: string; const AConstraints: array of string;
+  ASemver: boolean): boolean;
+var
+  k, i: integer;
+  Text: string;
+begin
+  if not IsPreRelease(AVersion) then
+    Exit(True);
+  for k := 0 to High(AConstraints) do
+  begin
+    Text := Trim(AConstraints[k]);
+    i := 1;
+    while (i <= Length(Text)) and (Text[i] in ['<', '>', '=', '!', '~', '^', 'v']) do
+      Inc(i);
+    Text := Copy(Text, i, MaxInt);
+    if (VersionParts(Text) <> nil) and IsPreRelease(Text) and (not ASemver or
+      (CompareVersionParts(VersionParts(Text), VersionParts(AVersion)) = 0)) then
+      Exit(True);
+  end;
+  Result := False;
+end;
+
+function MeetsRequirement(const AVersion, ARequirement: string; ASemver: boolean): boolean;
 var
   Version, Alternatives, Constraints, Upper: TStringArray;
   Req, UpperText: string;
   i, k, p: integer;
-  All, Pre, InRange: boolean;
+  All, InRange: boolean;
 begin
   Version := VersionParts(AVersion);
-  Pre := IsPreRelease(AVersion);
   { An operator and its number are one constraint: ">= 1.2". }
   Req := '';
   for i := 1 to Length(ARequirement) do
@@ -814,37 +1015,56 @@ begin
       { A pre-release as the end is a whole version: 2.0.0 is past
         2.0.0-beta.1. }
       if IsPreRelease(UpperText) then
-        InRange := CompareVersions(AVersion, UpperText) <= 0
+        InRange := CompareVersions(AVersion, UpperText, ASemver) <= 0
       else
         InRange := (CompareVersionParts(Version, Upper) <= 0) or
           HasVersionPrefix(Version, Upper);
       if InRange and
-        MeetsConstraint(Version, AVersion, Pre, '>=' + Trim(Copy(Alternatives[i], 1, p - 1))) then
+        MeetsConstraint(Version, AVersion, '>=' + Trim(Copy(Alternatives[i], 1, p - 1)), ASemver) and
+        PreReleaseAllowed(AVersion, [Copy(Alternatives[i], 1, p - 1), UpperText], ASemver) then
         Exit(True);
       Continue;
     end;
     Constraints := Alternatives[i].Split([',', ' '], TStringSplitOptions.ExcludeEmpty);
     All := True;
     for k := 0 to High(Constraints) do
-      if not MeetsConstraint(Version, AVersion, Pre, Constraints[k]) then
+      if not MeetsConstraint(Version, AVersion, Constraints[k], ASemver) then
         All := False;
-    if All then
+    if All and PreReleaseAllowed(AVersion, Constraints, ASemver) then
       Exit(True);
   end;
   Result := Length(Alternatives) = 0;
 end;
 
+function KeyOf(AKind: TGittanProjectKindClass; const AName: string): string;
+begin
+  if AKind = nil then
+    Result := AName
+  else
+    Result := AKind.NameKey(AName);
+end;
+
 procedure ResolveDependencies(var ADependencies: TGittanDependencies;
-  const ALocked: TGittanDependencies);
+  const ALocked: TGittanDependencies; AKind: TGittanProjectKindClass);
 var
   i, j, Count, Best: integer;
+  Keys: TStringArray;
+  Want: string;
 begin
+  Keys := nil;
+  SetLength(Keys, Length(ALocked));
+  for j := 0 to High(ALocked) do
+    Keys[j] := KeyOf(AKind, ALocked[j].Name);
   for i := 0 to High(ADependencies) do
   begin
     Count := 0;
     Best := -1;
+    if ADependencies[i].Package <> '' then
+      Want := KeyOf(AKind, ADependencies[i].Package)
+    else
+      Want := KeyOf(AKind, ADependencies[i].Name);
     for j := 0 to High(ALocked) do
-      if ALocked[j].Name = ADependencies[i].Name then
+      if Keys[j] = Want then
       begin
         Inc(Count);
         Best := j;
@@ -856,8 +1076,9 @@ begin
         when none meets it, rather than one that is wrong. }
       Best := -1;
       for j := 0 to High(ALocked) do
-        if (ALocked[j].Name = ADependencies[i].Name) and
-          MeetsRequirement(ALocked[j].Resolved, ADependencies[i].Version) then
+        if (Keys[j] = Want) and
+          MeetsRequirement(ALocked[j].Resolved, ADependencies[i].Version,
+          (AKind <> nil) and AKind.SemverRanges) then
         begin
           if ALocked[j].Resolved = ADependencies[i].Version then
           begin
@@ -865,7 +1086,7 @@ begin
             Break;
           end;
           if (Best < 0) or (CompareVersions(ALocked[j].Resolved,
-            ALocked[Best].Resolved) > 0) then
+            ALocked[Best].Resolved, (AKind <> nil) and AKind.SemverRanges) > 0) then
             Best := j;
         end;
     end;
@@ -874,10 +1095,16 @@ begin
   end;
 end;
 
-function DependencyChanges(const AOld, ANew: TGittanDependencies): TGittanDependencyChanges;
+function DependencyChanges(const AOld, ANew: TGittanDependencies;
+  AKind: TGittanProjectKindClass): TGittanDependencyChanges;
 var
   i, j: integer;
   Found: boolean;
+
+  function Same(const A, B: TGittanDependency): boolean;
+  begin
+    Result := (A.Group = B.Group) and (KeyOf(AKind, A.Name) = KeyOf(AKind, B.Name));
+  end;
 
   procedure Add(const AName, AGroup, AOldVersion, ANewVersion: string;
     AKind: TGittanDependencyChangeKind);
@@ -896,7 +1123,7 @@ begin
   begin
     Found := False;
     for j := 0 to High(AOld) do
-      if (AOld[j].Name = ANew[i].Name) and (AOld[j].Group = ANew[i].Group) then
+      if Same(AOld[j], ANew[i]) then
       begin
         Found := True;
         if DependencyShown(AOld[j]) <> DependencyShown(ANew[i]) then
@@ -911,7 +1138,7 @@ begin
   begin
     Found := False;
     for i := 0 to High(ANew) do
-      if (AOld[j].Name = ANew[i].Name) and (AOld[j].Group = ANew[i].Group) then
+      if Same(AOld[j], ANew[i]) then
       begin
         Found := True;
         Break;
@@ -960,7 +1187,8 @@ begin
   ADependencies := AKind.Dependencies(TextOf(AContext.Root, DepFile));
   LockName := AKind.LockFile(AContext.Root);
   if LockName <> '' then
-    ResolveDependencies(ADependencies, AKind.Locked(LockName, TextOf(AContext.Root, LockName)));
+    ResolveDependencies(ADependencies, AKind.Locked(LockName, TextOf(AContext.Root, LockName)),
+      AKind);
   if AContext.Since = '' then
     Exit;
   { The tag's files under the names they had there: a project that
@@ -970,8 +1198,8 @@ begin
   Old := AKind.Dependencies(OldText);
   OldLockName := FileAtSince(AContext, LockName, AKind.LockFileNames, OldLock);
   if OldLockName <> '' then
-    ResolveDependencies(Old, AKind.Locked(OldLockName, OldLock));
-  AChanges := DependencyChanges(Old, ADependencies);
+    ResolveDependencies(Old, AKind.Locked(OldLockName, OldLock), AKind);
+  AChanges := DependencyChanges(Old, ADependencies, AKind);
 end;
 
 function GroupTitle(const AGroup: string): string;
@@ -1087,6 +1315,8 @@ begin
   inherited Destroy;
 end;
 
+function WithoutBom(const AText: string): string; forward;
+
 function TGittanProjectContext.ReadAt(const APath: string): string;
 begin
   Result := '';
@@ -1164,7 +1394,9 @@ var
 begin
   if (Since = '') or (APath = '') or not RunGitIn(Root, ['cat-file', 'blob',
     Since + ':' + APath], Result, Err) then
-    Result := '';
+    Result := ''
+  else
+    Result := WithoutBom(Result);
 end;
 
 function TGittanGitProjectContext.GitlinkAt(const APath, ARef: string): string;
@@ -1241,6 +1473,16 @@ end;
 class function TGittanProjectKind.Locked(const AName, AText: string): TGittanDependencies;
 begin
   Result := nil;
+end;
+
+class function TGittanProjectKind.NameKey(const AName: string): string;
+begin
+  Result := AName;
+end;
+
+class function TGittanProjectKind.SemverRanges: boolean;
+begin
+  Result := False;
 end;
 
 class function TGittanProjectKind.Version(const AText: string): string;
@@ -1354,12 +1596,23 @@ begin
   Result := DirectoryExists(RootFile(ARoot, AName));
 end;
 
+{ The text without a UTF-8 byte order mark in front, which Notepad
+  writes and npm and pip skip: fpjson refuses it, and it would stick to
+  a requirements file's first name. }
+function WithoutBom(const AText: string): string;
+begin
+  if Copy(AText, 1, 3) = #$EF#$BB#$BF then
+    Result := Copy(AText, 4, MaxInt)
+  else
+    Result := AText;
+end;
+
 function TextOf(const ARoot, AName: string): string;
 begin
   Result := '';
   if HasFile(ARoot, AName) then
     try
-      Result := ReadFileBytes(RootFile(ARoot, AName));
+      Result := WithoutBom(ReadFileBytes(RootFile(ARoot, AName)));
     except
       { Gone or locked since HasFile looked: as if it were not there. }
       Result := '';

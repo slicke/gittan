@@ -509,6 +509,9 @@ begin
   AssertEquals('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEx', PublicKeyOf(FDir + PathDelim + 'b.pub'));
   AssertEquals('ssh-ed25519 AAAA', PublicKeyOf('key::ssh-ed25519 AAAA comment'));
   AssertEquals('ssh-ed25519 AAAA', PublicKeyOf('ssh-ed25519 AAAA'));
+  { A line break or a wildcard in a forge's key is no key. }
+  AssertEquals('', PublicKeyOf('key::ssh-ed25519'#10'*'#9'ssh-ed25519'#9'AAAA x'));
+  AssertEquals('', PublicKeyOf('key::ssh-ed25519 AA*A'));
   AssertEquals('', PublicKeyOf('ABCDEF'));
   AssertEquals('', PublicKeyOf(FDir + PathDelim + 'nope.pub'));
   { A private key file gives the public key beside it, or nothing. }

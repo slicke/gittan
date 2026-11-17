@@ -168,6 +168,23 @@ begin
   Result := False;
 end;
 
+{ AText as a .gitignore pattern that matches it alone: the glob
+  characters and the backslash escaped (pages/[id].tsx is that file, not
+  pages/d.tsx), and a space at the end, which git drops, too. }
+function IgnoreLiteral(const AText: string): string;
+var
+  i: integer;
+begin
+  Result := '';
+  for i := 1 to Length(AText) do
+    if AText[i] in ['[', ']', '*', '?', '\'] then
+      Result := Result + '\' + AText[i]
+    else if (AText[i] = ' ') and (Trim(Copy(AText, i, MaxInt)) = '') then
+      Result := Result + '\ '
+    else
+      Result := Result + AText[i];
+end;
+
 function IgnorePatterns(const APath: string): TStringArray;
 var
   Ext, Dir: string;
@@ -176,19 +193,19 @@ begin
   if APath = '' then
     Exit;
   SetLength(Result, 1);
-  Result[0] := '/' + APath;
+  Result[0] := '/' + IgnoreLiteral(APath);
   Ext := ExtractFileExt(APath);
   { A dotfile's "extension" is its whole name. }
   if (Ext <> '') and (Ext <> ExtractFileName(APath)) then
   begin
     SetLength(Result, Length(Result) + 1);
-    Result[High(Result)] := '*' + Ext;
+    Result[High(Result)] := '*' + IgnoreLiteral(Ext);
   end;
   Dir := ExtractFilePath(APath);
   if Dir <> '' then
   begin
     SetLength(Result, Length(Result) + 1);
-    Result[High(Result)] := '/' + Dir;
+    Result[High(Result)] := '/' + IgnoreLiteral(Dir);
   end;
 end;
 

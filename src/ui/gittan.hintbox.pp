@@ -64,6 +64,9 @@ type
     {** The fill and the edge of the box, then those of a warning; the
       text takes Font.Color. }
     procedure SetColors(ABack, ALine, AWarnBack, AWarnLine: TColor);
+    {** The height the box takes AWidth wide, as it would wrap there:
+      for one hidden, whose own width has not followed its parent's. }
+    function HeightFor(AWidth: integer): integer;
     property Text: string read FText write SetText;
     {** Where Icon comes from. }
     property Images: TCustomImageList read FImages write SetImages;
@@ -245,11 +248,16 @@ begin
     Inc(Result, Px(LinkGap) + C.TextHeight('Xg'));
 end;
 
+function TGittanHintBox.HeightFor(AWidth: integer): integer;
+begin
+  Result := Max(TextHeight(AWidth - TextLeft - Px(PadX)), Px(IconSize)) + 2 * Px(PadY);
+end;
+
 procedure TGittanHintBox.CalculatePreferredSize(var PreferredWidth,
   PreferredHeight: integer; WithThemeSpace: boolean);
 begin
   PreferredWidth := Width;
-  PreferredHeight := Max(TextHeight(Width - TextLeft - Px(PadX)), Px(IconSize)) + 2 * Px(PadY);
+  PreferredHeight := HeightFor(Width);
 end;
 
 { A new width wraps the text anew. }

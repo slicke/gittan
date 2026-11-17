@@ -259,9 +259,10 @@ end;
 procedure TGittanWelcome.SetRecent(ARoots: TStrings);
 begin
   FRecent.Assign(ARoots);
-  { The rows of the last paint are not these. }
+  { The rows of the last paint are not these, nor the one pressed. }
   FRowRects := nil;
   FHot := hotNone;
+  FDown := hotNone;
   Layout;
   Invalidate;
 end;

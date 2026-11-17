@@ -240,6 +240,10 @@ var
 begin
   if not CanPullAction(APull, AAction) or not AskPullAction(APull, AAction, Words) then
     Exit;
+  { The watcher runs in the dialog's loop, and a remote changed meanwhile
+    takes the forge away (ReFindForge). }
+  if not PullActsNow then
+    Exit;
   FPullActionJob := FForge.ActionJob(FRepo.Root, APull.Repo, APull.Number, AAction, Words);
   if FPullActionJob = nil then
     Exit;

@@ -32,6 +32,7 @@ begin
   FRepoTree.Images := TreeImages;
   FRepoTree.ReadOnly := True;
   FRepoTree.Options := FileTree.Options;
+  FRepoTree.ScrollBars := FileTree.ScrollBars;
   FRepoTree.OnSelectionChanged := @RepoTreeSelectionChanged;
   FRepoTree.Align := alClient;
   FRepoTree.Parent := FRepoPanel;
@@ -133,10 +134,62 @@ end;
   each while both the Repository and the Submodules sections show. The
   tree of changed files gives way last: it keeps room for its rows as
   long as the open sections keep MinSectionRows each. }
+{ The Commit section gives up room before it runs over the headers and
+  the tree of changed files above it, which a high DPI in a low window
+  did (the page rows, the filter field and a tall tip left the tree
+  nothing and hid the Changes and Commit headings): first the tick tip
+  goes, it can be read again with more room, then the message box
+  shrinks down to CommitMemoMin. A note that says something of this
+  commit stays. }
+procedure TRepoFrame.FitCommitPanel;
+var
+  Avail, Full, Over, MemoFull, MemoLeast: integer;
+  TipWanted, TipShown, NoRoom: boolean;
+begin
+  if FFittingCommit or (FCommitPanel = nil) or not FCommitPanel.Visible then
+    Exit;
+  Avail := FTreePanel.ClientHeight - Px(MinFileTree);
+  if FSideNav <> nil then
+    Dec(Avail, FSideNav.Top + FSideNav.Height);
+  if FRepoPanel.Visible then
+    Dec(Avail, FRepoHeader.Height);
+  if (FSubPanel <> nil) and FSubPanel.Visible then
+    Dec(Avail, FSubHeader.Height);
+  TipWanted := FCommitBox.Visible and (FCommitNote.Text = rsCommitTickHint);
+  TipShown := TipWanted and FCommitNote.Visible;
+  { The tip hidden is measured at the width it would have now: the
+    sidebar may have been made narrower since it was shown. }
+  if TipShown then
+    FTipHeight := FCommitNote.Height + FCommitNote.BorderSpacing.Top
+  else if TipWanted then
+    FTipHeight := FCommitNote.HeightFor(FCommitNote.Parent.ClientWidth -
+      FCommitNote.BorderSpacing.Left - FCommitNote.BorderSpacing.Right -
+      2 * FCommitNote.BorderSpacing.Around) + FCommitNote.BorderSpacing.Top;
+  MemoFull := Px(CommitMemoHeight);
+  MemoLeast := Px(CommitMemoMin);
+  { The panel's height with the whole message box and the tip. }
+  Full := FCommitPanel.Height;
+  if FCommitBox.Visible then
+    Inc(Full, MemoFull - FCommitMemo.Height);
+  if TipWanted and not TipShown then
+    Inc(Full, FTipHeight);
+  Over := Full - Avail;
+  NoRoom := TipWanted and (Over > 0);
+  if NoRoom then
+    Dec(Over, FTipHeight);
+  FFittingCommit := True;
+  try
+    FTipNoRoom := NoRoom;
+    if TipWanted then
+      FCommitNote.Visible := not NoRoom;
+    FCommitMemo.Height := MemoFull - EnsureRange(Over, 0, MemoFull - MemoLeast);
+  finally
+    FFittingCommit := False;
+  end;
+end;
+
 procedure TRepoFrame.LayoutRepoFiles;
 const
-  { The least the tree of changed files keeps of the panel. }
-  MinFileTree = 80;
   { The rows an open section keeps before the tree of changed files
     gives up any of its own. }
   MinSectionRows = 2;
@@ -183,6 +236,7 @@ var
   end;
 
 begin
+  FitCommitPanel;
   Limit := FTreePanel.ClientHeight div 2;
   if (FSubPanel <> nil) and FSubPanel.Visible and FRepoPanel.Visible then
     Limit := FTreePanel.ClientHeight div 3;
@@ -509,7 +563,18 @@ begin
     if AskDlg(rsAppName, Format(rsSaveAsk, [ExtractFileName(FEditPath)]),
       mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave,
       'NoCancel'], 0) = mrYes then
-      SaveEdit(False)
+    begin
+      { A failed save (a locked or read-only file) asks again: the caller
+        replaces the text next, so giving up has to be the user's word. }
+      while not SaveEdit(False) do
+        if AskDlg(rsAppName, Format(rsSaveFailedAsk, [ExtractFileName(FEditPath)]),
+          mtWarning, [mrYes, rsSaveAgain, 'IsDefault', mrNo, rsDontSave,
+          'NoCancel'], 0) <> mrYes then
+        begin
+          Edit.Modified := False;
+          Break;
+        end;
+    end
     else
       Edit.Modified := False;
   finally
@@ -686,7 +751,10 @@ begin
         mtConfirmation, [mrYes, rsSaveAction, 'IsDefault', mrNo, rsDontSave,
         mrCancel, rsCancelButton, 'IsCancel'], 0) of
       mrYes: CanClose := SaveEdit(False);
-      mrNo: Edit.Modified := False;
+      { Don't Save leaves the edits marked: another tab may still cancel
+        the quit, and they must be asked for again then. Nothing reads
+        the mark once the window closes. }
+      mrNo: ;
       else
         CanClose := False;
     end;

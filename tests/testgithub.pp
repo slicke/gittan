@@ -531,12 +531,19 @@ procedure TGitHubTest.TestWebArgs;
     Result := string.Join(' ', AArgs);
   end;
 
+var
+  Args: TStringArray;
 begin
-  AssertEquals('src/a.pp', Joined(GitHubWebArgs(FileTarget('src/a.pp', 0, '', ''))));
-  AssertEquals('src/a.pp:12 --branch main',
+  AssertEquals('-- src/a.pp', Joined(GitHubWebArgs(FileTarget('src/a.pp', 0, '', ''))));
+  AssertEquals('--branch=main -- src/a.pp:12',
     Joined(GitHubWebArgs(FileTarget('src/a.pp', 12, '', 'main'))));
+  { A file named like a flag: "--" and "-s" are two arguments. }
+  Args := GitHubWebArgs(FileTarget('-s', 0, '', ''));
+  AssertEquals('a file named like a flag', 2, Length(Args));
+  AssertEquals('--', Args[0]);
+  AssertEquals('-s', Args[1]);
   { A commit wins over the branch. }
-  AssertEquals('src/a.pp:3 --commit=abc123',
+  AssertEquals('--commit=abc123 -- src/a.pp:3',
     Joined(GitHubWebArgs(FileTarget('src/a.pp', 3, 'abc123', 'main'))));
   AssertEquals('abc123', Joined(GitHubWebArgs(CommitTarget('abc123'))));
   AssertEquals('42', Joined(GitHubWebArgs(IssueTarget(42))));

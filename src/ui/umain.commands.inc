@@ -235,6 +235,7 @@ end;
 procedure TRepoFrame.AbandonCommandJob(AWait: boolean);
 var
   Job: TGittanCommandJob;
+  Elapsed: int64;
 begin
   if FCommandJob = nil then
     Exit;
@@ -242,6 +243,8 @@ begin
   FCommandJob := nil;
   Job.Kill;
   Job.Stop(AWait);
+  { Read before a wait frees the job. }
+  Elapsed := Job.ElapsedMs;
   if AWait then
     Job.Free
   else
@@ -250,7 +253,7 @@ begin
     Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
   end;
   FCommandPage.Console.FollowEnd := False;
-  FCommandPage.SetRun(FCommandName, FCommandSource, FCommandProject, False, -1, Job.ElapsedMs,
+  FCommandPage.SetRun(FCommandName, FCommandSource, FCommandProject, False, -1, Elapsed,
     True, True);
 end;
 

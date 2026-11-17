@@ -706,7 +706,7 @@ end;
 
 procedure TRepoFrame.SkipOperationClick(Sender: TObject);
 begin
-  if (FRepo.Root = '') or not ContinueMode then
+  if (FRepo.Root = '') or not ContinueMode or (FCommitJob <> nil) or (FRemoteJob <> nil) then
     Exit;
   if AskDlg(rsSkipTitle, rsSkipAsk, mtConfirmation,
     [mrYes, rsSkipButton, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) <> mrYes then
@@ -725,7 +725,8 @@ procedure TRepoFrame.AbortOperationClick(Sender: TObject);
 var
   Noun: string;
 begin
-  if (FRepo.Root = '') or ((FOperation = '') and not FSquashPending) then
+  if (FRepo.Root = '') or ((FOperation = '') and not FSquashPending) or (FCommitJob <> nil) or
+    (FRemoteJob <> nil) then
     Exit;
   if FOperation = '' then
     Noun := rsNounSquash

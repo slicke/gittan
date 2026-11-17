@@ -1098,6 +1098,23 @@ begin
   AssertTrue('numbers copied', ApplyFixEdits(Lines, Edits, New, Error));
   AssertEquals(3, Length(New));
   AssertEquals('end', New[2]);
+  { The replacement numbered too: the numbers are not written. }
+  Edits[0].Find := ['3:   b := 2;', '4:'];
+  Edits[0].Replace := ['3:   b := 5;'];
+  Lines := ['begin', '  a := 1;', '  b := 2;', '', 'end'];
+  AssertTrue(Error, ApplyFixEdits(Lines, Edits, New, Error));
+  AssertEquals(4, Length(New));
+  AssertEquals('  b := 5;', New[2]);
+  { A replacement whose lines merely start with a number and a colon,
+    not where the find's numbers start, is the code itself: a case label. }
+  Edits[0].Find := ['3:   b := 2;'];
+  Edits[0].Replace := ['1: x := 2;'];
+  AssertTrue(Error, ApplyFixEdits(Lines, Edits, New, Error));
+  AssertEquals('the label kept', '1: x := 2;', New[2]);
+  { Numbers that do not count up are not FixInput's. }
+  Edits[0].Find := ['3:   b := 2;', '7:'];
+  AssertFalse('not numbered lines', ApplyFixEdits(Lines, Edits, New, Error));
+  Lines := ['begin', '  a := 1;', '  b := 2;  ', '  a := 1;', 'end'];
   Edits[0].Find := ['  a := 1;'];
   AssertFalse('twice', ApplyFixEdits(Lines, Edits, New, Error));
   AssertTrue(Error, Pos('2 times', Error) > 0);

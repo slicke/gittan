@@ -303,6 +303,44 @@ JS_PARAM_OK = -1;
 
 implementation
 
+const
+  { The most console lines kept until console.pop shows them: a script
+    logging in a loop would otherwise grow the list outside the JS heap's
+    limit until the watchdog stops it. The oldest go first. }
+  MaxConsoleLines = 1000;
+  { The longest line kept, in bytes; a longer one ends in an ellipsis. }
+  MaxConsoleLineBytes = 2000;
+
+procedure AddConsoleLine(const ALine: string);
+var
+  Lines: TStringArray;
+  Line: string;
+  Cut: integer;
+begin
+  if ConsoleBuffer = nil then
+    ConsoleBuffer := TStringList.Create;
+  { Each line of the entry counts, so the cap holds what is shown, and
+    each is cut, so a megabyte logged a thousand times stays small. }
+  Lines := ALine.Split([#10]);
+  if Lines = nil then
+    Lines := TStringArray.Create('');
+  for Line in Lines do
+  begin
+    while ConsoleBuffer.Count >= MaxConsoleLines do
+      ConsoleBuffer.Delete(0);
+    if Length(Line) <= MaxConsoleLineBytes then
+      ConsoleBuffer.Add(Line)
+    else
+    begin
+      { Not inside a UTF-8 character. }
+      Cut := MaxConsoleLineBytes;
+      while (Cut > 0) and (Ord(Line[Cut + 1]) and $C0 = $80) do
+        Dec(Cut);
+      ConsoleBuffer.Add(Copy(Line, 1, Cut) + '…');
+    end;
+  end;
+end;
+
 {------------------------------------------------------------------------------
   ExtError
   Extension-flavoured error reports. Thin wrappers that supply the extension
@@ -1100,10 +1138,7 @@ begin
   if fullMsg = '' then
     fullMsg := RS_LOG_EMPTY_MSG;
   
-  if ConsoleBuffer = nil then
-    ConsoleBuffer := TStringList.Create;
-
-  ConsoleBuffer.Add(ConsoleAttribution(ctx) + fullMsg);
+  AddConsoleLine(ConsoleAttribution(ctx) + fullMsg);
 
   // Return undefined
   res^ := JS_UNDEFINED;
@@ -1140,9 +1175,7 @@ begin
   if fullMsg = '' then
     fullMsg := RS_LOG_EMPTY_MSG;
 
-  if ConsoleBuffer = nil then
-    ConsoleBuffer := TStringList.Create;
-  ConsoleBuffer.Add(ConsoleAttribution(ctx) + '[' + level + '] ' + fullMsg);
+  AddConsoleLine(ConsoleAttribution(ctx) + '[' + level + '] ' + fullMsg);
 
   Result := JS_UNDEFINED;
 end;

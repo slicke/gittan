@@ -330,6 +330,14 @@ begin
   end;
 end;
 
+function ZeroIfNone(const APart: string): string;
+begin
+  if APart = '' then
+    Result := '0'
+  else
+    Result := APart;
+end;
+
 function ReadLazProject(const AXml: string): TLazProject;
 var
   Doc: TXMLDocument;
@@ -406,15 +414,21 @@ begin
         Item := TDOMElement(List[i]);
         Name := ValueAt(Item, 'PackageName');
         Min := '';
+        { Lazarus leaves out a part that is 0 (0.1.1 has no Major), and
+          Release and Build count too: 2.4.1 is not 2.4. }
         if Child(Item, 'MinVersion') <> nil then
         begin
           Major := Attr(Child(Item, 'MinVersion'), 'Major');
           Minor := Attr(Child(Item, 'MinVersion'), 'Minor');
-          if Major <> '' then
+          Rev := Attr(Child(Item, 'MinVersion'), 'Release');
+          Build := Attr(Child(Item, 'MinVersion'), 'Build');
+          if (Major <> '') or (Minor <> '') or (Rev <> '') or (Build <> '') then
           begin
-            Min := '>= ' + Major;
-            if Minor <> '' then
-              Min := Min + '.' + Minor;
+            Min := '>= ' + ZeroIfNone(Major) + '.' + ZeroIfNone(Minor);
+            if (Rev <> '') or (Build <> '') then
+              Min := Min + '.' + ZeroIfNone(Rev);
+            if Build <> '' then
+              Min := Min + '.' + Build;
           end;
         end;
         AddDependency(Result.Packages, Name, Min, '', '');

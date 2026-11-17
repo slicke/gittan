@@ -55,14 +55,24 @@ var
   Found: array of boolean;
   Cr: string;
   i, k, Old, Next, Left, Emitted: integer;
-  FinalNewline: boolean;
+  FinalNewline, EndNewline: boolean;
 
-  procedure Emit(const ALine: string);
+  { ALine goes into the result; ABare when no newline may follow it,
+    as the last line of a side git marks so. }
+  procedure Emit(const ALine: string; ABare: boolean);
   begin
     if Emitted > 0 then
       Out.Append(#10);
     Out.Append(ALine);
     Inc(Emitted);
+    EndNewline := not ABare;
+  end;
+
+  { The file's line Next goes into the result: the file's own last
+    newline, or not, when it is the last. }
+  procedure EmitFileLine;
+  begin
+    Emit(FileLines[Next], (Next = FileLines.Count - 1) and not FinalNewline);
   end;
 
   { The file's next line, which must be the added line ANew; it is put
@@ -73,7 +83,7 @@ var
     if not Result then
       Exit;
     if AUse then
-      Emit(FileLines[Next]);
+      EmitFileLine;
     Inc(Next);
   end;
 
@@ -104,6 +114,7 @@ begin
       Cr := #13;
     Next := 0;
     Emitted := 0;
+    EndNewline := True;
     i := 0;
     while i < ALines.Count do
     begin
@@ -113,7 +124,7 @@ begin
           may show it as HEAD has it. }
         if Next >= FileLines.Count then
           Exit;
-        Emit(FileLines[Next]);
+        EmitFileLine;
         Inc(Next);
         Inc(i);
         Continue;
@@ -130,8 +141,12 @@ begin
           Left := Match[i + Old + k];
         if (Left >= 0) <> AOthers then
         begin
+          { A bare last line gets no CR either: it ends the file. }
           if Pairs[k].HasOld then
-            Emit(Pairs[k].Old + Cr);
+            if HasNoNewline(ALines, i + k) then
+              Emit(Pairs[k].Old, True)
+            else
+              Emit(Pairs[k].Old + Cr, False);
           if Pairs[k].HasNew and not Take(Pairs[k].New, False) then
             Exit;
         end
@@ -143,7 +158,9 @@ begin
     end;
     if Next <> FileLines.Count then
       Exit;
-    if (Emitted > 0) and FinalNewline then
+    { The end as the last line put in it has it: an old line put back
+      as the old side ended, a line of the file as the file does. }
+    if (Emitted > 0) and EndNewline then
       Out.Append(#10);
     AResult := Out.ToString;
     AError := '';

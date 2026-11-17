@@ -560,17 +560,28 @@ begin
 end;
 
 { A merge that does not commit leaves its conflicts in the index (the
-  unmerged entries ls-files -u lists). }
+  unmerged entries ls-files -u lists). Git takes a tag before a branch of
+  the same name, so with such a tag the branch is merged by its full name,
+  under the message git gives the short one. }
 function MergeInto(const ARoot, ABranch, ATarget: string; out AConflicts: boolean;
   out AError: string): boolean;
 var
-  Output, Ignored: string;
+  Output, Ignored, Message: string;
 begin
   AConflicts := False;
   if not SwitchTo(ARoot, ATarget, AError) then
     Exit(False);
-  Result := RunGitEnv(ARoot, WithConflictStyle(ARoot, ['merge', '--no-ff', '--no-edit', ABranch]),
-    ['GIT_EDITOR=:'], Output, AError);
+  if HasRef(ARoot, 'refs/tags/' + ABranch) then
+  begin
+    Message := Format('Merge branch ''%s''', [ABranch]);
+    if (ATarget <> 'main') and (ATarget <> 'master') then
+      Message := Message + ' into ' + ATarget;
+    Result := RunGitEnv(ARoot, WithConflictStyle(ARoot, ['merge', '--no-ff', '-m', Message,
+      'refs/heads/' + ABranch]), ['GIT_EDITOR=:'], Output, AError);
+  end
+  else
+    Result := RunGitEnv(ARoot, WithConflictStyle(ARoot,
+      ['merge', '--no-ff', '--no-edit', ABranch]), ['GIT_EDITOR=:'], Output, AError);
   if not Result then
     AConflicts := RunGitIn(ARoot, ['ls-files', '-u'], Output, Ignored) and (Trim(Output) <> '');
 end;
@@ -641,7 +652,13 @@ begin
     end;
   end;
   { Merged everywhere it goes, which is what -d would check, against
-    HEAD alone. }
+    HEAD alone; checked again, as -D deletes whatever was not. }
+  for Target in Targets do
+    if not IsMergedInto(ARoot, Branch, Target) then
+    begin
+      AError := Format('%s is not merged into %s; it is kept.', [Branch, Target]);
+      Exit;
+    end;
   Result := SwitchTo(ARoot, AFlow.Develop, AError) and
     RunGitIn(ARoot, ['branch', '-D', Branch], Output, AError);
 end;

@@ -73,7 +73,7 @@ begin
   FCommitMemo := TCommitMemo.Create(Self);
   FCommitMemo.Align := alTop;
   FCommitMemo.Top := 500;
-  FCommitMemo.Height := 84;
+  FCommitMemo.Height := Px(CommitMemoHeight);
   FCommitMemo.WordWrap := True;
   FCommitMemo.ScrollBars := ssAutoVertical;
   FCommitMemo.WantReturns := True;
@@ -685,7 +685,8 @@ begin
   end
   else
     FCommitNote.Icon := -1;
-  FCommitNote.Visible := Note <> '';
+  FCommitNote.Visible := (Note <> '') and
+    not (FTipNoRoom and (Note = rsCommitTickHint));
   UpdateBisectState;
   if FCommitItem <> nil then
     FCommitItem.Enabled := FRepo.Root <> '';
@@ -1309,6 +1310,10 @@ begin
   end
   else
     StatusNote(Format(rsCommitted, [Copy(Job.Id, 1, 7), Subject]));
+  { A fetch, pull or push that waited for the background fetch and then
+    for this commit; last, so its busy note is not written over. }
+  if FPendingRemote and (FAutoFetchJob = nil) then
+    RunPendingRemote;
 end;
 
 procedure TRepoFrame.ShowCommitFailure(const AError: string);

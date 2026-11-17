@@ -1,6 +1,6 @@
 unit testdiscard;
 
-{** Tests of gittan.discard: reading a block out of a diff and writing
+{** Tests of gittan.discard, gittan.textfile: reading a block out of a diff and writing
   its old lines over its new ones in the file on disk. }
 
 {$mode objfpc}{$H+}
@@ -8,7 +8,7 @@ unit testdiscard;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, gittan.discard;
+  Classes, SysUtils, fpcunit, testregistry, gittan.discard, gittan.textfile;
 
 type
   TDiscardTest = class(TTestCase)
@@ -32,6 +32,8 @@ type
     procedure TestKeepsNoFinalNewline;
     procedure TestStale;
     procedure TestUndo;
+    procedure TestStaleBeside;
+    procedure TestBesideLoose;
     procedure TestMakesDeletedFile;
     procedure TestCount;
   end;
@@ -84,8 +86,13 @@ var
 begin
   Lines := TStringList.Create;
   try
+    { "\" marks the line before as the last of its side without a
+      newline, as FileChanges does from git's "\ No newline". }
     for Line in ADiff do
-      Lines.Add(Line);
+      if Line = '\' then
+        Lines.Objects[Lines.Count - 1] := NoNewlineMark
+      else
+        Lines.Add(Line);
     Result := DiffBlock(Lines, AStart, FFile);
   finally
     Lines.Free;
@@ -195,12 +202,39 @@ var
   B: TGittanDiscard;
   Err: string;
 begin
+  { Both sides without one. }
   WriteRaw('a'#10'B');
-  B := Block([' a', '-b', '+B'], 1);
+  B := Block([' a', '-b', '\', '+B', '\'], 1);
   AssertTrue(Err, DiscardBlock(B, Err));
   AssertEquals('a'#10'b', ReadRaw);
-  WriteRaw('a'#10'b');
-  B := Block([' a', ' b', '-c'], 2);
+  { The old side without one, the new with. }
+  WriteRaw('a'#10'b'#10);
+  B := Block([' a', '-c', '\', '+b'], 1);
+  AssertTrue(Err, DiscardBlock(B, Err));
+  AssertEquals('a'#10'c', ReadRaw);
+  { A line added after a last line that had a newline, the added one
+    without: the old end comes back with its newline. }
+  WriteRaw('a'#10'b'#10'c');
+  B := Block([' a', ' b', '+c', '\'], 2);
+  AssertTrue(Err, DiscardBlock(B, Err));
+  AssertEquals('a'#10'b'#10, ReadRaw);
+  { Only the newline changed. }
+  WriteRaw('a'#10'b'#10);
+  B := Block([' a', '-b', '\', '+b'], 1);
+  AssertTrue(Err, DiscardBlock(B, Err));
+  AssertEquals('a'#10'b', ReadRaw);
+  { Undone, the newline is back. }
+  AssertTrue(Err, DiscardBlock(Swapped(B), Err));
+  AssertEquals('a'#10'b'#10, ReadRaw);
+  { The file's end changed since the diff: stale, the change left. }
+  WriteRaw('a'#10'B');
+  B := Block([' a', '-b', '+B'], 1);
+  AssertFalse('newline taken away since', DiscardBlock(B, Err));
+  AssertEquals(rsDiscardStale, Err);
+  AssertEquals('a'#10'B', ReadRaw);
+  { A block in the middle keeps the file's end as it is. }
+  WriteRaw('a'#10'B'#10'c');
+  B := Block([' a', '-b', '+B', ' c', '\'], 1);
   AssertTrue(Err, DiscardBlock(B, Err));
   AssertEquals('a'#10'b'#10'c', ReadRaw);
 end;
@@ -232,6 +266,47 @@ begin
   AssertEquals('a'#10'b'#10'b2'#10'c'#10, ReadRaw);
   AssertTrue(Err, DiscardBlock(Swapped(B), Err));
   AssertEquals('a'#10'B'#10'c'#10, ReadRaw);
+end;
+
+{ A block that adds nothing has no line of its own to check: the lines
+  beside it tell that the file moved since. Undoing a discarded added line
+  after lines were added above it is refused, not put in the wrong place. }
+procedure TDiscardTest.TestStaleBeside;
+var
+  B: TGittanDiscard;
+  Err: string;
+begin
+  WriteRaw('a'#10'DEBUG'#10'b'#10);
+  B := Block([' a', '+DEBUG', ' b'], 1);
+  AssertTrue(Err, DiscardBlock(B, Err));
+  AssertEquals('a'#10'b'#10, ReadRaw);
+  WriteRaw('new1'#10'new2'#10'a'#10'b'#10);
+  AssertFalse(DiscardBlock(Swapped(B), Err));
+  AssertEquals(rsDiscardStale, Err);
+  AssertEquals('new1'#10'new2'#10'a'#10'b'#10, ReadRaw);
+  { A deleted line put back where the file has moved. }
+  WriteRaw('x'#10'a'#10'c'#10);
+  B := Block([' a', '-b', ' c'], 1);
+  AssertFalse(DiscardBlock(B, Err));
+  AssertEquals(rsDiscardStale, Err);
+  { At the end of the file, with a line added after since. }
+  WriteRaw('a'#10'z'#10);
+  B := Block([' a', '-b'], 1);
+  AssertFalse(DiscardBlock(B, Err));
+  AssertEquals(rsDiscardStale, Err);
+end;
+
+{ A diff taken with whitespace ignored shows a line beside the block as the
+  version compared against has it, which may differ in blanks alone. }
+procedure TDiscardTest.TestBesideLoose;
+var
+  B: TGittanDiscard;
+  Err: string;
+begin
+  WriteRaw('  a'#13#10'c'#13#10);
+  B := Block([' a', '-b', ' c'], 1);
+  AssertTrue(Err, DiscardBlock(B, Err));
+  AssertEquals('  a'#13#10'b'#13#10'c'#13#10, ReadRaw);
 end;
 
 { A deleted file is one block of deleted lines at line 1; discarding it

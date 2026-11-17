@@ -2193,29 +2193,54 @@ begin
   Result := (AEdits <> nil) or (AWhy <> '');
 end;
 
+{ ALines without the "12: " FixInput puts before each line, which the
+  agent copies at times ("12:" alone for an empty line), and in AFirst
+  the first line's number; false, with ALines as they are in ABare, when
+  one of them has none or the numbers do not count up by one, as
+  FixInput's do: code whose lines merely start with a number and a colon
+  (a case label) is not taken for numbered. }
+function Unnumbered(const ALines: TStringArray; out ABare: TStringArray;
+  out AFirst: integer): boolean;
+var
+  j, k, Number: integer;
+begin
+  ABare := Copy(ALines);
+  AFirst := 0;
+  Result := ALines <> nil;
+  for j := 0 to High(ALines) do
+  begin
+    k := 1;
+    while (k <= Length(ALines[j])) and (ALines[j][k] in ['0'..'9']) do
+      Inc(k);
+    if (k = 1) or (k > Length(ALines[j])) or (ALines[j][k] <> ':') or
+      ((k < Length(ALines[j])) and (ALines[j][k + 1] <> ' ')) or
+      not TryStrToInt(Copy(ALines[j], 1, k - 1), Number) or
+      ((j > 0) and (Number <> AFirst + j)) then
+    begin
+      ABare := Copy(ALines);
+      Exit(False);
+    end;
+    if j = 0 then
+      AFirst := Number;
+    ABare[j] := Copy(ALines[j], k + 2, MaxInt);
+  end;
+end;
+
 { Where AFind is in ALines, compared as AMode says: 0 as they are, 1
   with the spaces at the ends ignored, 2 without a line number before
   each of AFind's; -1 for nowhere, and ACount how many places. }
 function FindLines(const ALines, AFind: TStringArray; AMode: integer;
   out ACount: integer): integer;
 var
-  i, j, k: integer;
+  i, j, First: integer;
   Want: TStringArray;
   Same: boolean;
 begin
   Result := -1;
   ACount := 0;
   Want := Copy(AFind);
-  if AMode = 2 then
-    for j := 0 to High(Want) do
-    begin
-      k := 1;
-      while (k <= Length(Want[j])) and (Want[j][k] in ['0'..'9']) do
-        Inc(k);
-      if (k = 1) or (Copy(Want[j], k, 2) <> ': ') then
-        Exit;
-      Want[j] := Copy(Want[j], k + 2, MaxInt);
-    end;
+  if (AMode = 2) and not Unnumbered(AFind, Want, First) then
+    Exit;
   for i := 0 to Length(ALines) - Length(Want) do
   begin
     Same := True;
@@ -2240,7 +2265,8 @@ end;
 function ApplyFixEdits(const ALines: TStringArray; const AEdits: TGittanFixEdits;
   out ANew: TStringArray; out AError: string): boolean;
 var
-  e, Mode, At, Count: integer;
+  e, Mode, At, Count, FindFirst, ReplaceFirst: integer;
+  Replace, Bare: TStringArray;
 begin
   AError := '';
   ANew := Copy(ALines);
@@ -2263,7 +2289,15 @@ begin
       ANew := nil;
       Exit(False);
     end;
-    ANew := Concat(Copy(ANew, 0, At), AEdits[e].Replace,
+    { Found by its numbers: the replacement has them too, which are not
+      the file's, when they start where the find's do; other lines that
+      begin with a number and a colon are the code's. }
+    Replace := AEdits[e].Replace;
+    if (Mode = 2) and Unnumbered(AEdits[e].Find, Bare, FindFirst) and
+      Unnumbered(AEdits[e].Replace, Bare, ReplaceFirst) and
+      (ReplaceFirst = FindFirst) then
+      Replace := Bare;
+    ANew := Concat(Copy(ANew, 0, At), Replace,
       Copy(ANew, At + Length(AEdits[e].Find), MaxInt));
   end;
   Result := True;
