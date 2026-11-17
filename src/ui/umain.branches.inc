@@ -113,7 +113,11 @@ begin
     Exit;
   FBranchPopup.Close;
   case (Sender as TMenuItem).Tag of
-    bmSwitch: SwitchBranch(BranchName);
+    bmSwitch:
+      if Ref <> BranchName then
+        SwitchBranch(BranchName, False, Ref)
+      else
+        SwitchBranch(BranchName);
     bmCompareTree: SetBase(Ref);
     bmCompareSince: CompareSince(Ref);
     bmCurrentSince: CompareCurrentSince(Ref);

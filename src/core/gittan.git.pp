@@ -387,9 +387,13 @@ type
       files the branch changes, merged into its version (`--merge`);
       where they clash the files are left in conflict. With ADetach
       ABranch may be any commit, a tag say, and HEAD is left on it
-      without a branch (`--detach`). }
+      without a branch (`--detach`). With ATrack, a remote-tracking
+      branch such as upstream/feature, the local branch ABranch is made
+      from it and tracks it (`git switch -c ABranch --track ATrack`),
+      so the remote picked is the one used even when another has a
+      branch of the same name. }
     function Switch(const ABranch: string; AMerge: boolean = False;
-      ADetach: boolean = False): boolean;
+      ADetach: boolean = False; const ATrack: string = ''): boolean;
     {** Puts the files APaths (relative to Root) back as HEAD has them,
       in the index and the work tree (`git restore --source=HEAD
       --staged --worktree`); one HEAD lacks, added or untracked, is taken
@@ -1383,6 +1387,13 @@ function RunAgentCli(const AExe, ADir: string; const AArgs: array of string;
   files the branch has), each on a line of its own after a tab; false
   when the message names none, a refusal for another reason. }
 function SwitchBlockedFiles(const AError: string; AFiles: TStrings): boolean;
+
+{** The branch on its remote that the remote-tracking branch ARef
+  (origin/feature/x) stands for (feature/x), by the remotes ARemotes:
+  the longest that is a prefix, for remotes "a" and "a/b". With
+  ARemote that remote; both empty when none matches. }
+function RemoteRefBranch(const ARef: string; ARemotes: TStrings;
+  out ARemote: string): string;
 
 {** The branch and the message of a stash from its reflog subject, as
   `git stash list` prints it: "On main: message" for one made with a
@@ -3770,7 +3781,8 @@ begin
   end;
 end;
 
-function TGittanRepo.Switch(const ABranch: string; AMerge, ADetach: boolean): boolean;
+function TGittanRepo.Switch(const ABranch: string; AMerge, ADetach: boolean;
+  const ATrack: string): boolean;
 var
   Output: string;
   Args: array of string;
@@ -3782,7 +3794,11 @@ begin
     Args := Concat(Args, ['--merge']);
   if ADetach then
     Args := Concat(Args, ['--detach']);
-  Result := RunGit(FRoot, Concat(Args, [ABranch]), Output);
+  if ATrack <> '' then
+    Args := Concat(Args, ['-c', ABranch, '--track', ATrack])
+  else
+    Args := Concat(Args, [ABranch]);
+  Result := RunGit(FRoot, Args, Output);
 end;
 
 { Whether AFull is a symbolic link, with ATarget what it leads to. A
@@ -4280,6 +4296,22 @@ begin
   finally
     DeleteFile(Index);
   end;
+end;
+
+function RemoteRefBranch(const ARef: string; ARemotes: TStrings;
+  out ARemote: string): string;
+var
+  i: integer;
+begin
+  ARemote := '';
+  for i := 0 to ARemotes.Count - 1 do
+    if (Trim(ARemotes[i]) <> '') and (Pos(Trim(ARemotes[i]) + '/', ARef) = 1) and
+      (Length(Trim(ARemotes[i])) > Length(ARemote)) then
+      ARemote := Trim(ARemotes[i]);
+  if ARemote = '' then
+    Result := ''
+  else
+    Result := Copy(ARef, Length(ARemote) + 2, MaxInt);
 end;
 
 function SwitchBlockedFiles(const AError: string; AFiles: TStrings): boolean;
@@ -5480,20 +5512,21 @@ end;
 
 function TGittanRepo.SplitRemoteRef(const ARef: string; out ARemote, ABranch: string): boolean;
 var
-  Output, Remote: string;
+  Output: string;
+  Names: TStringList;
 begin
   ARemote := '';
   ABranch := '';
   if (FRoot = '') or not RunGit(FRoot, ['remote'], Output) then
     Exit(False);
-  { The longest remote that is a prefix, for remotes "a" and "a/b". }
-  for Remote in Output.Split([#10]) do
-    if (Trim(Remote) <> '') and (Pos(Trim(Remote) + '/', ARef) = 1) and
-      (Length(Trim(Remote)) > Length(ARemote)) then
-      ARemote := Trim(Remote);
+  Names := TStringList.Create;
+  try
+    Names.Text := Output;
+    ABranch := RemoteRefBranch(ARef, Names, ARemote);
+  finally
+    Names.Free;
+  end;
   Result := ARemote <> '';
-  if Result then
-    ABranch := Copy(ARef, Length(ARemote) + 2, MaxInt);
 end;
 
 function TGittanRepo.DeleteRemoteBranch(const ARef: string): boolean;

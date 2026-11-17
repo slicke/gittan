@@ -1579,9 +1579,9 @@ end;
 
 procedure TRepoFrame.ShowBranchList(AMode: TGittanBranchListMode; const AScreenRect: TRect);
 var
-  Local, Remote, Gone: TStringList;
-  i, Slash: integer;
-  Short, Detail: string;
+  Local, Remote, Gone, Remotes: TStringList;
+  i: integer;
+  Short, Detail, RemoteName: string;
   HasRemoteHeader: boolean;
 begin
   if FRepo.Root = '' then
@@ -1591,6 +1591,7 @@ begin
   Local := TStringList.Create;
   Remote := TStringList.Create;
   Gone := TStringList.Create;
+  Remotes := TStringList.Create;
   try
     if not FRepo.Branches(Local, Remote) then
     begin
@@ -1598,6 +1599,7 @@ begin
       Exit;
     end;
     FRepo.GoneBranches(Gone);
+    FRepo.Remotes(Remotes);
     { What the remotes said, which a stale remote-tracking ref hides
       from git. }
     for i := 0 to FGoneBranches.Count - 1 do
@@ -1646,9 +1648,10 @@ begin
     end;
     for i := 0 to Remote.Count - 1 do
     begin
-      Slash := Pos('/', Remote[i]);
-      Short := Copy(Remote[i], Slash + 1, MaxInt);
-      if (Slash = 0) or (Local.IndexOf(Short) >= 0) then
+      { By the remotes, so one with a slash in its name gives the right
+        branch name. }
+      Short := RemoteRefBranch(Remote[i], Remotes, RemoteName);
+      if (Short = '') or (Local.IndexOf(Short) >= 0) then
         Continue;
       if not HasRemoteHeader then
       begin
@@ -1665,12 +1668,14 @@ begin
     Local.Free;
     Remote.Free;
     Gone.Free;
+    Remotes.Free;
   end;
   FBranchPopup.Popup(AScreenRect);
 end;
 
 { A remote row goes by its remote-tracking ref for anything but a
-  switch, which makes the local branch from it. }
+  switch, which makes the local branch from it and tracks that very
+  ref, whichever other remote has a branch of the same name. }
 procedure TRepoFrame.BranchPopupPick(Sender: TObject; AIndex: integer);
 var
   Ref: string;
@@ -1690,7 +1695,7 @@ begin
     blBranchSince: CompareSince(Ref);
     blCurrentSince: CompareCurrentSince(Ref);
     else
-      SwitchBranch(FBranchNames[AIndex]);
+      SwitchBranch(FBranchNames[AIndex], False, FBranchRefs[AIndex]);
   end;
 end;
 
@@ -1701,8 +1706,10 @@ end;
   into the branch's version (`git switch --merge`, which may leave
   conflicts); any other refusal is shown with git's whole message.
   With ADetach ABranch is a tag (or any commit) and HEAD is left on it
-  without a branch. }
-procedure TRepoFrame.SwitchBranch(const ABranch: string; ADetach: boolean);
+  without a branch; with ATrack, a remote-tracking branch, ABranch is
+  made from it. }
+procedure TRepoFrame.SwitchBranch(const ABranch: string; ADetach: boolean;
+  const ATrack: string);
 var
   Files: TStringList;
   Shown, Switch: string;
@@ -1727,7 +1734,7 @@ begin
   try
     Files := TStringList.Create;
     try
-      if FRepo.Switch(ABranch, False, ADetach) then
+      if FRepo.Switch(ABranch, False, ADetach, ATrack) then
         Switched(Format(Switch, [ABranch]))
       else if SwitchBlockedFiles(FRepo.Error, Files) then
       begin
@@ -1742,7 +1749,7 @@ begin
           mrYes:
             if not FRepo.Stash(Format(rsStashMessage, [ABranch])) then
               BannerError(rsStashFailed, FRepo.Error)
-            else if FRepo.Switch(ABranch, False, ADetach) then
+            else if FRepo.Switch(ABranch, False, ADetach, ATrack) then
               Switched(Format(rsStashedSwitched, [ABranch]))
             else
             begin
@@ -1751,7 +1758,7 @@ begin
                 LineEnding + rsStashKept);
             end;
           mrNo:
-            if FRepo.Switch(ABranch, True, ADetach) then
+            if FRepo.Switch(ABranch, True, ADetach, ATrack) then
               Switched(Format(rsSwitchedAlong, [ABranch]))
             else
               BannerError(Format(rsSwitchFailed, [ABranch]), FRepo.Error);

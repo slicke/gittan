@@ -83,6 +83,7 @@ type
     procedure TestPathCommits;
     procedure TestOperation;
     procedure TestBranchesAndSwitch;
+    procedure TestSwitchTrack;
     procedure TestGoneBranches;
     procedure TestGoneUpstreams;
     procedure TestCommit;
@@ -4224,6 +4225,54 @@ begin
   finally
     RemoveTree(Remote);
   end;
+end;
+
+{ A remote branch picked from the list becomes a local branch tracking
+  that very ref: with two remotes that both have feature, the name
+  alone is refused by git (or goes to checkout.defaultRemote), the ref
+  is not. A remote with a slash in its name gives the right branch
+  name. The remote-tracking refs are set by hand, no remote is
+  reached. }
+procedure TGitRepoTest.TestSwitchTrack;
+var
+  First, Second: string;
+  Remotes: TStringList;
+  Remote: string;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  WriteFile('a.txt', 'second'#10);
+  Commit('second');
+  AssertTrue(FRepo.Open(FDir));
+  First := Trim(Git(['rev-parse', 'HEAD~1']));
+  Second := Trim(Git(['rev-parse', 'HEAD']));
+  Git(['remote', 'add', 'origin', 'https://example.invalid/a.git']);
+  Git(['remote', 'add', 'upstream', 'https://example.invalid/b.git']);
+  Git(['remote', 'add', 'team/x', 'https://example.invalid/c.git']);
+  Git(['update-ref', 'refs/remotes/origin/feature', Second]);
+  Git(['update-ref', 'refs/remotes/upstream/feature', First]);
+  Git(['update-ref', 'refs/remotes/team/x/topic/one', First]);
+  Git(['config', 'checkout.defaultRemote', 'origin']);
+
+  AssertTrue(FRepo.Error, FRepo.Switch('feature', False, False, 'upstream/feature'));
+  AssertEquals('feature', FRepo.Branch);
+  AssertEquals('the picked remote''s commit', First, Trim(Git(['rev-parse', 'HEAD'])));
+  AssertEquals('upstream/feature', FRepo.Upstream('feature'));
+
+  Remotes := TStringList.Create;
+  try
+    AssertTrue(FRepo.Remotes(Remotes));
+    AssertEquals('topic/one', RemoteRefBranch('team/x/topic/one', Remotes, Remote));
+    AssertEquals('team/x', Remote);
+    AssertEquals('', RemoteRefBranch('elsewhere/topic', Remotes, Remote));
+    AssertEquals('', Remote);
+  finally
+    Remotes.Free;
+  end;
+  AssertTrue(FRepo.Error, FRepo.Switch('topic/one', False, False, 'team/x/topic/one'));
+  AssertEquals('topic/one', FRepo.Branch);
+  AssertEquals('team/x/topic/one', FRepo.Upstream('topic/one'));
 end;
 
 { A switch the local changes block names the files; a stash clears the

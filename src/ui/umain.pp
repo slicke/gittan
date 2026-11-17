@@ -2041,7 +2041,8 @@ type
     procedure PullPopupPick(Sender: TObject; AIndex: integer);
     procedure StartPullFetch(ANumber: integer; const ARemote, ABaseRef: string);
     procedure PullFetchDone(AJob: TGittanRemoteJob);
-    procedure SwitchBranch(const ABranch: string; ADetach: boolean = False);
+    procedure SwitchBranch(const ABranch: string; ADetach: boolean = False;
+      const ATrack: string = '');
     function ContextFullPath: string;
     procedure MenuCopyPathClick(Sender: TObject);
     procedure MenuCopyRelativePathClick(Sender: TObject);

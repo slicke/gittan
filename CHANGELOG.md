@@ -36,6 +36,7 @@
 - Quitting with several tabs open no longer lets a tab still closing read the names of tabs already gone, and a tab closed during a save question at quit is passed over rather than skipping another.
 - Closing a tab or quitting while a pull request lookup, a blame or a fetch is under way no longer lets that finish on the tab being closed.
 - An argument with a NUL character is refused, so an extension can no longer slip a flag or command past the checks on what it may run with the forge's tool, git or a program.
+- Switching to a remote branch from the branch list makes the local branch from the remote you picked, even when another remote has a branch of the same name or `checkout.defaultRemote` names another. Before, git refused, or quietly tracked the other remote's commit. A remote with a slash in its name now gives the right branch name.
 
 ## 0.21 (build-146, 2026-11-17)
 
