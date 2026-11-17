@@ -124,7 +124,8 @@ declare namespace Gittan {
   const app: { setting(name: "GitPath" | "EditorCommand" | "TerminalCommand" | "AIEnabled" | "HostingEnabled" | "ExtensionsDir" | "GitHubCli"): string | boolean | null };
 
   function alert(...text: any[]): void;
-  function log(text: string): void;
+  /** A line in the extension console that console.pop() shows, as console.push does. */
+  function log(...text: any[]): void;
 }
 
 declare function alert(...text: any[]): void;

@@ -26,11 +26,9 @@ Math;
 
 resourcestring
   RS_EXT_FILE = 'File "%s" not found';
+  RS_EXT_SCRIPT_ERROR = 'Error in the extension %s';
 
 type
-  {** Callback signature invoked when JavaScript code emits output via this engine. }
-TOutputCallback = procedure(const Msg: RawUtf8) of object;
-
   {** Alias to the native-callback type used by the QuickJS binding.
       These are plain Pascal procedures reached through the shim trampoline;
       see @code(TJSNativeFunc) in gittan.ext.quickjs. }
@@ -159,9 +157,6 @@ private
     {** QuickJS context handle. }
   FContext: JSContext;
     {** Accumulated output produced by JS. }
-  FOutput: RawUtf8;
-    {** Output sink callback invoked by @code(SetOutput). }
-  OutCallback: TOutputCallback;
     {** Registered promises. }
   promises: TPromises;
     {** Map of active JS timers (setTimeout/setInterval). }
@@ -203,8 +198,6 @@ private
         the context it is used in. JS_UNDEFINED (and the error reported)
         when the text is no JSON. }
   function ParseJsonIn(ctx: JSContext; const Json: string): JSValue;
-  function GetOutput: RawUtf8;
-  procedure SetOutput(const val: RawUtf8);
 
     {** Dispose timers parked in FDeadTimers. Safe to call anytime; no-ops
         while a timer callback is running. }
@@ -283,18 +276,10 @@ public
     {** Release the singleton instance (frees resources). }
   class procedure ReleaseInstance;
 
-    {** Append values to @code(Output) by converting JS values to UTF-8.
-
-        @param(ctx  JS context)
-        @param(vals Pointer to first JS value)
-        @param(len  Number of items-1 to read; iterates inclusive from 0..len) }
-  procedure SetOutput(ctx: JSContext; const vals: PJSValues; const len: integer);
-
-    {** Clear the accumulated @code(Output). }
-  procedure ClearOutput;
-
-    {** Accessor to accumulated output; writes also trigger @code(OutCallback). }
-  property Output: RawUtf8 read GetOutput write SetOutput;
+    {** An error a script threw where no caller takes it (a listener, a
+        command, a timer, an unload hook): reported through the host under
+        the extension's name. }
+  procedure ReportScriptError(ctx: JSContext; const AMsg: string);
 
     {** Register a global JS function in the current context.
 
@@ -785,10 +770,10 @@ begin
         // DumpError, not ErrorMessage: it appends the JS stack trace, so the
         // extension console shows where in the callback the throw happened.
         TimerInfo^.Context^.DumpError(err);
-        Engine.SetOutput('Timer callback error: ' + string(err));
+        Engine.ReportScriptError(TimerInfo^.Context, string(err));
       end;
     except on E: Exception do
-        TGittanExtEngine.Instance.SetOutput('Timer exception: ' + E.Message);
+        Engine.ReportScriptError(TimerInfo^.Context, E.Message);
     end;
 
     // Release the call result; the callback/args stay owned by TimerInfo.
@@ -1008,35 +993,17 @@ begin
   Result := ctx^^.ToUtf8(vals^[pos]);
 end;
 
-{** Append JS values (0..len) to @code(Output) as UTF-8 strings. }
-procedure TGittanExtEngine.SetOutput(ctx: JSContext; const vals: PJSValues;
-const len: integer);
+procedure TGittanExtEngine.ReportScriptError(ctx: JSContext; const AMsg: string);
 var
-  i: integer;
+  Name: string;
 begin
-  // One conversion a value: a toString may answer differently each time
-  for i := 0 to len do
-    output := output + ctx^.ToUtf8(vals^[i]);
-end;
-
-{** Clear accumulated output buffer. }
-procedure TGittanExtEngine.ClearOutput();
-begin
-  output := '';
-end;
-
-{** Assign output and notify optional callback. }
-procedure TGittanExtEngine.SetOutput(const val: RawUtf8);
-begin
-  FOutput := val;
-  if assigned(OutCallback) then
-    OutCallback(val);
-end;
-
-{** Read accumulated output. }
-function TGittanExtEngine.GetOutput: RawUtf8;
-begin
-  Result := FOutput;
+  if (AMsg = '') or ExtHost.Terminated then
+    Exit;
+  Name := ExtensionNameForContext(ctx);
+  if Name = '' then
+    ExtError(AMsg)
+  else
+    ExtError(Format(RS_EXT_SCRIPT_ERROR, [Name]), AMsg);
 end;
 
 {******************************************************************************
@@ -1233,7 +1200,7 @@ begin
   if TGittanExtEngine.HasInstance then
     eng := TGittanExtEngine.Instance;
   if eng <> nil then
-    eng.SetOutput(string(msg));
+    eng.ReportScriptError(ctx, string(msg));
 end;
 
 { For the promise tasks (gittan.ext.promise), which may not use this unit:
@@ -2780,7 +2747,6 @@ begin
     FileStream.Free;
   end;
 
-  FOutput := '';
   if ScriptLooksLikeModule(Script) then
     Exit(ExtExecuteModule(Ext));
 
@@ -2876,7 +2842,6 @@ begin
     Exit;
   end;
 
-  FOutput := '';
 
   EvalResult := FContext^.Eval(Script, Name, JS_EVAL_TYPE_GLOBAL, err);
 

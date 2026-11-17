@@ -296,6 +296,12 @@ procedure ExtError(const msg, error: string); overload;
   }
 procedure ExtError(const error: string); overload;
 
+  {** Adds ALine to the console lines console.pop shows, cut to a length and
+    keeping the newest only. }
+procedure AddConsoleLine(const ALine: string);
+  {** "[name] " of the extension of ctx, '' when none is known. }
+function ConsoleAttribution(ctx: JSContext): string;
+
 const
 JS_TAG_UNKNOWN = -10;
 JS_PARAM_MISSMATCH = 150;

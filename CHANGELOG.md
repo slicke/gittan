@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- An error thrown by an extension's command, event listener (such as a `commit.before` check), timer or unload hook is now shown in a banner under the extension's name; it went nowhere. `Gittan.log` now writes to the extension console, where it went nowhere either and slowed down the more was logged.
 - Reloading extensions while one of them waits on git, a program, the forge or a fetch no longer keeps that extension's memory; after a few such reloads every extension failed with "out of memory" until Gittan was restarted.
 - An extension stuck in a loop that splits a long text or parses JSON over and over is stopped after 10 seconds, instead of freezing Gittan for good (at every start, when the loop runs as the extension loads); a dialog the extension shows does not count toward the 10 seconds.
 - Quitting or leaving a repository no longer waits for a background fetch, or a fetch you started, from a server that does not answer; the fetch is given up. Fetch, pull and push over ssh give up a server that stays silent for a minute or takes over 30 seconds to connect, and over HTTP a transfer that has stalled for a minute, unless your own ssh command or `http.lowSpeedLimit`/`lowSpeedTime` settings say otherwise. A pull request fetch now uses the same ssh settings as the other fetches.

@@ -17,10 +17,9 @@ begin
   res^ := JS_NewObjectClass(ctx, GittanClassID);
 end;
 
-{** Log function exposed to JavaScript.
-    Concatenates all arguments into UTF-8 and appends them to the engine’s
-    output buffer via @code(TGittanExtEngine.SetOutput). Intended for simple
-    console-like logging.
+{** Gittan.log: the arguments, each converted once, as one entry of the
+    console under the extension's name (AddConsoleLine, which keeps the
+    newest lines only), as console.push would.
 
     @param(ctx)      Current QuickJS context
     @param(this_val) The 'this' value from JavaScript (unused)
@@ -30,8 +29,14 @@ end;
 }
 procedure JSDoLog(res: PJSValue; ctx: JSContext; this_val: PJSValue;
 argc: integer; argv: PJSValues; magic: integer);
+var
+  i: integer;
+  Text: string;
 begin
-  TGittanExtEngine.Instance.SetOutput(ctx, argv, argc - 1);
+  Text := '';
+  for i := 0 to argc - 1 do
+    Text := Text + string(ctx^.ToUtf8(argv^[i]));
+  AddConsoleLine(ConsoleAttribution(ctx) + Text);
   res^ := JS_UNDEFINED;
 end;
 

@@ -104,6 +104,7 @@ type
     procedure TestDialogTextFromChangingToString;
     procedure TestWatchdogStopsNativeLoop;
     procedure TestUnloadWithPromisePending;
+    procedure TestLogGoesToConsole;
   end;
 
 implementation
@@ -435,10 +436,27 @@ var
 begin
   AssertLoaded('loads', LoadResult('broken',
     'Gittan.on("commit.before", function () { throw new Error("oops"); });'));
-  FEngine.ClearOutput;
+  FHost.Errors.Clear;
   AssertTrue('a throw does not cancel', FEngine.Fire('commit.before', '{}', Msg));
-  AssertTrue('the throw is in the output: ' + string(FEngine.Output),
-    Pos('oops', string(FEngine.Output)) > 0);
+  AssertEquals('reported', 1, FHost.Errors.Count);
+  AssertTrue('the throw is reported under the extension''s name: ' + FHost.Errors[0],
+    (Pos('broken', FHost.Errors[0]) > 0) and (Pos('oops', FHost.Errors[0]) > 0));
+end;
+
+{ Gittan.log goes to the console console.pop shows, which keeps its
+  newest lines only, however much is logged. }
+procedure TExtEngineTest.TestLogGoesToConsole;
+var
+  Info: PExtContextInfo;
+begin
+  Info := Load('logger', 'Gittan.log("first", 2);' +
+    'for (var i = 0; i < 5000; i++) Gittan.log("x".repeat(1000));' +
+    'Gittan.log("last"); console.pop();', PermBaseline);
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  AssertEquals('one log shown', 1, FHost.Logs.Count);
+  AssertTrue('the newest kept', Pos('[logger] last', FHost.Logs[0]) > 0);
+  AssertEquals('the oldest gone', 0, Pos('first2', FHost.Logs[0]));
+  AssertTrue('capped', Length(FHost.Logs[0]) < 3000000);
 end;
 
 procedure TExtEngineTest.TestOff;
@@ -773,6 +791,20 @@ begin
   end;
   AssertTrue(EvalIn(Info^.Ctx, 'globalThis.inner'),
     Pos('More than 1000 timers', EvalIn(Info^.Ctx, 'globalThis.inner')) > 0);
+  { A timer that throws is reported under its extension's name. }
+  FHost.Errors.Clear;
+  Info := Load('ticker', 'setTimeout(function () { throw new Error("tick failed"); }, 0);',
+    PermBaseline);
+  AssertLoaded('ticker', string(FEngine.ExtExecuteFile(Info)));
+  GiveUpAt := GetTickCount64 + 5000;
+  while (FHost.Errors.Count = 0) and (GetTickCount64 < GiveUpAt) do
+  begin
+    Sleep(5);
+    FEngine.OnJSTimer(nil);
+  end;
+  AssertEquals('the throw reported', 1, FHost.Errors.Count);
+  AssertTrue(FHost.Errors[0], (Pos('ticker', FHost.Errors[0]) > 0) and
+    (Pos('tick failed', FHost.Errors[0]) > 0));
 end;
 
 { An exception raised while a native read its argument (a toString that
