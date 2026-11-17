@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- An extension can no longer register a Batch operation or a forge tab around `Gittan.batch` and `Gittan.forgeTabs`, which left a run on "Running on 1 of N…" or a tab on Loading for good.
 - An extension whose promise continuation was stopped, or whose promise was rejected with a value that cannot be shown, no longer makes the next call of another extension fail with that error, which could let a commit go ahead past the other extension's `commit.before` check.
 - An error thrown by an extension's command, event listener (such as a `commit.before` check), timer or unload hook is now shown in a banner under the extension's name; it went nowhere. `Gittan.log` now writes to the extension console, where it went nowhere either and slowed down the more was logged.
 - Reloading extensions while one of them waits on git, a program, the forge or a fetch no longer keeps that extension's memory; after a few such reloads every extension failed with "out of memory" until Gittan was restarted.

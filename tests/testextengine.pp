@@ -730,9 +730,11 @@ begin
     '  if (c.repo === "/bad") throw new Error("boom");' +
     '  if (c.repo === "/loop") { var o = {}; o.self = o; return o; }' +
     '  return c.repo + "!"; }});' +
-    'globalThis.typeOk = typeof Gittan._deliver;', PermBaseline + [epExec]);
+    'globalThis.typeOk = typeof Gittan._deliver + typeof Gittan.registerBatch +' +
+    '  typeof Gittan.registerForgeTab;', PermBaseline + [epExec]);
   AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
-  AssertEquals('deliver out of reach', 'undefined', EvalIn(Info^.Ctx, 'globalThis.typeOk'));
+  AssertEquals('deliver and the raw natives out of reach', 'undefinedundefinedundefined',
+    EvalIn(Info^.Ctx, 'globalThis.typeOk'));
   AssertEquals('three', 3, FEngine.Registry.CommandCount);
   Tabs := FEngine.Registry.CommandsIn(cwForgeTab);
   AssertEquals('one tab', 1, Length(Tabs));

@@ -1816,6 +1816,11 @@ const
     '  };' + LineEnding +
     '  var deliver = t._deliver, ANSWER_SECONDS = 300;' + LineEnding +
     '  delete t._deliver;' + LineEnding +
+    { The raw natives would keep a function that never answers, and the
+      run or the tab would wait for ever: only the shim's way is left. }
+    '  var registerForgeTab = t.registerForgeTab, registerBatch = t.registerBatch;' + LineEnding +
+    '  delete t.registerForgeTab;' + LineEnding +
+    '  delete t.registerBatch;' + LineEnding +
     '  var said = function (e) { try { return String((e && e.message) || e); } catch (x) { return "The extension failed"; } };' + LineEnding +
     '  var answer = function (seq, p) {' + LineEnding +
     '    var done = false, timer = null;' + LineEnding +
@@ -1837,7 +1842,7 @@ const
     '    register: function (o) {' + LineEnding +
     '      if (!o || typeof o.render !== "function" || !o.id)' + LineEnding +
     '        throw new TypeError("Gittan.forgeTabs.register: {id, title, render} expected");' + LineEnding +
-    '      return t.registerForgeTab(String(o.id), String(o.title || o.id), String(o.description || ""), function (ctx) {' + LineEnding +
+    '      return registerForgeTab.call(t, String(o.id), String(o.title || o.id), String(o.description || ""), function (ctx) {' + LineEnding +
     '        var seq = ctx.seq; delete ctx.seq;' + LineEnding +
     '        if (ctx.kind === "action") {' + LineEnding +
     '          var a = ctx.action, row = ctx.row; delete ctx.kind; delete ctx.action; delete ctx.row;' + LineEnding +
@@ -1854,7 +1859,7 @@ const
     '    register: function (o) {' + LineEnding +
     '      if (!o || typeof o.run !== "function" || !o.id)' + LineEnding +
     '        throw new TypeError("Gittan.batch.register: {id, title, run} expected");' + LineEnding +
-    '      return t.registerBatch(String(o.id), String(o.title || o.id), String(o.description || ""), function (ctx) {' + LineEnding +
+    '      return registerBatch.call(t, String(o.id), String(o.title || o.id), String(o.description || ""), function (ctx) {' + LineEnding +
     '        var seq = ctx.seq; delete ctx.seq;' + LineEnding +
     '        answer(seq, function () { return o.run(ctx); });' + LineEnding +
     '      });' + LineEnding +
