@@ -2105,28 +2105,31 @@ begin
   Result := string.Join(#10, Lines);
 end;
 
-{ Reads what the pipe holds, into ADest and to AOnOutput; false when it
-  held nothing. }
-function ReadPipe(APipe: TInputPipeStream; var ADest: string;
+{ Reads what the pipe holds, onto the first ALen bytes of ADest and to
+  AOnOutput; false when it held nothing. ADest is a buffer that doubles
+  as it fills, ALen what of it is used, so a large output is not copied
+  whole for every piece (ADest := ADest + Chunk took ten seconds for
+  git diff's 130 MB); the caller cuts it to ALen at the end. }
+function ReadPipe(APipe: TInputPipeStream; var ADest: string; var ALen: SizeInt;
   AOnOutput: TGittanOutputEvent): boolean;
 var
-  Chunk: string;
   N: longint;
 begin
   N := APipe.NumBytesAvailable;
   Result := N > 0;
   if not Result then
     Exit;
-  SetLength(Chunk, N);
-  N := APipe.Read(Chunk[1], N);
-  if N < 0 then
-    N := 0;
-  SetLength(Chunk, N);
-  if Chunk = '' then
+  if ALen + N > Length(ADest) then
+    if 2 * Length(ADest) > ALen + N then
+      SetLength(ADest, 2 * Length(ADest))
+    else
+      SetLength(ADest, ALen + N);
+  N := APipe.Read(ADest[ALen + 1], N);
+  if N <= 0 then
     Exit(False);
-  ADest := ADest + Chunk;
   if Assigned(AOnOutput) then
-    AOnOutput(Chunk);
+    AOnOutput(Copy(ADest, ALen + 1, N));
+  Inc(ALen, N);
 end;
 
 { Waits until git writes or ends, so RunGitEnv does not sleep past the
@@ -2289,9 +2292,12 @@ var
   Skip: array of string;
   i: integer;
   Got, OutOpen, ErrOpen: boolean;
+  OutLen, ErrLen: SizeInt;
 begin
   AOutput := '';
   AError := '';
+  OutLen := 0;
+  ErrLen := 0;
   AStatus := -1;
   { An argument is passed as a C string (Windows: in the command line),
     which a NUL ends: the tool would get less than the caller checked
@@ -2376,8 +2382,8 @@ begin
         AStatus := -1;
         Exit(False);
       end;
-      Got := ReadPipe(P.Output, AOutput, AOnOutput);
-      if ReadPipe(P.Stderr, AError, AOnOutput) then
+      Got := ReadPipe(P.Output, AOutput, OutLen, AOnOutput);
+      if ReadPipe(P.Stderr, AError, ErrLen, AOnOutput) then
         Got := True;
       if not Got then
         if P.Running then
@@ -2385,11 +2391,14 @@ begin
         else
           Break;
     until False;
-    while ReadPipe(P.Output, AOutput, AOnOutput) do;
-    while ReadPipe(P.Stderr, AError, AOnOutput) do;
+    while ReadPipe(P.Output, AOutput, OutLen, AOnOutput) do;
+    while ReadPipe(P.Stderr, AError, ErrLen, AOnOutput) do;
     AStatus := P.ExitStatus;
     Result := True;
   finally
+    { The buffers to what was read, on every way out. }
+    SetLength(AOutput, OutLen);
+    SetLength(AError, ErrLen);
     { The tool has ended (or was ended), so the writer's pipe is read or
       broken and it returns. }
     if Writer <> nil then

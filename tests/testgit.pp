@@ -34,6 +34,7 @@ type
     procedure TestWindowsArg;
     procedure TestEmptyArgument;
     procedure TestNulArgument;
+    procedure TestLargeOutput;
     procedure TestTagWithSigningOn;
     procedure TestNoEditor;
     procedure TestInsteadOf;
@@ -4843,6 +4844,29 @@ end;
 
 { A NUL would end the C string the argument is passed as, so the tool
   would get less than was checked: refused on every system. }
+{ A large output comes whole and fast: each piece appended to the
+  string copied all of it, 7.5 s for 130 MB. }
+procedure TGitRepoTest.TestLargeOutput;
+{$IFDEF UNIX}
+var
+  Output, Err: string;
+  Status: integer;
+  T: QWord;
+begin
+  T := GetTickCount64;
+  AssertTrue(RunTool('/bin/sh', '', ['-c', 'head -c 40000000 /dev/zero | tr "\0" a; printf b'],
+    [], [], Output, Err, Status, nil));
+  AssertEquals(40000001, Length(Output));
+  AssertEquals('a', Output[1]);
+  AssertEquals('b', Output[Length(Output)]);
+  AssertEquals('', Err);
+  AssertTrue('took ' + IntToStr(GetTickCount64 - T) + ' ms', GetTickCount64 - T < 3000);
+end;
+{$ELSE}
+begin
+end;
+{$ENDIF}
+
 procedure TGitRepoTest.TestNulArgument;
 var
   Output, Err: string;
