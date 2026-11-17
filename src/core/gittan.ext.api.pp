@@ -1080,7 +1080,9 @@ begin
     Result := '';
 end;
 
-{ A JSON array of strings as arguments; False for anything else. }
+{ A JSON array of strings as arguments; False for anything else, and for
+  a string with a NUL (\u0000), which the C string an argument is passed
+  as would end at, so the program would get less than was checked. }
 function ArgsOf(const AJson: string; out AArgs: TStringArray): boolean;
 var
   Data: TJSONData;
@@ -1100,7 +1102,14 @@ begin
       Exit;
     SetLength(AArgs, Data.Count);
     for i := 0 to Data.Count - 1 do
+    begin
       AArgs[i] := Data.Items[i].AsString;
+      if Pos(#0, AArgs[i]) > 0 then
+      begin
+        AArgs := nil;
+        Exit;
+      end;
+    end;
     Result := True;
   finally
     Data.Free;

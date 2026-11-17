@@ -1317,8 +1317,8 @@ function FnmNodeBin(const AFnmDir: string): string;
 {** Runs AExe in ADir with AArgs, the environment without ASkip's prefixes
   ("NAME=") and with AEnv, and answers whether it started, with its
   output, its error and its exit code in AStatus (see the implementation).
-  On Unix an empty argument is refused: nothing runs and AError says
-  why (see the implementation). }
+  An argument with a NUL, and on Unix an empty one, is refused: nothing
+  runs and AError says why (see the implementation). }
 function RunTool(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of string;
   out AOutput, AError: string; out AStatus: integer;
   AOnOutput: TGittanOutputEvent; const AInput: string = '';
@@ -2292,6 +2292,16 @@ begin
   AOutput := '';
   AError := '';
   AStatus := -1;
+  { An argument is passed as a C string (Windows: in the command line),
+    which a NUL ends: the tool would get less than the caller checked
+    or meant. }
+  for i := 0 to High(AArgs) do
+    if Pos(#0, AArgs[i]) > 0 then
+    begin
+      AError := Format('An argument with a NUL character cannot be passed to %s; ' +
+        'nothing was run.', [ExtractFileName(AExe)]);
+      Exit(False);
+    end;
   {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
   { TProcess makes each argument a C string with StrNew, which gives nil
     for an empty one, and nil ends the argument list: the empty argument

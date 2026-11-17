@@ -1603,6 +1603,15 @@ begin
     AReason := 'gh needs a command';
     Exit;
   end;
+  { A NUL ends the C string the argument is passed as, so gh would get
+    less than what is checked here: "--body-file"#0 passes as a flag
+    of no meaning and arrives as --body-file. }
+  for A in AArgs do
+    if Pos(#0, A) > 0 then
+    begin
+      AReason := 'gh takes no argument with a NUL character';
+      Exit;
+    end;
   Cmd := AArgs[0];
   Known := False;
   for c := 0 to High(Allowed) do

@@ -355,17 +355,23 @@ begin
     'globalThis.out = r.ok + ":" + r.stdout.trim(); });' +
     'Gittan.git.run(["nonsense-command"]).then(function (r) { globalThis.bad = r.ok + ":" + (r.stderr.length > 0); });' +
     'Gittan.git.run(["rev-parse", "--verify", "no-such-ref"]).then(function (r) {' +
-    'globalThis.code = r.status; globalThis.codeErr = r.stderr; }, function (e) { globalThis.code = "rejected: " + e; });',
+    'globalThis.code = r.status; globalThis.codeErr = r.stderr; }, function (e) { globalThis.code = "rejected: " + e; });' +
+    'Gittan.git.run(["log", "--output\u0000", "x"]).then(function (r) { globalThis.nul = "ran: " + r.ok; },' +
+    'function (e) { globalThis.nul = "rejected: " + e; });',
     AllPerms);
   { Each set at all, not truthy: a status of 0 is a wrong answer to show,
     not a wait that never ends. }
   WaitFor(Info^.Ctx, 'globalThis.out !== undefined && globalThis.bad !== undefined && ' +
-    'globalThis.code !== undefined',
-    'JSON.stringify({out: globalThis.out, bad: globalThis.bad, code: globalThis.code})');
+    'globalThis.code !== undefined && globalThis.nul !== undefined',
+    'JSON.stringify({out: globalThis.out, bad: globalThis.bad, code: globalThis.code, nul: globalThis.nul})');
   AssertEquals('the subject', 'true:first', EvalIn(Info^.Ctx, 'globalThis.out'));
   AssertEquals('a failure', 'false:true', EvalIn(Info^.Ctx, 'globalThis.bad'));
   AssertEquals('git''s own exit status (' + EvalIn(Info^.Ctx, 'String(globalThis.codeErr)') + ')',
     '128', EvalIn(Info^.Ctx, 'String(globalThis.code)'));
+  { A NUL would end the C string: git would get --output, not what was
+    passed. }
+  AssertTrue('a NUL refused: ' + EvalIn(Info^.Ctx, 'globalThis.nul'),
+    Pos('rejected: ', EvalIn(Info^.Ctx, 'globalThis.nul')) = 1);
 end;
 
 { exec without data: git.run, exec.run and gh.run run in the shown

@@ -33,6 +33,7 @@ type
   published
     procedure TestWindowsArg;
     procedure TestEmptyArgument;
+    procedure TestNulArgument;
     procedure TestInsteadOf;
     procedure TestChangeKind;
     procedure TestStageFlags;
@@ -4806,6 +4807,22 @@ begin
   AssertTrue(Err, RunGitIn(FDir, ['config', '--local', 'gittan.test', ''], Output, Err));
   AssertEquals('set, empty', '', Trim(Git(['config', 'gittan.test'])));
   {$ENDIF}
+end;
+
+{ A NUL would end the C string the argument is passed as, so the tool
+  would get less than was checked: refused on every system. }
+procedure TGitRepoTest.TestNulArgument;
+var
+  Output, Err: string;
+begin
+  Git(['init', '-q']);
+  Git(['config', 'gittan.test', 'before']);
+  AssertFalse('refused', RunGitIn(FDir, ['config', '--local', 'gittan.test', 'after'#0'x'],
+    Output, Err));
+  AssertTrue(Err, Pos('NUL', Err) > 0);
+  AssertEquals('nothing run', 'before', Trim(Git(['config', 'gittan.test'])));
+  AssertFalse('a tool too', RunCli('git', FDir, ['config', 'gittan.test'#0, 'x'], [], Output, Err));
+  AssertTrue(Err, Pos('NUL', Err) > 0);
 end;
 
 procedure TGitRepoTest.TestParseGitVersion;
