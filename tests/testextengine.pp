@@ -13,7 +13,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, gittan.ext.quickjs, gittan.ext.engine,
-  gittan.ext.host, gittan.ext.registry, gittan.ext.perm, gittan.reviews;
+  gittan.ext.functions, gittan.ext.host, gittan.ext.registry, gittan.ext.perm, gittan.reviews;
 
 type
 
@@ -75,6 +75,8 @@ type
     { The result of a load is the script's last value; an error starts
       with Error:. }
     procedure AssertLoaded(const AMsg, AResult: string);
+    function SlowTask(const ctx: PJSContext; const func: string;
+      const params: JSParameters; out res: JSValueVal): boolean;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -101,6 +103,7 @@ type
     procedure TestConsoleLinesCut;
     procedure TestDialogTextFromChangingToString;
     procedure TestWatchdogStopsNativeLoop;
+    procedure TestUnloadWithPromisePending;
   end;
 
 implementation
@@ -545,6 +548,41 @@ begin
   finally
     FHost.ConfirmDelay := 0;
     ExtWatchdogMs := 10000;
+  end;
+end;
+
+{ A threaded promise native that takes a while, as a git or a fetch would. }
+function TExtEngineTest.SlowTask(const ctx: PJSContext; const func: string;
+  const params: JSParameters; out res: JSValueVal): boolean;
+begin
+  Sleep(200);
+  res := StringToValueVal('done');
+  Result := True;
+end;
+
+{ An extension unloaded while a promise of it is pending lets its heap
+  go: the resolve and reject the task held kept the freed context alive,
+  so six reloads of one that holds some 12 MB ran into the 64 MB cap. }
+procedure TExtEngineTest.TestUnloadWithPromisePending;
+var
+  Info: PExtContextInfo;
+  Round: integer;
+  Res: string;
+begin
+  for Round := 1 to 10 do
+  begin
+    Info := Load('heavy', '', PermBaseline);
+    FEngine.BeginRegistration(Info);
+    try
+      FEngine.AddPromise('slowTask', @SlowTask, 0, 0, True);
+    finally
+      FEngine.EndRegistration;
+    end;
+    Res := string(FEngine.ExtExecuteFile(Info));
+    Res := EvalIn(Info^.Ctx, 'globalThis.big = new Array(400000).fill(0.5);' +
+      'slowTask().then(function () { globalThis.done = true; }); "started"');
+    AssertEquals('round ' + IntToStr(Round), 'started', Res);
+    FEngine.UnloadExtensions;
   end;
 end;
 

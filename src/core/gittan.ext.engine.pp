@@ -1260,6 +1260,7 @@ begin
   FRuntime := JS_NewRuntime;
   if FRuntime = nil then
     raise Exception.Create('Failed to create JS runtime');
+  ExtRuntimeAlive := True;
 
   // Create the context
   FContext := JS_NewContext(FRuntime);
@@ -2141,7 +2142,9 @@ begin
     FContext := nil;
   end;
 
-  // Normal runtime cleanup
+  // Normal runtime cleanup; a promise task that ends later leaves its
+  // values alone from here on.
+  ExtRuntimeAlive := False;
   if Assigned(FRuntime) then
   begin
     try

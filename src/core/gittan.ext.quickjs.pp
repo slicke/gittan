@@ -510,6 +510,9 @@ function JS_SetPropertyUint32(ctx: JSContext; const obj: JSValue; idx: cardinal;
 function JS_SetOpaque(const obj: JSValue; opaque: pointer): integer;
 
 procedure JS_FreeValue(ctx: JSContext; const v: JSValue);
+{** Release a value through its runtime, for when its context may be gone
+    (JS_FreeContext only drops a reference, which a function of it holds). }
+procedure JS_FreeValueRT(rt: JSRuntime; const v: JSValue);
 function JS_DupValue(ctx: JSContext; const v: JSValue): JSValue;
 
 function JS_ToCString(ctx: JSContext; const v: JSValue): pansichar;
@@ -632,6 +635,7 @@ function tq_is_error(v: PJSValue): integer; cdecl; external TQLIB;
 function tq_is_function(ctx: JSContext; v: PJSValue): integer; cdecl; external TQLIB;
 
 procedure tq_free_value(ctx: JSContext; v: PJSValue); cdecl; external TQLIB;
+procedure tq_free_value_rt(rt: JSRuntime; v: PJSValue); cdecl; external TQLIB;
 procedure tq_dup_value(res: PJSValue; ctx: JSContext; v: PJSValue); cdecl; external TQLIB;
 
 procedure tq_get_property_str(res: PJSValue; ctx: JSContext; obj: PJSValue;
@@ -1023,6 +1027,11 @@ end;
 { ================================================================== }
 { Lifetime                                                            }
 { ================================================================== }
+
+procedure JS_FreeValueRT(rt: JSRuntime; const v: JSValue);
+begin
+  tq_free_value_rt(rt, @v);
+end;
 
 procedure JS_FreeValue(ctx: JSContext; const v: JSValue);
 begin
