@@ -54,7 +54,7 @@ var
   Pairs: TGittanKeepArray;
   Found: array of boolean;
   Cr: string;
-  i, k, Old, Next, Left, Emitted: integer;
+  i, k, Old, Next, Left, Emitted, NewLine, Seen: integer;
   FinalNewline, EndNewline: boolean;
 
   { ALine goes into the result; ABare when no newline may follow it,
@@ -114,6 +114,8 @@ begin
       Cr := #13;
     Next := 0;
     Emitted := 0;
+    NewLine := 1;
+    Seen := 0;
     EndNewline := True;
     i := 0;
     while i < ALines.Count do
@@ -129,7 +131,11 @@ begin
         Inc(i);
         Continue;
       end;
-      Pairs := BlockPairs(ALines, i);
+      { The new line counted on from the last block: BlockPairs counts
+        from the top, which made this quadratic. }
+      NewLine := NextNewLine(ALines, Seen, NewLine, i);
+      Seen := i;
+      Pairs := BlockPairsAt(ALines, i, NewLine);
       Old := 0;
       while (i + Old < ALines.Count) and (ALines[i + Old][1] = '-') do
         Inc(Old);

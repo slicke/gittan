@@ -38,6 +38,7 @@ type
     Line: integer;
   end;
   TGittanKeepArray = array of TGittanKeep;
+  TGittanKeepArrays = array of TGittanKeepArray;
 
   { TGittanKeeps }
 
@@ -69,8 +70,21 @@ type
       out AKeptOf, AOldNum: TIntegerDynArray); overload;
   end;
 
-{** The pairs of the block that starts at diff line AStart, in order. }
+{** The pairs of the block that starts at diff line AStart, in order.
+  It counts the new file's line from the top: a walk over every block
+  takes BlockPairsAt with a running count (NextNewLine) instead, or it
+  is quadratic in the diff's length. }
 function BlockPairs(ALines: TStrings; AStart: integer): TGittanKeepArray;
+{** BlockPairs with ANewLine, the new file's line (1-based) at diff line
+  AStart, given. }
+function BlockPairsAt(ALines: TStrings; AStart, ANewLine: integer): TGittanKeepArray;
+{** The new file's line at diff line ATo, from ANewLine at diff line
+  AFrom (AFrom <= ATo): every line between that is not a deletion is one
+  of the new file. }
+function NextNewLine(ALines: TStrings; AFrom, ANewLine, ATo: integer): integer;
+{** BlockPairs of each block that starts at AStarts (in ascending
+  order), in one pass over the diff. }
+function BlockPairsOf(ALines: TStrings; const AStarts: array of integer): TGittanKeepArrays;
 
 {** Whether two keeps name the same change (Line aside). }
 function SameKeep(const A, B: TGittanKeep): boolean;
@@ -105,14 +119,68 @@ begin
     (not A.HasOld or (A.Old = B.Old)) and (not A.HasNew or (A.New = B.New));
 end;
 
+function NextNewLine(ALines: TStrings; AFrom, ANewLine, ATo: integer): integer;
+var
+  i: integer;
+begin
+  Result := ANewLine;
+  for i := AFrom to ATo - 1 do
+    if ALines[i][1] <> '-' then
+      Inc(Result);
+end;
+
+function BlockPairsOf(ALines: TStrings; const AStarts: array of integer): TGittanKeepArrays;
+var
+  b, NewLine, Seen: integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(AStarts));
+  NewLine := 1;
+  Seen := 0;
+  for b := 0 to High(AStarts) do
+  begin
+    if AStarts[b] >= Seen then
+      NewLine := NextNewLine(ALines, Seen, NewLine, AStarts[b])
+    else
+      NewLine := NextNewLine(ALines, 0, 1, AStarts[b]);
+    Seen := AStarts[b];
+    Result[b] := BlockPairsAt(ALines, AStarts[b], NewLine);
+  end;
+end;
+
 function BlockPairs(ALines: TStrings; AStart: integer): TGittanKeepArray;
+begin
+  Result := BlockPairsAt(ALines, AStart, NextNewLine(ALines, 0, 1, AStart));
+end;
+
+function BlockPairsAt(ALines: TStrings; AStart, ANewLine: integer): TGittanKeepArray;
 var
   B: TGittanDiscard;
-  k, Old, New: integer;
+  k, i, Old, New: integer;
 begin
-  B := DiffBlock(ALines, AStart, '');
-  Old := Length(B.OldLines);
-  New := Length(B.NewLines);
+  { DiffBlock's lines without its count from the top. }
+  B.Line := ANewLine;
+  B.OldLines := nil;
+  B.NewLines := nil;
+  Old := 0;
+  New := 0;
+  i := AStart;
+  while (i < ALines.Count) and (ALines[i][1] <> ' ') do
+  begin
+    if ALines[i][1] = '-' then
+    begin
+      SetLength(B.OldLines, Old + 1);
+      B.OldLines[Old] := Copy(ALines[i], 2, MaxInt);
+      Inc(Old);
+    end
+    else
+    begin
+      SetLength(B.NewLines, New + 1);
+      B.NewLines[New] := Copy(ALines[i], 2, MaxInt);
+      Inc(New);
+    end;
+    Inc(i);
+  end;
   Result := nil;
   if Old > New then
     SetLength(Result, Old)
@@ -144,14 +212,18 @@ type
 var
   Cands: array of TCandidate;
   Pairs: TGittanKeepArray;
-  i, j, k, n, Best, Dist, Old: integer;
+  i, j, k, n, Best, Dist, Old, NewLine, Seen: integer;
 begin
   Result := nil;
   SetLength(Result, ALines.Count);
   for i := 0 to High(Result) do
     Result[i] := -1;
+  if Length(AKeeps) = 0 then
+    Exit;
   { Every pair of every block is a candidate for a keep. }
   Cands := nil;
+  NewLine := 1;
+  Seen := 0;
   i := 0;
   while i < ALines.Count do
   begin
@@ -160,7 +232,9 @@ begin
       Inc(i);
       Continue;
     end;
-    Pairs := BlockPairs(ALines, i);
+    NewLine := NextNewLine(ALines, Seen, NewLine, i);
+    Seen := i;
+    Pairs := BlockPairsAt(ALines, i, NewLine);
     n := Length(Cands);
     SetLength(Cands, n + Length(Pairs));
     for k := 0 to High(Pairs) do
@@ -211,12 +285,43 @@ begin
   Result := ApplyKeeps(ALines, AKeeps, AKeptOf, OldNum);
 end;
 
+{ ApplyKeeps without keeps: the lines stay as they are, so only the
+  numbers are made, in one pass. False when a block has a deletion after
+  an addition, which ApplyKeeps would put in order. }
+function NoKeeps(ALines: TStrings; out AKeptOf, AOldNum: TIntegerDynArray): boolean;
+var
+  i, OldLine: integer;
+begin
+  Result := False;
+  AKeptOf := nil;
+  AOldNum := nil;
+  SetLength(AKeptOf, ALines.Count);
+  SetLength(AOldNum, ALines.Count);
+  OldLine := 0;
+  for i := 0 to ALines.Count - 1 do
+  begin
+    AKeptOf[i] := -1;
+    case ALines[i][1] of
+      ' ', '-':
+        begin
+          if (ALines[i][1] = '-') and (i > 0) and (ALines[i - 1][1] = '+') then
+            Exit;
+          Inc(OldLine);
+          AOldNum[i] := OldLine;
+        end;
+    else
+      AOldNum[i] := 0;
+    end;
+  end;
+  Result := True;
+end;
+
 function ApplyKeeps(ALines: TStrings; const AKeeps: array of TGittanKeep;
   out AKeptOf, AOldNum: TIntegerDynArray): integer;
 var
   Match, OldNos: TIntegerDynArray;
   Pairs: TGittanKeepArray;
-  i, k, Keep, Old, OldLine: integer;
+  i, k, Keep, Old, OldLine, NewLine, Seen: integer;
   Out: TStringList;
   Olds, News: TStringList;
 
@@ -252,6 +357,12 @@ begin
   AOldNum := nil;
   OldNos := nil;
   OldLine := 0;
+  NewLine := 1;
+  Seen := 0;
+  if (Length(AKeeps) = 0) and NoKeeps(ALines, AKeptOf, AOldNum) then
+    Exit;
+  AKeptOf := nil;
+  AOldNum := nil;
   Match := MatchKeeps(ALines, AKeeps);
   Out := TStringList.Create;
   Olds := TStringList.Create;
@@ -267,7 +378,9 @@ begin
         Inc(i);
         Continue;
       end;
-      Pairs := BlockPairs(ALines, i);
+      NewLine := NextNewLine(ALines, Seen, NewLine, i);
+      Seen := i;
+      Pairs := BlockPairsAt(ALines, i, NewLine);
       Old := 0;
       while (i + Old < ALines.Count) and (ALines[i + Old][1] = '-') do
         Inc(Old);
