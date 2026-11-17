@@ -2874,6 +2874,7 @@ end;
 procedure TGitRepoTest.TestRemoteEnvironment;
 var
   Env: TStringArray;
+  i: integer;
 begin
   MakeHistory;
   AssertTrue(FRepo.Open(FDir));
@@ -2897,8 +2898,12 @@ begin
     AssertEquals(1, Length(Env));
     AssertEquals('GIT_SSH_COMMAND=', Copy(Env[0], 1, Length('GIT_SSH_COMMAND=')));
   end;
+  { The ssh part alone: the HTTP variables may come from the tests'
+    own environment, or not. }
   Git(['config', 'core.sshCommand', 'ssh -i key']);
-  AssertEquals('the user runs ssh their own way', 0, Length(FRepo.RemoteEnvironment));
+  Env := FRepo.RemoteEnvironment;
+  for i := 0 to High(Env) do
+    AssertFalse('the user runs ssh their own way', Pos('GIT_SSH_COMMAND=', Env[i]) = 1);
 end;
 
 { Sets a variable in the test's own environment, as the shell that
