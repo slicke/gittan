@@ -42,6 +42,15 @@ function ListJson(AList: TStrings): TJSONArray;
 {** A commit as the lists give it. }
 function CommitJson(const ACommit: TGittanCommitLine): TJSONObject;
 
+var
+  {** How long a program git.run, exec.run or forge.cli runs may take, in
+    milliseconds, and how much it may write on both streams, in bytes:
+    past either it is ended, so a hung one does not keep its thread for
+    the session, nor a talkative one fill the memory before the JS heap's
+    cap refuses its string. The tests make them smaller. }
+  ExtToolTimeLimitMs: QWord = 10 * 60 * 1000;
+  ExtToolOutputLimit: Int64 = 32 shl 20;
+
 implementation
 
 uses
@@ -1138,16 +1147,78 @@ begin
   end;
 end;
 
+type
+  { Ends a program an extension runs (RunTool's cancel, asked on every
+    pass of its reading loop): on Reload Extensions or quitting, so the
+    wait for the promise tasks is short, past ExtToolTimeLimitMs, and once
+    it has written more than ExtToolOutputLimit. Why says which. }
+  TToolGuard = class
+  private
+    FDeadline: QWord;
+    FWritten: Int64;
+  public
+    Why: string;
+    constructor Create;
+    procedure Wrote(const AText: string);
+    function Stop: boolean;
+  end;
+
+resourcestring
+  rsToolReload = 'The program was stopped, as the extensions are reloaded.';
+  rsToolTime = 'The program was stopped after %d minutes.';
+  rsToolTimeSeconds = 'The program was stopped after %d seconds.';
+  rsToolOutput = 'The program was stopped, as it wrote more than %d MB.';
+
+constructor TToolGuard.Create;
+begin
+  inherited Create;
+  FDeadline := GetTickCount64 + ExtToolTimeLimitMs;
+end;
+
+procedure TToolGuard.Wrote(const AText: string);
+begin
+  Inc(FWritten, Length(AText));
+end;
+
+function TToolGuard.Stop: boolean;
+begin
+  if Why = '' then
+    if IsExtShuttingDown or ExtHost.Terminated then
+      Why := rsToolReload
+    else if GetTickCount64 > FDeadline then
+    begin
+      if ExtToolTimeLimitMs >= 60000 then
+        Why := Format(rsToolTime, [ExtToolTimeLimitMs div 60000])
+      else
+        Why := Format(rsToolTimeSeconds, [ExtToolTimeLimitMs div 1000]);
+    end
+    else if FWritten > ExtToolOutputLimit then
+      Why := Format(rsToolOutput, [ExtToolOutputLimit shr 20]);
+  Result := Why <> '';
+end;
+
 { Runs a tool and gives git.run's and exec.run's result: its exit code,
   128 and the signal when one ended it (as a shell says), -1 when it did
-  not start. RunTool gives the raw wait status on Unix. }
+  not start or the guard ended it (its reason in stderr, and no stdout).
+  RunTool gives the raw wait status on Unix. }
 function ToolJson(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of string;
   const AInput: string): string;
 var
   Output, Error: string;
   Status: integer;
+  Guard: TToolGuard;
+  Ran: boolean;
 begin
-  if not RunTool(AExe, ADir, AArgs, ASkip, AEnv, Output, Error, Status, nil, AInput) then
+  Guard := TToolGuard.Create;
+  try
+    Ran := RunTool(AExe, ADir, AArgs, ASkip, AEnv, Output, Error, Status, @Guard.Wrote,
+      AInput, @Guard.Stop);
+    if Guard.Why <> '' then
+      Exit(RunJson(False, -1, '', Guard.Why));
+  finally
+    Guard.Free;
+  end;
+  if not Ran then
   begin
     Status := -1;
     if Error = '' then

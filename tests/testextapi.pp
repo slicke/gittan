@@ -52,6 +52,7 @@ type
     procedure TestPromiseAfterUnload;
     procedure TestExecWithoutData;
     procedure TestRunInput;
+    procedure TestRunLimits;
     procedure TestStorage;
     procedure TestSettings;
     procedure TestSettingsTooDeep;
@@ -422,6 +423,35 @@ begin
   AssertEquals('an input not read', 'true:git version', EvalIn(Info^.Ctx, 'globalThis.unread'));
 end;
 
+{ A program that writes without end, or does not end, is stopped with
+  a reason, past the output cap and the time limit. }
+procedure TExtApiTest.TestRunLimits;
+{$IFDEF UNIX}
+var
+  Info: PExtContextInfo;
+begin
+  ExtToolOutputLimit := 1 shl 20;
+  ExtToolTimeLimitMs := 1500;
+  try
+    Info := Load('limits', 'Gittan.exec.run("sh", ["-c", "yes"]).then(function (r) {' +
+      'globalThis.chatty = r.ok + ":" + r.status + ":" + r.stdout.length + ":" + r.stderr; });' +
+      'Gittan.exec.run("sleep", ["30"]).then(function (r) {' +
+      'globalThis.hung = r.ok + ":" + r.status + ":" + r.stderr; });', AllPerms);
+    WaitFor(Info^.Ctx, 'globalThis.chatty && globalThis.hung');
+    AssertEquals('the talkative one', 'false:-1:0:The program was stopped, as it wrote more than 1 MB.',
+      EvalIn(Info^.Ctx, 'globalThis.chatty'));
+    AssertEquals('the hung one', 'false:-1:The program was stopped after 1 seconds.',
+      EvalIn(Info^.Ctx, 'globalThis.hung'));
+  finally
+    ExtToolOutputLimit := 32 shl 20;
+    ExtToolTimeLimitMs := 10 * 60 * 1000;
+  end;
+end;
+{$ELSE}
+begin
+end;
+{$ENDIF}
+
 procedure TExtApiTest.TestExecRun;
 var
   Info: PExtContextInfo;
@@ -439,7 +469,8 @@ end;
   the promise threads; one that finishes later (a slow fetch or command)
   found the shutdown flag cleared again and settled its promise on the
   freed context. The task keeps the context's generation and leaves a
-  promise of a context that is gone alone. }
+  promise of a context that is gone alone; the unload now also ends the
+  program, so the task is done within the wait. }
 procedure TExtApiTest.TestPromiseAfterUnload;
 {$IFDEF UNIX}
 var
@@ -466,7 +497,6 @@ begin
   AssertTrue('the command started', FileExists(Marker));
   FEngine.UnloadExtensions;
   AssertEquals('a freed one has none', 0, ExtContextGeneration(Ctx));
-  AssertEquals('still running after the capped wait', 1, ActiveAsyncTaskCount);
   GiveUpAt := GetTickCount64 + 10000;
   while (ActiveAsyncTaskCount > 0) and (GetTickCount64 < GiveUpAt) do
   begin
