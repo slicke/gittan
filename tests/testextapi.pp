@@ -576,9 +576,9 @@ begin
 end;
 
 { The raw natives stay reachable and take a string past the facade's
-  JSON.stringify; 50 000 levels end a process in fpjson. This runner
-  survives that depth even without the guard (TestGetJSONLimited is what
-  fails then), so this checks the natives refuse it, not the crash. }
+  JSON.stringify; 50 000 levels end a process in fpjson. The JSON is
+  valid, so without the guard the parser goes down all of it and the
+  runner ends here; the natives' own error does not say why. }
 procedure TExtApiTest.TestSettingsTooDeep;
 var
   Info: PExtContextInfo;
@@ -586,11 +586,15 @@ begin
   Info := Load('deep', '', AllPerms);
   AssertEquals('raw native there', 'function', EvalIn(Info^.Ctx, 'typeof Gittan._settingsDefine'));
   AssertEquals('raw message there', 'function', EvalIn(Info^.Ctx, 'typeof Gittan._message'));
+  { Valid JSON, so its syntax is not what refuses it; the message's
+    nesting beside valid text. }
   AssertEquals('refused', 'thrown', EvalIn(Info^.Ctx,
-    'try { Gittan._settingsDefine("[".repeat(50000)); "taken" } catch (e) { "thrown" }'));
+    'try { Gittan._settingsDefine("[".repeat(50000) + "]".repeat(50000)); "taken" } ' +
+    'catch (e) { "thrown" }'));
   AssertEquals('nothing declared', 0, Length(FEngine.Registry.SettingsOf('deep')));
   AssertEquals('a message too', 'thrown', EvalIn(Info^.Ctx,
-    'try { Gittan._message("[".repeat(50000)); "taken" } catch (e) { "thrown" }'));
+    'try { Gittan._message(''{"text": "hi", "x": '' + "[".repeat(50000) + "]".repeat(50000) + ' +
+    '''}''); "taken" } catch (e) { "thrown" }'));
 end;
 
 procedure TExtApiTest.TestPermissionsShape;
