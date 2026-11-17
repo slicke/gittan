@@ -8107,9 +8107,23 @@ begin
   FWatcher.Start;
 end;
 
+{ The watcher is let go, not waited for: a poll under way (a status of a
+  large tree, a snapshot) would hold every commit, stash and switch that
+  stops it. The blame zombies free it once its thread ends; without them
+  (gone already) it is waited for. }
 procedure TRepoFrame.StopWatcher;
 begin
-  FreeAndNil(FWatcher);
+  if FWatcher = nil then
+    Exit;
+  if FBlameZombies <> nil then
+  begin
+    FWatcher.Detach;
+    FBlameZombies.Add(FWatcher);
+    FWatcher := nil;
+    FBlameZombies.FreeFinished(False);
+  end
+  else
+    FreeAndNil(FWatcher);
 end;
 
 function TRepoFrame.WatchPace: integer;

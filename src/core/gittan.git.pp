@@ -297,6 +297,11 @@ type
     FIndexAdded: boolean;
     FIgnoreWhitespace: boolean;
     FNoVerify: boolean;
+    { Fingerprint's content hashes: the paths, sorted, with the index in
+      FHashValues ("time<TAB>size<TAB>hash") as their object, so a file
+      is hashed while its time is fresh, not on every poll. }
+    FHashKeys: TStringList;
+    FHashValues: TStringArray;
     FOnOutput: TGittanOutputEvent;
     { The last MergeConflicts of Snapshot: the two commits merged (HEAD's
       and the default branch's, '' for none), the count and the paths.
@@ -1151,7 +1156,13 @@ type
       modification time of the repository's config, and the size,
       modification time and content hash of every changed file on disk.
       Empty when nothing is open or git failed. Meant for polling: two
-      equal fingerprints mean there is nothing new to show. }
+      equal fingerprints mean there is nothing new to show. A file is
+      hashed only while its time is within FreshSeconds of now (git's
+      racy window: a write in the same second as the last one leaves time
+      and size alike) and it is under HashMax bytes; an older one keeps
+      the hash it had at that time and size, or has none, since a write
+      after it gives a newer time. A 512 MB file not tracked made every
+      poll take 1.7 s. }
     function Fingerprint: string;
     {** Work tree root, empty when nothing is open. }
     property Root: string read FRoot;
@@ -2849,6 +2860,7 @@ end;
 
 destructor TGittanRepo.Destroy;
 begin
+  FHashKeys.Free;
   DropTempIndex;
   inherited Destroy;
 end;
@@ -8321,12 +8333,15 @@ begin
 end;
 
 function TGittanRepo.Fingerprint: string;
+const
+  FreshSeconds = 3;
+  HashMax = 64 * 1024 * 1024;
 var
-  Paths: TStringList;
+  Paths, Keys: TStringList;
+  Values: TStringArray;
   Info: TSearchRec;
-  FileName, Id, Left, Right: string;
-
-  i: integer;
+  FileName, Id, Left, Right, Stamp, Hash, Cached: string;
+  i, k: integer;
 
   { The name, time and size of each file in ADir, none when it is not
     there. }
@@ -8425,22 +8440,49 @@ begin
     { Between two commits the files on disk do not matter. }
     if IsRange then
       Exit;
+    { The hashes of the files changed now, the next cache, so it does
+      not grow. }
+    Keys := TStringList.Create;
+    Keys.CaseSensitive := True;
+    Keys.UseLocale := False;
+    Values := nil;
     for i := 0 to Paths.Count - 1 do
     begin
       FileName := FullPath(Paths[i]);
       if not StatExact(FileName, Info) then
         Continue;
-      Result := Result + Paths[i] + #9 + FormatDateTime('yyyymmddhhnnsszzz', Info.TimeStamp) + #9 + IntToStr(Info.Size);
+      Stamp := FormatDateTime('yyyymmddhhnnsszzz', Info.TimeStamp) + #9 + IntToStr(Info.Size);
+      Result := Result + Paths[i] + #9 + Stamp;
       if Info.Attr and faDirectory = 0 then
-        try
-          Result := Result + #9 + MD5Print(MD5File(FileName));
-        except
-          { Gone or unreadable between the stat and the read; the stat
-            says what it can. }
+      begin
+        Hash := '';
+        Cached := '';
+        if (FHashKeys <> nil) and FHashKeys.Find(Paths[i], k) then
+          Cached := FHashValues[PtrInt(FHashKeys.Objects[k])];
+        if (Abs(Now - Info.TimeStamp) * SecsPerDay < FreshSeconds) and (Info.Size <= HashMax) then
+          try
+            Hash := MD5Print(MD5File(FileName));
+          except
+            { Gone or unreadable between the stat and the read; the stat
+              says what it can. }
+          end
+        else if Copy(Cached, 1, Length(Stamp) + 1) = Stamp + #9 then
+          Hash := Copy(Cached, Length(Stamp) + 2, MaxInt);
+        if Hash <> '' then
+        begin
+          Result := Result + #9 + Hash;
+          Keys.AddObject(Paths[i], TObject(PtrInt(Length(Values))));
+          SetLength(Values, Length(Values) + 1);
+          Values[High(Values)] := Stamp + #9 + Hash;
         end;
+      end;
       Result := Result + #10;
       FindClose(Info);
     end;
+    Keys.Sorted := True;
+    FHashKeys.Free;
+    FHashKeys := Keys;
+    FHashValues := Values;
   finally
     Paths.Free;
   end;

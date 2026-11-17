@@ -634,6 +634,23 @@ begin
   AssertTrue(FRepo.Fingerprint <> '');
 end;
 
+{ The tabs of the line of AFingerprint that starts with APath and a tab. }
+function TabsOfLine(const AFingerprint, APath: string): integer;
+var
+  Line: string;
+  c: char;
+begin
+  Result := -1;
+  for Line in AFingerprint.Split([#10]) do
+    if Pos(APath + #9, Line) = 1 then
+    begin
+      Result := 0;
+      for c in Line do
+        if c = #9 then
+          Inc(Result);
+    end;
+end;
+
 procedure TGitRepoTest.TestFingerprint;
 
 var
@@ -691,6 +708,13 @@ begin
   AssertTrue('the personal file seen', A <> B);
   WriteFile('a.txt', 'changed in the work tree'#10);
   AssertEquals('a work tree file not, in a range', A, FRepo.Fingerprint);
+  { A file written now is hashed, one an hour old not (a 512 MB file
+    made every poll take 1.7 s): a write after it gives a newer time. }
+  FRepo.Base := '';
+  WriteFile('new.txt', 'k'#10);
+  AssertEquals('fresh: time, size and hash', 3, TabsOfLine(FRepo.Fingerprint, 'new.txt'));
+  AssertEquals(0, FileSetDate(FDir + PathDelim + 'new.txt', DateTimeToFileDate(Now - 1 / 24)));
+  AssertEquals('old: time and size', 2, TabsOfLine(FRepo.Fingerprint, 'new.txt'));
 end;
 
 { A snapshot holds the untracked files, and the whole tree comparison

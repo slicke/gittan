@@ -43,6 +43,12 @@ type
     destructor Destroy; override;
     {** Drops the handler, ends the thread and waits for it. }
     procedure Stop;
+    {** Drops the handler and asks the thread to end, without waiting:
+      the caller hands it to a TGittanJobReaper, so a stop does not
+      hold the main thread for the rest of a poll. The thread's git runs
+      with GIT_OPTIONAL_LOCKS=0, so it takes no lock the caller's next
+      command would trip over. }
+    procedure Detach;
     {** Polls at once instead of when the current interval runs out. }
     procedure Poll;
     {** Called in the main thread after the repository changed. }
@@ -169,6 +175,8 @@ begin
       Break;
     try
       Fingerprint := FRepo.Fingerprint;
+      if Terminated then
+        Break;
       if Fingerprint <> FLast then
       begin
         Ok := FRepo.Snapshot(FSnapshot);
@@ -209,6 +217,12 @@ begin
   FOnChange := nil;
   Terminate;
   WaitFor;
+end;
+
+procedure TGittanWatcher.Detach;
+begin
+  FOnChange := nil;
+  Terminate;
 end;
 
 { TGittanOpenJob }
