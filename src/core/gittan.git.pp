@@ -7918,16 +7918,22 @@ end;
   merged branch's commits are left out; the other parents are cut from
   each commit too, since LayoutGraph would keep a lane open for them to
   the end. With ANoMerges the merges are left out, and their children
-  name parents the list lacks; the graph shows such a list flat. }
+  name parents the list lacks; the graph shows such a list flat, and
+  those parents are cut for the layout (DropMissingParents), then put
+  back, since a fixup takes its commit's first parent: every merged
+  branch's lane stayed open to the end, rows times lanes, 44 s and
+  900 MB for 20,000 commits. }
 function TGittanRepo.GraphCommits(out ACommits: TGittanGraphCommits;
   AMax: integer; AFirstParent: boolean; ANoMerges: boolean): boolean;
 var
   Output, Ahead, Behind: string;
   Args: array of string;
+  Kept: array of TStringArray;
   i: integer;
   Born: boolean;
 begin
   ACommits := nil;
+  Kept := nil;
   SetLength(Args, Length(GraphLogArgs));
   for i := 0 to High(GraphLogArgs) do
     Args[i] := GraphLogArgs[i];
@@ -7954,7 +7960,18 @@ begin
     for i := 0 to High(ACommits) do
       if Length(ACommits[i].Parents) > 1 then
         SetLength(ACommits[i].Parents, 1);
+  if ANoMerges then
+  begin
+    SetLength(Kept, Length(ACommits));
+    for i := 0 to High(ACommits) do
+      { A copy: DropMissingParents writes into the array itself. }
+      Kept[i] := Copy(ACommits[i].Parents);
+    DropMissingParents(ACommits);
+  end;
   LayoutGraph(ACommits);
+  if ANoMerges then
+    for i := 0 to High(ACommits) do
+      ACommits[i].Parents := Kept[i];
 end;
 
 { git names the format after the extension of -o's file. }

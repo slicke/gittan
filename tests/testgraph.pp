@@ -20,6 +20,7 @@ type
     procedure TestBranchAndMerge;
     procedure TestTwoTips;
     procedure TestMissingParent;
+    procedure TestDropMissingParents;
     procedure TestRefs;
     procedure TestFilter;
   end;
@@ -121,6 +122,36 @@ begin
   AssertEquals(1, FCommits[1].Lane);
   AssertTrue(HasEdge(FCommits[2].TopEdges, 1, 1));
   AssertTrue('still open below the last row', HasEdge(FCommits[2].BottomEdges, 1, 1));
+end;
+
+{ Without the merges every merged branch's first commit names a parent
+  the list lacks; cut, no lane stays open for it, and 20,000 such
+  commits (44 s and 900 MB before) lay out at once. }
+procedure TGraphTest.TestDropMissingParents;
+var
+  i: integer;
+  T: QWord;
+begin
+  FCommits := nil;
+  Add('c', 'b x');
+  Add('b', 'a y');
+  Add('a', '');
+  DropMissingParents(FCommits);
+  AssertEquals(1, Length(FCommits[0].Parents));
+  AssertEquals('b', FCommits[0].Parents[0]);
+  AssertEquals('a', FCommits[1].Parents[0]);
+  AssertEquals(0, Length(FCommits[2].Parents));
+  FCommits := nil;
+  for i := 0 to 19999 do
+    if i mod 5 = 4 then
+      Add('c' + IntToStr(i), 'merge' + IntToStr(i))
+    else
+      Add('c' + IntToStr(i), 'c' + IntToStr(i + 1));
+  T := GetTickCount64;
+  DropMissingParents(FCommits);
+  LayoutGraph(FCommits);
+  AssertTrue('took ' + IntToStr(GetTickCount64 - T) + ' ms', GetTickCount64 - T < 2000);
+  AssertEquals(1, GraphWidth(FCommits));
 end;
 
 procedure TGraphTest.TestRefs;

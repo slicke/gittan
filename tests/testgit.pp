@@ -1652,7 +1652,14 @@ begin
   AssertTrue('on side kept', Found);
   AssertTrue(FRepo.GraphCommits(Commits, 500, True, True));
   AssertEquals(2, Length(Commits));
-  AssertEquals('on main', Commits[0].Subject);
+  AssertEquals('on main', Commits[0].Subject);  { A commit on the merge: the layout leaves out the parent the list
+    lacks, the commit keeps it (a fixup rebases onto it). }
+  WriteFile('a.txt', 'after'#10);
+  Commit('after the merge');
+  AssertTrue(FRepo.GraphCommits(Commits, 500, False, True));
+  AssertEquals('after the merge', Commits[0].Subject);
+  AssertEquals(Trim(Git(['rev-parse', 'HEAD~1'])), Commits[0].Parents[0]);
+  AssertEquals('no lane kept open for the merge', 0, Length(Commits[0].BottomEdges));
 end;
 
 { A note is set, read by the graph and the details, replaced and

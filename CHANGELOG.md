@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- The commit graph with No Merges no longer takes seconds and hundreds of megabytes on a long history (20,000 commits took 44 s); it lays out at once.
 - A large changed or untracked file no longer slows down every poll of the repository and every commit, stash or switch: its content is hashed only while it is being written (a 512 MB file cost 1.7 s a poll, now 40 ms), and those commands no longer wait for a poll under way.
 - Showing a large diff or file no longer slows down with its size: git's output is read without copying all of it for every piece (a 130 MB diff took 7.5 s, now a fraction of a second).
 - The Project page of a Lazarus repository no longer follows symbolic links when it looks for packages; a few committed links to the repository itself made it hang for minutes.
