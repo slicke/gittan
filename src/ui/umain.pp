@@ -1944,6 +1944,7 @@ type
     procedure IndexParseDone(Sender: TObject; ATime: integer);
     procedure IndexTimerTimer(Sender: TObject);
     function ShownRelPath: string;
+    function TreeFilePaths: TStringList;
     function FindInRepo(const AWord: string; out APath: string;
       out ASymbol: TGittanSymbol): boolean;
     procedure ShowRepoFile(const ARelPath: string);

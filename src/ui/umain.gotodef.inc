@@ -381,8 +381,7 @@ end;
 procedure TRepoFrame.MenuGoToRepoSymbolClick(Sender: TObject);
 var
   Names, Details: TStringList;
-  Seen: TStringList;
-  Node: TTreeNode;
+  Seen, Paths: TStringList;
   E: TGittanIndexEntry;
   Path: string;
   i: integer;
@@ -411,27 +410,23 @@ begin
   FSymbolFiles := TStringList.Create;
   Names := TStringList.Create;
   Details := TStringList.Create;
+  Paths := nil;
   Seen := TStringList.Create;
   try
     Seen.CaseSensitive := True;
     Seen.Sorted := True;
     Seen.Duplicates := dupIgnore;
-    { FSymbols grows as AddFile needs and is cut to size after. }
+    { FSymbols grows as AddFile needs and is cut to size after. The
+      paths are taken first: FileSymbols pumps messages, where the tree
+      may be filled again (TreeFilePaths). }
     SetLength(FSymbols, 0);
-    Node := FileTree.Items.GetFirstNode;
-    while Node <> nil do
-    begin
-      if Node.Data <> nil then
+    Paths := TreeFilePaths;
+    for Path in Paths do
+      if Seen.IndexOf(Path) < 0 then
       begin
-        Path := Node.GetTextPath;
-        if Seen.IndexOf(Path) < 0 then
-        begin
-          Seen.Add(Path);
-          AddFile(Path, FileSymbols(Path));
-        end;
+        Seen.Add(Path);
+        AddFile(Path, FileSymbols(Path));
       end;
-      Node := Node.GetNext;
-    end;
     Path := ShownRelPath;
     if (Path <> '') and (Seen.IndexOf(Path) < 0) then
     begin
@@ -448,6 +443,7 @@ begin
     SetLength(FSymbols, Names.Count);
     FSymbolBar.SetSymbols(Names, nil, Details, True, rsRepoSymbolHint);
   finally
+    Paths.Free;
     Seen.Free;
     Details.Free;
     Names.Free;
