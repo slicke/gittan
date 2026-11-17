@@ -625,6 +625,10 @@ begin
         App.Settings.ClearExtPerm(V.ExtResetPerms[i]);
         ExtChanged := True;
       end;
+      { To disk at once, not at the window's close: an extension turned
+        off or its permissions taken back holds for a Gittan started
+        meanwhile, and Save merges with what another one wrote. }
+      App.Settings.Save;
       if ExtChanged then
         App.Extensions.Reload;
     end

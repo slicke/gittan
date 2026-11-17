@@ -7,7 +7,12 @@ unit gittan.settings;
   the recent repositories, the commit draft, the trust given to commands
   files and extensions). Each is read whole and written whole through a
   temporary file renamed over it, with the keys Gittan does not know kept
-  as they were, so a newer build's keys outlast an older one. A missing or
+  as they were, so a newer build's keys outlast an older one. A save
+  reads the file again and merges (MergeDocs): what this process changed
+  since it read or last wrote the file wins, the rest is the file's, so
+  two Gittan processes do not undo each other's choices (an extension
+  turned off or its permissions taken back, a key or a commands file
+  trusted). A missing or
   broken file costs nothing but the defaults. Earlier builds kept one ini
   file, gittan.ini, which is not read: OldIniFound tells it is there with
   neither JSON file, so the window can say the settings started over. }
@@ -77,6 +82,10 @@ type
       extensions' (extensions) and their grants (extensionGrants), the
       trust (trust) and the project kinds (projectKinds). }
     FSettingsDoc, FStateDoc: TJSONObject;
+    { The documents as this process last read or wrote them, after
+      PutSettings and PutState: what Save holds the in-memory ones
+      against to tell this process's changes from another's. }
+    FSettingsBase, FStateBase: TJSONObject;
     FDir: string;
     FOldIniFound: boolean;
     FDamagedFiles: string;
@@ -85,7 +94,8 @@ type
     function GrantObj(const AId: string; ACreate: boolean): TJSONObject;
     procedure PutSettings;
     procedure PutState;
-    function WriteState: boolean;
+    procedure ReadFields;
+    procedure TakeBase;
   public
     {** The tab shown when the window closed, an index into Tabs. }
     ActiveTab: integer;
@@ -609,6 +619,8 @@ begin
   FTrustedKeys := TStringList.Create;
   FSettingsDoc := TJSONObject.Create;
   FStateDoc := TJSONObject.Create;
+  FSettingsBase := TJSONObject.Create;
+  FStateBase := TJSONObject.Create;
   if ADir <> '' then
     FDir := ExcludeTrailingPathDelimiter(ADir)
   else
@@ -631,6 +643,8 @@ destructor TGittanSettings.Destroy;
 begin
   FSettingsDoc.Free;
   FStateDoc.Free;
+  FSettingsBase.Free;
+  FStateBase.Free;
   FRecent.Free;
   FPaletteRecent.Free;
   FTabs.Free;
@@ -699,7 +713,6 @@ end;
 
 procedure TGittanSettings.Load;
 var
-  O, Sub: TJSONObject;
   Damaged: boolean;
 begin
   FreeAndNil(FSettingsDoc);
@@ -715,7 +728,26 @@ begin
     FDamagedFiles := FDamagedFiles + ', ' + StateFileName
   else if Damaged then
     FDamagedFiles := StateFileName;
+  ReadFields;
+  TakeBase;
+end;
 
+{ The documents as they stand, with the fields put in, become the base:
+  a field never touched then equals it, a key the file lacked included. }
+procedure TGittanSettings.TakeBase;
+begin
+  PutSettings;
+  PutState;
+  FSettingsBase.Free;
+  FSettingsBase := TJSONObject(FSettingsDoc.Clone);
+  FStateBase.Free;
+  FStateBase := TJSONObject(FStateDoc.Clone);
+end;
+
+procedure TGittanSettings.ReadFields;
+var
+  O, Sub: TJSONObject;
+begin
   O := ObjOf(FSettingsDoc, 'editor');
   FontName := StrOf(O, 'fontName');
   { A value edited by hand past what the settings dialog and the zoom
@@ -911,19 +943,177 @@ begin
   ChildOf(FStateDoc, 'batch').Strings['operation'] := BatchOperation;
 end;
 
-function TGittanSettings.WriteState: boolean;
+{ The fingerprint of a trusted key's entry (gittan.signing's
+  TrustEntryKey; this unit does not use that one). }
+function KeyFpr(const AEntry: string): string;
 begin
-  PutState;
-  Result := WriteFileReplacing(StateFile, FStateDoc.FormatJSON(JsonLayout) + LineEnding);
+  Result := UpperCase(Trim(AEntry.Split([#31])[0]));
+end;
+
+{ The trusted keys as a set by fingerprint: the file's, less the ones
+  this process dropped since the base, with this process's added or
+  changed ones in. }
+procedure MergeTrustedKeys(ABase, AMine, ATheirs, AResult: TJSONObject);
+var
+  Base, Mine, Merged: TStringList;
+  i, k: integer;
+  Found: boolean;
+begin
+  Base := TStringList.Create;
+  Mine := TStringList.Create;
+  Merged := TStringList.Create;
+  try
+    ListOf(ObjOf(ABase, 'signing'), 'trustedKeys', Base);
+    ListOf(ObjOf(AMine, 'signing'), 'trustedKeys', Mine);
+    ListOf(ObjOf(ATheirs, 'signing'), 'trustedKeys', Merged);
+    { Dropped here: in the base, no entry of its key left in mine. }
+    for i := 0 to Base.Count - 1 do
+    begin
+      Found := False;
+      for k := 0 to Mine.Count - 1 do
+        if KeyFpr(Mine[k]) = KeyFpr(Base[i]) then
+          Found := True;
+      if not Found then
+        for k := Merged.Count - 1 downto 0 do
+          if KeyFpr(Merged[k]) = KeyFpr(Base[i]) then
+            Merged.Delete(k);
+    end;
+    { Added or changed here. }
+    for i := 0 to Mine.Count - 1 do
+      if Base.IndexOf(Mine[i]) < 0 then
+      begin
+        Found := False;
+        for k := 0 to Merged.Count - 1 do
+          if KeyFpr(Merged[k]) = KeyFpr(Mine[i]) then
+          begin
+            Merged[k] := Mine[i];
+            Found := True;
+          end;
+        if not Found then
+          Merged.Add(Mine[i]);
+      end;
+    if (Merged.Count > 0) or (ObjOf(AResult, 'signing') <> nil) then
+      ChildOf(AResult, 'signing').Arrays['trustedKeys'] := ListJson(Merged);
+  finally
+    Base.Free;
+    Mine.Free;
+    Merged.Free;
+  end;
+end;
+
+function MergeDocs(ABase, AMine, ATheirs: TJSONObject): TJSONObject;
+var
+  Names: TStringList;
+  i: integer;
+  Name: string;
+  B, M, T: TJSONData;
+  Empty: TJSONObject;
+begin
+  Result := TJSONObject.Create;
+  Names := TStringList.Create;
+  try
+    { In the file's order, then this process's new keys, so a merge
+      does not reorder the file. }
+    Names.CaseSensitive := True;
+    for i := 0 to ATheirs.Count - 1 do
+      if Names.IndexOf(ATheirs.Names[i]) < 0 then
+        Names.Add(ATheirs.Names[i]);
+    for i := 0 to AMine.Count - 1 do
+      if Names.IndexOf(AMine.Names[i]) < 0 then
+        Names.Add(AMine.Names[i]);
+    for i := 0 to ABase.Count - 1 do
+      if Names.IndexOf(ABase.Names[i]) < 0 then
+        Names.Add(ABase.Names[i]);
+    for Name in Names do
+    begin
+      B := ABase.Find(Name);
+      M := AMine.Find(Name);
+      T := ATheirs.Find(Name);
+      if M = nil then
+      begin
+        { Dropped here wins; never here, the file's. }
+        if (B = nil) and (T <> nil) then
+          Result.Add(Name, T.Clone);
+      end
+      else if (B <> nil) and (M.AsJSON = B.AsJSON) then
+      begin
+        { Not changed here: the file's, or nothing when it dropped it. }
+        if T <> nil then
+          Result.Add(Name, T.Clone);
+      end
+      else if (M is TJSONObject) and (T is TJSONObject) then
+      begin
+        if B is TJSONObject then
+          Result.Add(Name, MergeDocs(TJSONObject(B), TJSONObject(M), TJSONObject(T)))
+        else
+        begin
+          { Made here and in the file: each key as above, from no base. }
+          Empty := TJSONObject.Create;
+          try
+            Result.Add(Name, MergeDocs(Empty, TJSONObject(M), TJSONObject(T)));
+          finally
+            Empty.Free;
+          end;
+        end;
+      end
+      else
+        Result.Add(Name, M.Clone);
+    end;
+  finally
+    Names.Free;
+  end;
+end;
+
+{ Reads AFileName again and gives what to write: ADoc merged into it
+  against ABase. A file missing or broken now is taken as the base, so
+  what was never changed here is kept. }
+function MergedWithFile(const AFileName: string; ABase, ADoc: TJSONObject;
+  ATrustedKeys: boolean): TJSONObject;
+var
+  Theirs: TJSONObject;
+  Damaged: boolean;
+begin
+  if FileExists(AFileName) then
+    Theirs := ReadDoc(AFileName, Damaged)
+  else
+  begin
+    Theirs := nil;
+    Damaged := True;
+  end;
+  if Damaged then
+  begin
+    Theirs.Free;
+    Theirs := TJSONObject(ABase.Clone);
+  end;
+  try
+    Result := MergeDocs(ABase, ADoc, Theirs);
+    if ATrustedKeys then
+      MergeTrustedKeys(ABase, ADoc, Theirs, Result);
+  finally
+    Theirs.Free;
+  end;
 end;
 
 procedure TGittanSettings.Save;
+var
+  Doc: TJSONObject;
 begin
   try
     PutSettings;
+    PutState;
+    Doc := MergedWithFile(SettingsFile, FSettingsBase, FSettingsDoc, True);
+    FSettingsDoc.Free;
+    FSettingsDoc := Doc;
+    Doc := MergedWithFile(StateFile, FStateBase, FStateDoc, False);
+    FStateDoc.Free;
+    FStateDoc := Doc;
+    { The other process's changes are this one's now, and the fields
+      follow; the base is what goes to disk. }
+    ReadFields;
+    TakeBase;
     { The API key is in the file as it is, so no one else may read it. }
     WriteFileReplacing(SettingsFile, FSettingsDoc.FormatJSON(JsonLayout) + LineEnding, &600);
-    WriteState;
+    WriteFileReplacing(StateFile, FStateDoc.FormatJSON(JsonLayout) + LineEnding);
   except
     { Nothing to do; the next run starts with what was saved before. }
   end;

@@ -37,6 +37,7 @@ type
     procedure TestExtValueList;
     procedure TestDefaultFontSize;
     procedure TestTrust;
+    procedure TestTwoProcesses;
     procedure TestProjectKinds;
     procedure TestForgeValues;
     procedure TestExtensions;
@@ -687,6 +688,81 @@ begin
   AssertEquals('a large screen gets a size up', DefaultFontSize(1080) + 1,
     DefaultFontSize(1440));
   AssertEquals(DefaultFontSize(1080) + 2, DefaultFontSize(2160));
+end;
+
+{ Two Gittan processes load the same files; each one's save keeps what
+  the other changed, a permission taken back and a key trusted among
+  it, and what neither touched. }
+procedure TSettingsTest.TestTwoProcesses;
+var
+  A, B, C: TGittanSettings;
+begin
+  A := TGittanSettings.Create(FDir);
+  try
+    A.SetExtPerm('ext.b', 'Hash', 'abc');
+    A.SetExtValue('ext.c', 'k', 'v');
+    A.AddTrustedKey('OLD'#31'github.com'#31'old'#31'old@x');
+    A.Save;
+  finally
+    A.Free;
+  end;
+  A := TGittanSettings.Create(FDir);
+  B := TGittanSettings.Create(FDir);
+  try
+    A.Load;
+    B.Load;
+    A.SetExtEnabled('ext.a', False);
+    A.ClearExtPerm('ext.b');
+    A.TrustCommands('/repo', 'h1');
+    A.AddTrustedKey('AAAA'#31'github.com'#31'ada'#31'ada@x');
+    A.Save;
+    B.FontSize := 14;
+    B.AddTrustedKey('BBBB'#31'github.com'#31'bob'#31'bob@x');
+    B.Save;
+    AssertEquals('B sees A''s key after its save', 3, B.TrustedKeys.Count);
+    AssertTrue('and A''s trust', B.CommandsTrusted('/repo', 'h1'));
+  finally
+    A.Free;
+    B.Free;
+  end;
+  C := TGittanSettings.Create(FDir);
+  try
+    C.Load;
+    AssertEquals('B''s change', 14, C.FontSize);
+    AssertFalse('A turned the extension off', C.ExtEnabled('ext.a'));
+    AssertFalse('A took the permissions back', C.HasExtPerm('ext.b'));
+    AssertTrue('A trusted the commands file', C.CommandsTrusted('/repo', 'h1'));
+    AssertEquals('every key kept', 3, C.TrustedKeys.Count);
+    AssertEquals('what neither touched', 'v', C.ExtValue('ext.c', 'k'));
+  finally
+    C.Free;
+  end;
+
+  { A key one process drops stays dropped though the other saves later. }
+  A := TGittanSettings.Create(FDir);
+  B := TGittanSettings.Create(FDir);
+  try
+    A.Load;
+    B.Load;
+    A.TrustedKeys.Delete(0);
+    A.Zoom := 120;
+    A.Save;
+    B.Width := 800;
+    B.Save;
+    AssertEquals('B did not touch the zoom', 120, B.Zoom);
+  finally
+    A.Free;
+    B.Free;
+  end;
+  C := TGittanSettings.Create(FDir);
+  try
+    C.Load;
+    AssertEquals(2, C.TrustedKeys.Count);
+    AssertEquals(120, C.Zoom);
+    AssertEquals(800, C.Width);
+  finally
+    C.Free;
+  end;
 end;
 
 procedure TSettingsTest.TestTrust;
