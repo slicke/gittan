@@ -133,15 +133,15 @@ begin
   Caption := rsIdentityDlgTitle;
   BorderStyle := bsDialog;
   Position := poMainFormCenter;
-  Constraints.MinWidth := Scale96ToScreen(DialogWidth);
-  Constraints.MaxWidth := Scale96ToScreen(DialogWidth);
+  Constraints.MinWidth := Scale96ToForm(DialogWidth);
+  Constraints.MaxWidth := Scale96ToForm(DialogWidth);
   AutoSize := True;
 
   Note := TLabel.Create(Self);
   Note.Caption := rsIdentityDlgHint;
   Note.WordWrap := True;
   Note.Align := alTop;
-  Note.BorderSpacing.Around := Scale96ToScreen(Margin);
+  Note.BorderSpacing.Around := Scale96ToForm(Margin);
   Note.Top := 0;
   Note.Parent := Self;
 
@@ -157,9 +157,9 @@ begin
   FLocal.Align := alTop;
   Inc(FNextTop, 1000);
   FLocal.Top := FNextTop;
-  FLocal.BorderSpacing.Left := Scale96ToScreen(Margin + LabelWidth);
-  FLocal.BorderSpacing.Right := Scale96ToScreen(Margin);
-  FLocal.BorderSpacing.Top := Scale96ToScreen(4);
+  FLocal.BorderSpacing.Left := Scale96ToForm(Margin + LabelWidth);
+  FLocal.BorderSpacing.Right := Scale96ToForm(Margin);
+  FLocal.BorderSpacing.Top := Scale96ToForm(4);
   FLocal.Parent := Self;
 
   Head := TLabel.Create(Self);
@@ -168,8 +168,8 @@ begin
   Head.Align := alTop;
   Inc(FNextTop, 1000);
   Head.Top := FNextTop;
-  Head.BorderSpacing.Left := Scale96ToScreen(Margin);
-  Head.BorderSpacing.Top := Scale96ToScreen(16);
+  Head.BorderSpacing.Left := Scale96ToForm(Margin);
+  Head.BorderSpacing.Top := Scale96ToForm(16);
   Head.Parent := Self;
   SignNote := TLabel.Create(Self);
   SignNote.Caption := rsIdentityDlgSignHint;
@@ -177,10 +177,10 @@ begin
   SignNote.Align := alTop;
   Inc(FNextTop, 1000);
   SignNote.Top := FNextTop;
-  SignNote.BorderSpacing.Left := Scale96ToScreen(Margin);
-  SignNote.BorderSpacing.Right := Scale96ToScreen(Margin);
-  SignNote.BorderSpacing.Top := Scale96ToScreen(4);
-  SignNote.BorderSpacing.Bottom := Scale96ToScreen(8);
+  SignNote.BorderSpacing.Left := Scale96ToForm(Margin);
+  SignNote.BorderSpacing.Right := Scale96ToForm(Margin);
+  SignNote.BorderSpacing.Top := Scale96ToForm(4);
+  SignNote.BorderSpacing.Bottom := Scale96ToForm(8);
   SignNote.Parent := Self;
 
   FSign := TComboBox.Create(Self);
@@ -205,8 +205,8 @@ begin
   FResult.Align := alTop;
   Inc(FNextTop, 1000);
   FResult.Top := FNextTop;
-  FResult.BorderSpacing.Left := Scale96ToScreen(Margin + LabelWidth);
-  FResult.BorderSpacing.Right := Scale96ToScreen(Margin);
+  FResult.BorderSpacing.Left := Scale96ToForm(Margin + LabelWidth);
+  FResult.BorderSpacing.Right := Scale96ToForm(Margin);
   FResult.Parent := Self;
 
   { Save on the right on macOS, Cancel on the right elsewhere; Test at
@@ -217,13 +217,13 @@ begin
   Buttons.Align := alTop;
   Inc(FNextTop, 1000);
   Buttons.Top := FNextTop;
-  Buttons.BorderSpacing.Around := Scale96ToScreen(Margin);
-  Buttons.BorderSpacing.Top := Scale96ToScreen(16);
+  Buttons.BorderSpacing.Around := Scale96ToForm(Margin);
+  Buttons.BorderSpacing.Top := Scale96ToForm(16);
   Buttons.Parent := Self;
   FTest := TButton.Create(Self);
   FTest.Caption := rsIdentityDlgTest;
   FTest.AutoSize := True;
-  FTest.Constraints.MinWidth := Scale96ToScreen(84);
+  FTest.Constraints.MinWidth := Scale96ToForm(84);
   FTest.Align := alLeft;
   FTest.OnClick := @TestClick;
   FTest.Parent := Buttons;
@@ -232,7 +232,7 @@ begin
   FSaveButton.ModalResult := mrOK;
   FSaveButton.Default := True;
   FSaveButton.AutoSize := True;
-  FSaveButton.Constraints.MinWidth := Scale96ToScreen(84);
+  FSaveButton.Constraints.MinWidth := Scale96ToForm(84);
   FSaveButton.Align := alRight;
   FSaveButton.Parent := Buttons;
   Cancel := TButton.Create(Self);
@@ -240,7 +240,7 @@ begin
   Cancel.ModalResult := mrCancel;
   Cancel.Cancel := True;
   Cancel.AutoSize := True;
-  Cancel.Constraints.MinWidth := Scale96ToScreen(84);
+  Cancel.Constraints.MinWidth := Scale96ToForm(84);
   Cancel.Align := alRight;
   Cancel.Parent := Buttons;
   {$IFDEF DARWIN}
@@ -250,8 +250,8 @@ begin
   FSaveButton.Left := 0;
   Cancel.Left := 1000;
   {$ENDIF}
-  Cancel.BorderSpacing.Left := Scale96ToScreen(8);
-  FSaveButton.BorderSpacing.Left := Scale96ToScreen(8);
+  Cancel.BorderSpacing.Left := Scale96ToForm(8);
+  FSaveButton.BorderSpacing.Left := Scale96ToForm(8);
 end;
 
 { A row under the ones before it: the caption in a column of its own,
@@ -266,22 +266,22 @@ begin
   Panel.Align := alTop;
   Inc(FNextTop, 1000);
   Panel.Top := FNextTop;
-  Panel.BorderSpacing.Left := Scale96ToScreen(Margin);
-  Panel.BorderSpacing.Right := Scale96ToScreen(Margin);
-  Panel.BorderSpacing.Bottom := Scale96ToScreen(6);
+  Panel.BorderSpacing.Left := Scale96ToForm(Margin);
+  Panel.BorderSpacing.Right := Scale96ToForm(Margin);
+  Panel.BorderSpacing.Bottom := Scale96ToForm(6);
   Panel.AutoSize := True;
   Panel.Parent := Self;
   Lbl := TLabel.Create(Self);
   Lbl.Caption := ACaption;
   Lbl.AutoSize := False;
-  Lbl.Width := Scale96ToScreen(LabelWidth);
+  Lbl.Width := Scale96ToForm(LabelWidth);
   Lbl.Align := alLeft;
   Lbl.Layout := tlCenter;
   Lbl.Parent := Panel;
   if AButton <> nil then
   begin
     AButton.Align := alRight;
-    AButton.BorderSpacing.Left := Scale96ToScreen(6);
+    AButton.BorderSpacing.Left := Scale96ToForm(6);
     AButton.Parent := Panel;
   end;
   AControl.Align := alClient;

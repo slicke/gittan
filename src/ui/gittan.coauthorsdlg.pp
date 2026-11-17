@@ -83,15 +83,15 @@ begin
   Caption := rsCoAuthorsDlgTitle;
   BorderStyle := bsDialog;
   Position := poMainFormCenter;
-  Constraints.MinWidth := Scale96ToScreen(DialogWidth);
-  Constraints.MaxWidth := Scale96ToScreen(DialogWidth);
+  Constraints.MinWidth := Scale96ToForm(DialogWidth);
+  Constraints.MaxWidth := Scale96ToForm(DialogWidth);
   AutoSize := True;
 
   Note := TLabel.Create(Self);
   Note.Caption := rsCoAuthorsDlgHint;
   Note.WordWrap := True;
   Note.Align := alTop;
-  Note.BorderSpacing.Around := Scale96ToScreen(Margin);
+  Note.BorderSpacing.Around := Scale96ToForm(Margin);
   Note.Top := 0;
   Note.Parent := Self;
 
@@ -99,9 +99,9 @@ begin
   FList.Align := alTop;
   Inc(FNextTop, 1000);
   FList.Top := FNextTop;
-  FList.Height := Scale96ToScreen(ListRows * 22);
-  FList.BorderSpacing.Left := Scale96ToScreen(Margin);
-  FList.BorderSpacing.Right := Scale96ToScreen(Margin);
+  FList.Height := Scale96ToForm(ListRows * 22);
+  FList.BorderSpacing.Left := Scale96ToForm(Margin);
+  FList.BorderSpacing.Right := Scale96ToForm(Margin);
   FList.Parent := Self;
 
   { The field and Add on one row under the list. }
@@ -111,14 +111,14 @@ begin
   Inc(FNextTop, 1000);
   Row.Top := FNextTop;
   Row.AutoSize := True;
-  Row.BorderSpacing.Left := Scale96ToScreen(Margin);
-  Row.BorderSpacing.Right := Scale96ToScreen(Margin);
-  Row.BorderSpacing.Top := Scale96ToScreen(8);
+  Row.BorderSpacing.Left := Scale96ToForm(Margin);
+  Row.BorderSpacing.Right := Scale96ToForm(Margin);
+  Row.BorderSpacing.Top := Scale96ToForm(8);
   Row.Parent := Self;
   FAddButton := TButton.Create(Self);
   FAddButton.Caption := rsCoAuthorsDlgAdd;
   FAddButton.AutoSize := True;
-  FAddButton.Constraints.MinWidth := Scale96ToScreen(72);
+  FAddButton.Constraints.MinWidth := Scale96ToForm(72);
   FAddButton.Align := alRight;
   FAddButton.Enabled := False;
   FAddButton.OnClick := @AddClick;
@@ -126,7 +126,7 @@ begin
   FPerson := TEdit.Create(Self);
   FPerson.TextHint := rsCoAuthorsDlgPerson;
   FPerson.Align := alClient;
-  FPerson.BorderSpacing.Right := Scale96ToScreen(8);
+  FPerson.BorderSpacing.Right := Scale96ToForm(8);
   FPerson.OnChange := @PersonChange;
   FPerson.OnKeyPress := @PersonKeyPress;
   FPerson.Parent := Row;
@@ -138,15 +138,15 @@ begin
   Buttons.Align := alTop;
   Inc(FNextTop, 1000);
   Buttons.Top := FNextTop;
-  Buttons.BorderSpacing.Around := Scale96ToScreen(Margin);
-  Buttons.BorderSpacing.Top := Scale96ToScreen(16);
+  Buttons.BorderSpacing.Around := Scale96ToForm(Margin);
+  Buttons.BorderSpacing.Top := Scale96ToForm(16);
   Buttons.Parent := Self;
   FOKButton := TButton.Create(Self);
   FOKButton.Caption := rsCoAuthorsDlgOK;
   FOKButton.ModalResult := mrOK;
   FOKButton.Default := True;
   FOKButton.AutoSize := True;
-  FOKButton.Constraints.MinWidth := Scale96ToScreen(84);
+  FOKButton.Constraints.MinWidth := Scale96ToForm(84);
   FOKButton.Align := alRight;
   FOKButton.Parent := Buttons;
   Cancel := TButton.Create(Self);
@@ -154,7 +154,7 @@ begin
   Cancel.ModalResult := mrCancel;
   Cancel.Cancel := True;
   Cancel.AutoSize := True;
-  Cancel.Constraints.MinWidth := Scale96ToScreen(84);
+  Cancel.Constraints.MinWidth := Scale96ToForm(84);
   Cancel.Align := alRight;
   Cancel.Parent := Buttons;
   {$IFDEF DARWIN}
@@ -164,8 +164,8 @@ begin
   FOKButton.Left := 0;
   Cancel.Left := 1000;
   {$ENDIF}
-  Cancel.BorderSpacing.Left := Scale96ToScreen(8);
-  FOKButton.BorderSpacing.Left := Scale96ToScreen(8);
+  Cancel.BorderSpacing.Left := Scale96ToForm(8);
+  FOKButton.BorderSpacing.Left := Scale96ToForm(8);
 end;
 
 { APerson into the list once: ticked as asked, or ticked when it is

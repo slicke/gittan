@@ -105,15 +105,15 @@ begin
   Position := poMainFormCenter;
   { The height follows the content; the width stays, so a long path is
     cut at the edge instead of widening the dialog. }
-  Constraints.MinWidth := Scale96ToScreen(DialogWidth);
-  Constraints.MaxWidth := Scale96ToScreen(DialogWidth);
+  Constraints.MinWidth := Scale96ToForm(DialogWidth);
+  Constraints.MaxWidth := Scale96ToForm(DialogWidth);
   AutoSize := True;
 
   FHint := TLabel.Create(Self);
   FHint.Caption := rsCloneHint;
   FHint.WordWrap := True;
   FHint.Align := alTop;
-  FHint.BorderSpacing.Around := Scale96ToScreen(Margin);
+  FHint.BorderSpacing.Around := Scale96ToForm(Margin);
   FHint.Top := 0;
   FHint.Parent := Self;
 
@@ -136,8 +136,8 @@ begin
   FInto.Align := alTop;
   Inc(FNextTop, 1000);
   FInto.Top := FNextTop;
-  FInto.BorderSpacing.Left := Scale96ToScreen(Margin + LabelWidth);
-  FInto.BorderSpacing.Right := Scale96ToScreen(Margin);
+  FInto.BorderSpacing.Left := Scale96ToForm(Margin + LabelWidth);
+  FInto.BorderSpacing.Right := Scale96ToForm(Margin);
   FInto.Parent := Self;
 
   FSubmodules := TCheckBox.Create(Self);
@@ -145,8 +145,8 @@ begin
   FSubmodules.Align := alTop;
   Inc(FNextTop, 1000);
   FSubmodules.Top := FNextTop;
-  FSubmodules.BorderSpacing.Left := Scale96ToScreen(Margin + LabelWidth);
-  FSubmodules.BorderSpacing.Top := Scale96ToScreen(10);
+  FSubmodules.BorderSpacing.Left := Scale96ToForm(Margin + LabelWidth);
+  FSubmodules.BorderSpacing.Top := Scale96ToForm(10);
   FSubmodules.Parent := Self;
 
   FError := TLabel.Create(Self);
@@ -156,9 +156,9 @@ begin
   FError.Align := alTop;
   Inc(FNextTop, 1000);
   FError.Top := FNextTop;
-  FError.BorderSpacing.Left := Scale96ToScreen(Margin + LabelWidth);
-  FError.BorderSpacing.Right := Scale96ToScreen(Margin);
-  FError.BorderSpacing.Top := Scale96ToScreen(8);
+  FError.BorderSpacing.Left := Scale96ToForm(Margin + LabelWidth);
+  FError.BorderSpacing.Right := Scale96ToForm(Margin);
+  FError.BorderSpacing.Top := Scale96ToForm(8);
   FError.Parent := Self;
 
   { Clone on the right on macOS, Cancel on the right elsewhere. }
@@ -168,15 +168,15 @@ begin
   Buttons.Align := alTop;
   Inc(FNextTop, 1000);
   Buttons.Top := FNextTop;
-  Buttons.BorderSpacing.Around := Scale96ToScreen(Margin);
-  Buttons.BorderSpacing.Top := Scale96ToScreen(16);
+  Buttons.BorderSpacing.Around := Scale96ToForm(Margin);
+  Buttons.BorderSpacing.Top := Scale96ToForm(16);
   Buttons.Parent := Self;
   FCloneButton := TButton.Create(Self);
   FCloneButton.Caption := rsCloneButton;
   FCloneButton.ModalResult := mrOK;
   FCloneButton.Default := True;
   FCloneButton.AutoSize := True;
-  FCloneButton.Constraints.MinWidth := Scale96ToScreen(84);
+  FCloneButton.Constraints.MinWidth := Scale96ToForm(84);
   FCloneButton.Align := alRight;
   FCloneButton.Parent := Buttons;
   Cancel := TButton.Create(Self);
@@ -184,7 +184,7 @@ begin
   Cancel.ModalResult := mrCancel;
   Cancel.Cancel := True;
   Cancel.AutoSize := True;
-  Cancel.Constraints.MinWidth := Scale96ToScreen(84);
+  Cancel.Constraints.MinWidth := Scale96ToForm(84);
   Cancel.Align := alRight;
   Cancel.Parent := Buttons;
   {$IFDEF DARWIN}
@@ -194,8 +194,8 @@ begin
   FCloneButton.Left := 0;
   Cancel.Left := 1000;
   {$ENDIF}
-  Cancel.BorderSpacing.Left := Scale96ToScreen(8);
-  FCloneButton.BorderSpacing.Left := Scale96ToScreen(8);
+  Cancel.BorderSpacing.Left := Scale96ToForm(8);
+  FCloneButton.BorderSpacing.Left := Scale96ToForm(8);
 end;
 
 { A row under the ones before it: the caption in a column of its own,
@@ -209,15 +209,15 @@ begin
   Result.Align := alTop;
   Inc(FNextTop, 1000);
   Result.Top := FNextTop;
-  Result.BorderSpacing.Left := Scale96ToScreen(Margin);
-  Result.BorderSpacing.Right := Scale96ToScreen(Margin);
-  Result.BorderSpacing.Bottom := Scale96ToScreen(6);
+  Result.BorderSpacing.Left := Scale96ToForm(Margin);
+  Result.BorderSpacing.Right := Scale96ToForm(Margin);
+  Result.BorderSpacing.Bottom := Scale96ToForm(6);
   Result.AutoSize := True;
   Result.Parent := Self;
   Lbl := TLabel.Create(Self);
   Lbl.Caption := ACaption;
   Lbl.AutoSize := False;
-  Lbl.Width := Scale96ToScreen(LabelWidth);
+  Lbl.Width := Scale96ToForm(LabelWidth);
   Lbl.Align := alLeft;
   Lbl.Layout := tlCenter;
   Lbl.Parent := Result;
@@ -225,7 +225,7 @@ begin
   begin
     AButton.AutoSize := True;
     AButton.Align := alRight;
-    AButton.BorderSpacing.Left := Scale96ToScreen(8);
+    AButton.BorderSpacing.Left := Scale96ToForm(8);
     AButton.Parent := Result;
   end;
   AEdit.Align := alClient;

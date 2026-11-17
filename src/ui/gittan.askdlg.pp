@@ -220,8 +220,8 @@ begin
   BorderStyle := bsDialog;
   Position := poMainFormCenter;
   KeyPreview := True;
-  Constraints.MinWidth := Scale96ToScreen(DialogWidth);
-  Constraints.MaxWidth := Scale96ToScreen(DialogWidth);
+  Constraints.MinWidth := Scale96ToForm(DialogWidth);
+  Constraints.MaxWidth := Scale96ToForm(DialogWidth);
   AutoSize := True;
   if AlertHeading and (ATitle <> '') then
     AddText(ATitle, True);
@@ -255,12 +255,12 @@ begin
   Lbl.WordWrap := True;
   Lbl.Align := alTop;
   Lbl.Top := NextTop;
-  Lbl.BorderSpacing.Left := Scale96ToScreen(IconLeft + IconSize + IconGap);
-  Lbl.BorderSpacing.Right := Scale96ToScreen(EdgeGap);
+  Lbl.BorderSpacing.Left := Scale96ToForm(IconLeft + IconSize + IconGap);
+  Lbl.BorderSpacing.Right := Scale96ToForm(EdgeGap);
   if FNextTop = 1000 then
-    Lbl.BorderSpacing.Top := Scale96ToScreen(TopGap)
+    Lbl.BorderSpacing.Top := Scale96ToForm(TopGap)
   else
-    Lbl.BorderSpacing.Top := Scale96ToScreen(AGap);
+    Lbl.BorderSpacing.Top := Scale96ToForm(AGap);
   if ABold then
     Lbl.Font.Style := [fsBold];
   Lbl.Parent := Self;
@@ -293,10 +293,10 @@ begin
   Row.Align := alTop;
   Row.Top := NextTop;
   { Around would add to each side's own spacing: each is set alone. }
-  Row.BorderSpacing.Left := Scale96ToScreen(Margin);
-  Row.BorderSpacing.Right := Scale96ToScreen(EdgeGap);
-  Row.BorderSpacing.Bottom := Scale96ToScreen(EdgeGap);
-  Row.BorderSpacing.Top := Scale96ToScreen(Margin + 4);
+  Row.BorderSpacing.Left := Scale96ToForm(Margin);
+  Row.BorderSpacing.Right := Scale96ToForm(EdgeGap);
+  Row.BorderSpacing.Bottom := Scale96ToForm(EdgeGap);
+  Row.BorderSpacing.Top := Scale96ToForm(Margin + 4);
   Row.Constraints.MinHeight := 1;
   Row.Parent := Self;
   FButtonRow := Row;
@@ -326,10 +326,10 @@ begin
     B.ModalResult := AButtons[Order[i]].Result;
     B.OnClick := @ButtonClick;
     B.AutoSize := True;
-    B.Constraints.MinWidth := Scale96ToScreen(ButtonMinWidth);
+    B.Constraints.MinWidth := Scale96ToForm(ButtonMinWidth);
     B.Align := alRight;
     B.Left := (i + 1) * 1000;
-    B.BorderSpacing.Left := Scale96ToScreen(ButtonGap);
+    B.BorderSpacing.Left := Scale96ToForm(ButtonGap);
     B.Default := Order[i] = ADefault;
     B.Cancel := Order[i] = ACancel;
     B.Parent := Row;
@@ -350,7 +350,7 @@ begin
   FFromRow := TPanel.Create(Self);
   FFromRow.BevelOuter := bvNone;
   FFromRow.Align := alClient;
-  FFromRow.BorderSpacing.Left := Scale96ToScreen(IconLeft - Margin);
+  FFromRow.BorderSpacing.Left := Scale96ToForm(IconLeft - Margin);
   FFromRow.OnPaint := @RowPaint;
   FFromRow.Parent := FButtonRow;
   FFrom := TLabel.Create(Self);
@@ -361,7 +361,7 @@ begin
   FFrom.Font.Color := clGrayText;
   FFrom.Layout := tlCenter;
   FFrom.Align := alClient;
-  FFrom.BorderSpacing.Left := Scale96ToScreen(FromPiece + FromGap);
+  FFrom.BorderSpacing.Left := Scale96ToForm(FromPiece + FromGap);
   FFrom.Parent := FFromRow;
 end;
 
@@ -388,13 +388,13 @@ begin
     FButtons[i].GetPreferredSize(BW, BH);
     Inc(Buttons, Max(BW, FButtons[i].Constraints.MinWidth) + FButtons[i].BorderSpacing.Left);
   end;
-  W := Max(Scale96ToScreen(DialogWidth), FButtonRow.BorderSpacing.Left + Buttons +
+  W := Max(Scale96ToForm(DialogWidth), FButtonRow.BorderSpacing.Left + Buttons +
     FButtonRow.BorderSpacing.Right);
   Constraints.MaxWidth := W;
   Constraints.MinWidth := W;
   if FFrom = nil then
     Exit;
-  TextLeft := Scale96ToScreen(IconLeft + IconSize + IconGap);
+  TextLeft := Scale96ToForm(IconLeft + IconSize + IconGap);
   Bmp := TBitmap.Create;
   try
     Bmp.SetSize(1, 1);
@@ -405,11 +405,11 @@ begin
     begin
       FFromRow.Parent := Self;
       FFromRow.Align := alTop;
-      FFromRow.Height := Bmp.Canvas.TextHeight('Xg') + Scale96ToScreen(4);
+      FFromRow.Height := Bmp.Canvas.TextHeight('Xg') + Scale96ToForm(4);
       FFromRow.Top := FButtonRow.Top - 1;
       FFromRow.BorderSpacing.Left := TextLeft;
-      FFromRow.BorderSpacing.Right := Scale96ToScreen(EdgeGap);
-      FFromRow.BorderSpacing.Top := Scale96ToScreen(FieldGap);
+      FFromRow.BorderSpacing.Right := Scale96ToForm(EdgeGap);
+      FFromRow.BorderSpacing.Top := Scale96ToForm(FieldGap);
       Exit;
     end;
     TextBottom := 0;
@@ -422,7 +422,7 @@ begin
       H := R.Bottom - R.Top;
       Inc(TextBottom, FTexts[i].BorderSpacing.Top + H);
     end;
-    Need := Scale96ToScreen(TopGap + IconSize + FieldGap) -
+    Need := Scale96ToForm(TopGap + IconSize + FieldGap) -
       (TextBottom + FButtonRow.BorderSpacing.Top);
     if Need > 0 then
       FButtonRow.BorderSpacing.Top := FButtonRow.BorderSpacing.Top + Need;
@@ -437,7 +437,7 @@ var
 begin
   if FFrom = nil then
     Exit;
-  S := Scale96ToScreen(FromPiece);
+  S := Scale96ToForm(FromPiece);
   PaintPuzzle(FFromRow.Canvas, 0, (FFromRow.ClientHeight - S) div 2, S, clGrayText);
 end;
 
@@ -482,14 +482,14 @@ function TAskForm.IconRect: TRect;
 var
   S, IconTop, Room: integer;
 begin
-  S := Scale96ToScreen(IconSize);
-  IconTop := Scale96ToScreen(TopGap);
+  S := Scale96ToForm(IconSize);
+  IconTop := Scale96ToForm(TopGap);
   if FButtonRow <> nil then
   begin
     Room := FButtonRow.Top - FButtonRow.BorderSpacing.Top - IconTop;
     Inc(IconTop, Max(0, (Room - S) div 2));
   end;
-  Result := Rect(Scale96ToScreen(IconLeft), IconTop, Scale96ToScreen(IconLeft) + S, IconTop + S);
+  Result := Rect(Scale96ToForm(IconLeft), IconTop, Scale96ToForm(IconLeft) + S, IconTop + S);
 end;
 
 procedure TAskForm.DoShow;
@@ -656,8 +656,8 @@ begin
       Box.Checked := AChecked;
       Box.Align := alTop;
       Box.Top := F.NextTop;
-      Box.BorderSpacing.Left := F.Scale96ToScreen(IconLeft + IconSize + IconGap);
-      Box.BorderSpacing.Top := F.Scale96ToScreen(FieldGap);
+      Box.BorderSpacing.Left := F.Scale96ToForm(IconLeft + IconSize + IconGap);
+      Box.BorderSpacing.Top := F.Scale96ToForm(FieldGap);
       Box.Parent := F;
     end;
     F.AddButtons(Buttons, Default, Cancel);
@@ -744,9 +744,9 @@ begin
       Edit := TEdit.Create(F);
       Edit.Align := alTop;
       Edit.Top := F.NextTop;
-      Edit.BorderSpacing.Left := F.Scale96ToScreen(IconLeft + IconSize + IconGap);
-      Edit.BorderSpacing.Right := F.Scale96ToScreen(EdgeGap);
-      Edit.BorderSpacing.Top := F.Scale96ToScreen(4);
+      Edit.BorderSpacing.Left := F.Scale96ToForm(IconLeft + IconSize + IconGap);
+      Edit.BorderSpacing.Right := F.Scale96ToForm(EdgeGap);
+      Edit.BorderSpacing.Top := F.Scale96ToForm(4);
       if i <= High(AValues) then
         Edit.Text := AValues[i];
       Edit.OnChange := @F.FieldChange;
@@ -757,9 +757,9 @@ begin
     F.FError.WordWrap := True;
     F.FError.Align := alTop;
     F.FError.Top := F.NextTop;
-    F.FError.BorderSpacing.Left := F.Scale96ToScreen(IconLeft + IconSize + IconGap);
-    F.FError.BorderSpacing.Right := F.Scale96ToScreen(EdgeGap);
-    F.FError.BorderSpacing.Top := F.Scale96ToScreen(6);
+    F.FError.BorderSpacing.Left := F.Scale96ToForm(IconLeft + IconSize + IconGap);
+    F.FError.BorderSpacing.Right := F.Scale96ToForm(EdgeGap);
+    F.FError.BorderSpacing.Top := F.Scale96ToForm(6);
     F.FError.Font.Color := RGBToColor(229, 72, 77);
     F.FError.Visible := False;
     F.FError.Parent := F;

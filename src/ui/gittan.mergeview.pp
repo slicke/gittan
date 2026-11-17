@@ -40,6 +40,10 @@ type
     FBack, FText, FDim, FLine: TColor;
   protected
     procedure Paint; override;
+    { Its height again from Px: the frame's scaling after it is made
+      would scale the one already from Px a second time. }
+    procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+      const AXProportion, AYProportion: double); override;
   public
     constructor Create(AOwner: TComponent); override;
     procedure SetText(const ATitle, ADetail: string);
@@ -98,6 +102,9 @@ type
     function ConflictNumber(AChunk: integer): integer;
   protected
     procedure Resize; override;
+    { The splitters' widths again from Px, for the same reason. }
+    procedure DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+      const AXProportion, AYProportion: double); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -177,6 +184,14 @@ begin
   FText := clWindowText;
   FDim := clGrayText;
   FLine := clGrayText;
+end;
+
+procedure TGittanMergeCaption.DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+  const AXProportion, AYProportion: double);
+begin
+  inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
+  if AMode = lapAutoAdjustForDPI then
+    Height := Px(24);
 end;
 
 procedure TGittanMergeCaption.SetText(const ATitle, ADetail: string);
@@ -489,6 +504,17 @@ end;
 function TGittanMergeView.GetLexer: TecSyntAnalyzer;
 begin
   Result := FAdapterResult.Lexer;
+end;
+
+procedure TGittanMergeView.DoAutoAdjustLayout(const AMode: TLayoutAdjustmentPolicy;
+  const AXProportion, AYProportion: double);
+begin
+  inherited DoAutoAdjustLayout(AMode, AXProportion, AYProportion);
+  if AMode <> lapAutoAdjustForDPI then
+    Exit;
+  FSideSplitter.Width := Px(4);
+  FBaseSplitter.Width := Px(4);
+  FTopSplitter.Height := Px(4);
 end;
 
 procedure TGittanMergeView.Resize;

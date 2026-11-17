@@ -111,15 +111,15 @@ begin
   Position := poMainFormCenter;
   { The height follows the content; the width stays, so a long path is
     cut at the edge instead of widening the dialog. }
-  Constraints.MinWidth := Scale96ToScreen(DialogWidth);
-  Constraints.MaxWidth := Scale96ToScreen(DialogWidth);
+  Constraints.MinWidth := Scale96ToForm(DialogWidth);
+  Constraints.MaxWidth := Scale96ToForm(DialogWidth);
   AutoSize := True;
 
   FHint := TLabel.Create(Self);
   FHint.Caption := rsSubAddHint;
   FHint.WordWrap := True;
   FHint.Align := alTop;
-  FHint.BorderSpacing.Around := Scale96ToScreen(Margin);
+  FHint.BorderSpacing.Around := Scale96ToForm(Margin);
   FHint.Top := 0;
   FHint.Parent := Self;
 
@@ -130,7 +130,7 @@ begin
   FPath.OnChange := @PathChange;
   Row(rsSubAddPath, FPath);
   FInto := Note(clGrayText);
-  FInto.BorderSpacing.Bottom := Scale96ToScreen(8);
+  FInto.BorderSpacing.Bottom := Scale96ToForm(8);
   FBranch := TEdit.Create(Self);
   Row(rsSubAddBranch, FBranch);
   FBranchHint := Note(clGrayText);
@@ -138,7 +138,7 @@ begin
 
   FError := Note(clRed);
   FError.WordWrap := True;
-  FError.BorderSpacing.Top := Scale96ToScreen(8);
+  FError.BorderSpacing.Top := Scale96ToForm(8);
 
   { Add on the right on macOS, Cancel on the right elsewhere. }
   Buttons := TPanel.Create(Self);
@@ -147,8 +147,8 @@ begin
   Buttons.Align := alTop;
   Inc(FNextTop, 1000);
   Buttons.Top := FNextTop;
-  Buttons.BorderSpacing.Around := Scale96ToScreen(Margin);
-  Buttons.BorderSpacing.Top := Scale96ToScreen(16);
+  Buttons.BorderSpacing.Around := Scale96ToForm(Margin);
+  Buttons.BorderSpacing.Top := Scale96ToForm(16);
   Buttons.Parent := Self;
   FButtons := Buttons;
   FAddButton := TButton.Create(Self);
@@ -156,7 +156,7 @@ begin
   FAddButton.ModalResult := mrOK;
   FAddButton.Default := True;
   FAddButton.AutoSize := True;
-  FAddButton.Constraints.MinWidth := Scale96ToScreen(84);
+  FAddButton.Constraints.MinWidth := Scale96ToForm(84);
   FAddButton.Align := alRight;
   FAddButton.Parent := Buttons;
   Cancel := TButton.Create(Self);
@@ -164,7 +164,7 @@ begin
   Cancel.ModalResult := mrCancel;
   Cancel.Cancel := True;
   Cancel.AutoSize := True;
-  Cancel.Constraints.MinWidth := Scale96ToScreen(84);
+  Cancel.Constraints.MinWidth := Scale96ToForm(84);
   Cancel.Align := alRight;
   Cancel.Parent := Buttons;
   {$IFDEF DARWIN}
@@ -174,8 +174,8 @@ begin
   FAddButton.Left := 0;
   Cancel.Left := 1000;
   {$ENDIF}
-  Cancel.BorderSpacing.Left := Scale96ToScreen(8);
-  FAddButton.BorderSpacing.Left := Scale96ToScreen(8);
+  Cancel.BorderSpacing.Left := Scale96ToForm(8);
+  FAddButton.BorderSpacing.Left := Scale96ToForm(8);
 end;
 
 { A row under the ones before it: the caption in a column of its own,
@@ -190,15 +190,15 @@ begin
   Panel.Align := alTop;
   Inc(FNextTop, 1000);
   Panel.Top := FNextTop;
-  Panel.BorderSpacing.Left := Scale96ToScreen(Margin);
-  Panel.BorderSpacing.Right := Scale96ToScreen(Margin);
-  Panel.BorderSpacing.Bottom := Scale96ToScreen(6);
+  Panel.BorderSpacing.Left := Scale96ToForm(Margin);
+  Panel.BorderSpacing.Right := Scale96ToForm(Margin);
+  Panel.BorderSpacing.Bottom := Scale96ToForm(6);
   Panel.AutoSize := True;
   Panel.Parent := Self;
   Lbl := TLabel.Create(Self);
   Lbl.Caption := ACaption;
   Lbl.AutoSize := False;
-  Lbl.Width := Scale96ToScreen(LabelWidth);
+  Lbl.Width := Scale96ToForm(LabelWidth);
   Lbl.Align := alLeft;
   Lbl.Layout := tlCenter;
   Lbl.Parent := Panel;
@@ -215,8 +215,8 @@ begin
   Result.Align := alTop;
   Inc(FNextTop, 1000);
   Result.Top := FNextTop;
-  Result.BorderSpacing.Left := Scale96ToScreen(Margin + LabelWidth);
-  Result.BorderSpacing.Right := Scale96ToScreen(Margin);
+  Result.BorderSpacing.Left := Scale96ToForm(Margin + LabelWidth);
+  Result.BorderSpacing.Right := Scale96ToForm(Margin);
   Result.Parent := Self;
 end;
 

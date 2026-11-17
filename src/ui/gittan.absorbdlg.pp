@@ -81,16 +81,16 @@ begin
   Caption := rsAbsorbDlgTitle;
   BorderStyle := bsSizeable;
   Position := poMainFormCenter;
-  Width := Scale96ToScreen(DialogWidth);
-  Height := Scale96ToScreen(DialogHeight);
-  Constraints.MinWidth := Scale96ToScreen(440);
-  Constraints.MinHeight := Scale96ToScreen(300);
+  Width := Scale96ToForm(DialogWidth);
+  Height := Scale96ToForm(DialogHeight);
+  Constraints.MinWidth := Scale96ToForm(440);
+  Constraints.MinHeight := Scale96ToForm(300);
 
   FHint := TLabel.Create(Self);
   FHint.Caption := rsAbsorbDlgHint;
   FHint.WordWrap := True;
   FHint.Align := alTop;
-  FHint.BorderSpacing.Around := Scale96ToScreen(Margin);
+  FHint.BorderSpacing.Around := Scale96ToForm(Margin);
   FHint.Parent := Self;
 
   { Everything under the list in one panel that sizes itself, the
@@ -99,15 +99,15 @@ begin
   FBottom.BevelOuter := bvNone;
   FBottom.AutoSize := True;
   FBottom.Align := alBottom;
-  FBottom.BorderSpacing.Left := Scale96ToScreen(Margin);
-  FBottom.BorderSpacing.Right := Scale96ToScreen(Margin);
-  FBottom.BorderSpacing.Bottom := Scale96ToScreen(Margin);
+  FBottom.BorderSpacing.Left := Scale96ToForm(Margin);
+  FBottom.BorderSpacing.Right := Scale96ToForm(Margin);
+  FBottom.BorderSpacing.Bottom := Scale96ToForm(Margin);
   FBottom.Parent := Self;
 
   FList := TCheckListBox.Create(Self);
   FList.Align := alClient;
-  FList.BorderSpacing.Left := Scale96ToScreen(Margin);
-  FList.BorderSpacing.Right := Scale96ToScreen(Margin);
+  FList.BorderSpacing.Left := Scale96ToForm(Margin);
+  FList.BorderSpacing.Right := Scale96ToForm(Margin);
   FList.OnClickCheck := @ListClickCheck;
   FList.Parent := Self;
 
@@ -125,7 +125,7 @@ begin
   FUntickAll.AutoSize := True;
   FUntickAll.Align := alRight;
   FUntickAll.Left := 1000;
-  FUntickAll.BorderSpacing.Left := Scale96ToScreen(8);
+  FUntickAll.BorderSpacing.Left := Scale96ToForm(8);
   FUntickAll.Tag := 0;
   FUntickAll.OnClick := @TickClick;
   FUntickAll.Parent := Row;
@@ -152,7 +152,7 @@ begin
   FPutButton.ModalResult := mrOK;
   FPutButton.Default := True;
   FPutButton.AutoSize := True;
-  FPutButton.Constraints.MinWidth := Scale96ToScreen(84);
+  FPutButton.Constraints.MinWidth := Scale96ToForm(84);
   FPutButton.Align := alRight;
   FPutButton.Parent := Row;
   Cancel := TButton.Create(Self);
@@ -160,7 +160,7 @@ begin
   Cancel.ModalResult := mrCancel;
   Cancel.Cancel := True;
   Cancel.AutoSize := True;
-  Cancel.Constraints.MinWidth := Scale96ToScreen(84);
+  Cancel.Constraints.MinWidth := Scale96ToForm(84);
   Cancel.Align := alRight;
   Cancel.Parent := Row;
   {$IFDEF DARWIN}
@@ -170,8 +170,8 @@ begin
   FPutButton.Left := 0;
   Cancel.Left := 1000;
   {$ENDIF}
-  Cancel.BorderSpacing.Left := Scale96ToScreen(8);
-  FPutButton.BorderSpacing.Left := Scale96ToScreen(8);
+  Cancel.BorderSpacing.Left := Scale96ToForm(8);
+  FPutButton.BorderSpacing.Left := Scale96ToForm(8);
 end;
 
 { Puts AControl under the ones placed before it in the bottom panel:
@@ -179,7 +179,7 @@ end;
 procedure TAbsorbForm.Place(AControl: TControl; ASpaceAbove: integer);
 begin
   AControl.Align := alTop;
-  AControl.BorderSpacing.Top := Scale96ToScreen(ASpaceAbove);
+  AControl.BorderSpacing.Top := Scale96ToForm(ASpaceAbove);
   Inc(FNextTop, 1000);
   AControl.Top := FNextTop;
   AControl.Parent := FBottom;
