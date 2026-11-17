@@ -90,10 +90,6 @@ var
       does not settle its promise on the freed context, nor on another
       one that took its address. }
   ExtContextGeneration: TExtContextGeneration = nil;
-  {** Whether the runtime the tasks' values belong to is there; the engine
-      clears it before it frees the runtime, after which a late task leaves
-      its values alone. }
-  ExtRuntimeAlive: boolean = False;
 
 // Global shutdown guard for extensions/promises
 procedure SetExtShuttingDown(const Value: boolean);

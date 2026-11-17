@@ -225,10 +225,37 @@ procedure TExtQuickJSTest.TestParseValueLimits;
 var
   P, Inner: JSParameters;
   Depth: integer;
+  WasAlive: boolean;
 begin
+  { The objects parsed hold a reference, which FreeJSParameters gives back
+    through this runtime. }
+  WasAlive := ExtRuntimeAlive;
+  ExtRuntimeAlive := True;
+  try
   P := Parsed('({length: 2e9})');
   try
-    AssertTrue('a made-up length', P[0]^.Data.match = JD_UNDEFINED);
+    AssertTrue('a made-up length is an object''s', P[0]^.Data.match = JD_OBJ);
+  finally
+    FreeJSParameters(P);
+  end;
+  { Only an array is one: an object without a length was an empty array,
+    a function one as long as its parameters. }
+  P := Parsed('({a: 1})');
+  try
+    AssertTrue('an object', P[0]^.Data.match = JD_OBJ);
+  finally
+    FreeJSParameters(P);
+  end;
+  P := Parsed('(function (a, b) {})');
+  try
+    AssertTrue('a function', P[0]^.Data.match <> JD_ARRAY);
+  finally
+    FreeJSParameters(P);
+  end;
+  P := Parsed('new Proxy([], {get: function () { throw new Error("no length"); }})');
+  try
+    AssertTrue('a length that throws', P[0]^.Data.match = JD_OBJ);
+    AssertFalse('leaves nothing pending', JS_HasException(FContext));
   finally
     FreeJSParameters(P);
   end;
@@ -259,6 +286,9 @@ begin
     AssertEquals('a plain one is kept', 2, JSParameters(P[0]^.Data.ArrayVal).Count);
   finally
     FreeJSParameters(P);
+  end;
+  finally
+    ExtRuntimeAlive := WasAlive;
   end;
 end;
 

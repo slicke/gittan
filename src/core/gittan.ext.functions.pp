@@ -119,6 +119,9 @@ JSValueVal = record
     BoolVal: boolean;
     Func: Pointer;
     ObjectVal: Pointer;
+    { The runtime of a JD_OBJ that holds a reference of its own, which
+      FreeJSParameters gives back; nil for a borrowed one. }
+    ObjectRt: Pointer;
     Parsed: string;
     ArrayVal: TJSValList;
     end;
@@ -295,6 +298,12 @@ procedure ExtError(const msg, error: string); overload;
     @param error Error text.
   }
 procedure ExtError(const error: string); overload;
+
+var
+  {** Whether the extensions' runtime is there; the engine clears it before
+      it frees the runtime, after which a late promise task or parameter
+      list leaves its values alone. }
+  ExtRuntimeAlive: boolean = False;
 
   {** Adds ALine to the console lines console.pop shows, cut to a length and
     keeping the newest only. }
@@ -690,7 +699,11 @@ begin
     begin
       Inner := JSParameters(AParams[i]^.Data.ArrayVal);
       FreeJSParameters(Inner);
-    end;
+    end
+    else if (AParams[i]^.Data.match = JD_OBJ) and (AParams[i]^.Data.ObjectRt <> nil) and
+      ExtRuntimeAlive then
+      JS_FreeValueRT(JSRuntime(AParams[i]^.Data.ObjectRt),
+        JSValueFromPtr(JS_TAG_OBJECT, AParams[i]^.Data.ObjectVal));
     Dispose(AParams[i]);
   end;
   FreeAndNil(AParams);
@@ -760,13 +773,28 @@ var
   pVal: PJSValueVal;
   isArr: boolean;
 begin
-  // If val is an object or recognized as an array
+  Result := Default(JSValueVal);
+  // An array is an array (JS_IsArray), not any object with a length: one
+  // without a length was taken for an empty array (ToInt32 of undefined
+  // is 0), and a function for an array as long as its parameters.
   // quickjs-ng's JS_IsArray takes no context and returns a plain boolean.
   if val.IsObject or JS_IsArray(val) then
   begin
-    arrVal := JS_GetPropertyStr(ctx, val.Raw, 'length');
-    isArr := (not val.IsUndefined) and (JS_ToInt32(ctx, @len, arrVal) = 0);
-    JS_FreeValue(ctx, arrVal);
+    isArr := JS_IsArray(val);
+    len := 0;
+    if isArr then
+    begin
+      arrVal := JS_GetPropertyStr(ctx, val.Raw, 'length');
+      isArr := JS_ToInt32(ctx, @len, arrVal) = 0;
+      JS_FreeValue(ctx, arrVal);
+      // What a length getter (a Proxy's) threw is not left pending.
+      if JS_HasException(ctx) then
+      begin
+        elem := JS_GetException(ctx);
+        JS_FreeValue(ctx, elem);
+        isArr := false;
+      end;
+    end;
     if isArr and ((ADepth >= MaxParseDepth) or (len < 0) or (len > MaxParseLength) or
       (len > ABudget)) then
     begin
@@ -794,9 +822,13 @@ begin
     end
     else
     begin
-      // Not an array => treat as an object
+      // Not an array => an object, with a reference of its own, so a
+      // threaded native may still use it once the call has returned;
+      // FreeJSParameters gives it back.
       Result.Data.match := JD_OBJ;
       Result.Data.ObjectVal := val.Ptr;
+      JS_DupValue(ctx, val);
+      Result.Data.ObjectRt := JS_GetRuntime(ctx);
     end;
     Exit;
   end;
@@ -859,6 +891,7 @@ begin
   begin
     Result.Data.match := JD_OBJ;
     Result.Data.ObjectVal := val.Ptr;
+    Result.Data.ObjectRt := nil;
   end
   else
   if JS_IsFunction(ctx, val.Raw) then
