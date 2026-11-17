@@ -83,7 +83,8 @@ type
 implementation
 
 uses
-  gittan.ext.host, gittan.ext.grant, gittan.ext.modules, gittan.textfile, gittan.forge;
+  gittan.ext.host, gittan.ext.grant, gittan.ext.modules, gittan.ext.promise, gittan.textfile,
+  gittan.forge;
 
 resourcestring
   rsExtReadFailed = 'The extension file could not be read';
@@ -455,8 +456,19 @@ begin
   ExtHost.CommandsChanged;
 end;
 
+{ Refused while a load or an unload is under way: either runs the message
+  loop (a permission question, the wait for the promise tasks), and a
+  Reload clicked meanwhile would load the extensions beside the ones
+  still going, or free those still being loaded. }
 procedure TGittanExtLoader.Reload;
+var
+  Engine: TGittanExtEngine;
 begin
+  { Existing gives nil once the unload has signalled the promise tasks,
+    which is when it waits; Unloading covers the unload hooks before. }
+  Engine := TGittanExtEngine.Existing;
+  if FLoading or IsExtShuttingDown or ((Engine <> nil) and Engine.Unloading) then
+    Exit;
   Unload;
   Load;
 end;

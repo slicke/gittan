@@ -10,7 +10,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, gittan.ext.engine, gittan.ext.host,
-  gittan.ext.loader, gittan.ext.perm, gittan.settings, testextengine;
+  gittan.ext.loader, gittan.ext.perm, gittan.ext.quickjs, gittan.ext.functions,
+  gittan.settings, testextengine;
 
 type
   TExtLoaderTest = class(TTestCase)
@@ -19,9 +20,14 @@ type
     FDir: string;
     FSettings: TGittanSettings;
     FLoader: TGittanExtLoader;
+    FAskedAgain: boolean;
     procedure Put(const AName, AScript: string);
     procedure EditModule;
     procedure SwapFiles(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
+    procedure AddSlowTask(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
+    procedure ReloadAgain;
+    function SlowTask(const ctx: PJSContext; const func: string;
+      const params: JSParameters; out res: JSValueVal): boolean;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -39,6 +45,7 @@ type
     procedure TestCaseTwinWithEqualsRefused;
     procedure TestNameRefused;
     procedure TestRunsWhatWasRead;
+    procedure TestNoReloadDuringUnload;
   end;
 
 implementation
@@ -105,6 +112,48 @@ begin
   FLoader.Load;
   AssertEquals('what was read ran', 'a,b,c,d', FHost.Alerts.CommaText);
   AssertTrue('the removed one loaded', FLoader.Info(2).Loaded);
+end;
+
+procedure TExtLoaderTest.AddSlowTask(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
+begin
+  AEngine.AddPromise('slowTask', @SlowTask, 0, 0, True);
+end;
+
+function TExtLoaderTest.SlowTask(const ctx: PJSContext; const func: string;
+  const params: JSParameters; out res: JSValueVal): boolean;
+begin
+  Sleep(300);
+  res := StringToValueVal('done');
+  Result := True;
+end;
+
+procedure TExtLoaderTest.ReloadAgain;
+begin
+  FAskedAgain := True;
+  FHost.OnPump := nil;
+  FLoader.Reload;
+end;
+
+{ The unload waits for the promise tasks with the message loop running,
+  where a second Reload could come: it is refused, or it would load the
+  extensions beside those still going and the first then free them. }
+procedure TExtLoaderTest.TestNoReloadDuringUnload;
+var
+  Changed: integer;
+begin
+  Put('a.js', '/* @name Ay */ Gittan.alert("loaded"); slowTask();');
+  FLoader.OnProvision := @AddSlowTask;
+  FLoader.Load;
+  Changed := FHost.Changed;
+  FHost.OnPump := @ReloadAgain;
+  FLoader.Reload;
+  FHost.OnPump := nil;
+  AssertTrue('the second Reload came during the unload', FAskedAgain);
+  { The menus follow once for the unload and once for the load: a second
+    Reload that ran would have unloaded and loaded (to nothing) again. }
+  AssertEquals('one Reload ran', 2, FHost.Changed - Changed);
+  AssertEquals('loaded twice', 'loaded,loaded', FHost.Alerts.CommaText);
+  AssertEquals('one context', 1, TGittanExtEngine.Instance.ExtensionCount);
 end;
 
 procedure TExtLoaderTest.TestLoadsInNameOrder;

@@ -41,6 +41,8 @@ type
     Messages: TStringList;
     { Run as a permission is asked, while the real host's dialog is up. }
     OnAsk: procedure of object;
+    { Run as the engine lets the message loop run while it waits. }
+    OnPump: procedure of object;
     constructor Create;
     destructor Destroy; override;
     procedure Alert(const AName, AText: string); override;
@@ -53,6 +55,7 @@ type
     procedure ReportError(const ATitle, ADetail: string); override;
     function AskPermission(const AName, AFile, AAuthor: string;
       const ARequested: TExtPermSet): boolean; override;
+    procedure Pump; override;
     procedure AddCard(const ARoot: string; const ACard: TGittanReviewThread); override;
     procedure ClearCards(const ARoot, AExtId: string); override;
     procedure SetStatus(const ARoot, AText: string; ASeconds: integer); override;
@@ -208,6 +211,13 @@ begin
   if Assigned(OnAsk) then
     OnAsk();
   Result := PermissionAnswer;
+end;
+
+procedure TFakeExtHost.Pump;
+begin
+  if Assigned(OnPump) then
+    OnPump();
+  inherited Pump;
 end;
 
 procedure TFakeExtHost.AddCard(const ARoot: string; const ACard: TGittanReviewThread);

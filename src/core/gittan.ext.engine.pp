@@ -169,6 +169,7 @@ private
         draining so a timer is never freed beneath its own event. }
   FInTimerCallback: integer;
   FLastLoadFailed: boolean;
+  FUnloading: boolean;
     { The entry file being loaded and the text read of it, which the module
       loader takes instead of reading the file again (ExtExecuteSource). }
   FEntryFile: string;
@@ -206,6 +207,9 @@ private
     {** Dispose timers parked in FDeadTimers. Safe to call anytime; no-ops
         while a timer callback is running. }
   procedure DrainDeadTimers;
+    {** Disposes the timers of ctx, live and parked: they hold its values,
+        so they go before it is freed. }
+  procedure DropTimersOf(ctx: JSContext);
   procedure RunDueTimers;
 
     {** Find a registered callback by name.
@@ -552,6 +556,9 @@ public
   function ExtExecuteSource(Ext: PExtContextInfo; const ASource: RawUtf8): RawUtf8;
     {** Whether the last ExtExecuteFile threw rather than ran to its end. }
   property LastLoadFailed: boolean read FLastLoadFailed;
+    {** Whether UnloadExtensions is under way: it runs the message loop as it
+        waits for the promise tasks, so a second Reload could start then. }
+  property Unloading: boolean read FUnloading;
     {** Takes one extension's context out and frees it, with what it
         registered and its timers: one whose script threw as it loaded,
         which is not loaded but would otherwise keep its listeners,
@@ -2448,20 +2455,10 @@ begin
   end;
 end;
 
-procedure TGittanExtEngine.DropExtensionContext(Ext: PExtContextInfo);
+procedure TGittanExtEngine.DropTimersOf(ctx: JSContext);
 var
   i: integer;
-  ctx: JSContext;
 begin
-  if (Ext = nil) or (Ext^.Ctx = nil) or not Assigned(FExtContexts) then
-    Exit;
-  i := FExtContexts.IndexOf(Ext);
-  if i < 0 then
-    Exit;
-  ctx := Ext^.Ctx;
-  FRegistry.RemoveContext(ctx);
-  FRegistry.RemoveSettingsOf(Ext^.ExtId);
-  { Its timers hold values of the context, so they go before it. }
   if Assigned(FJSTimers) then
     for i := FJSTimers.Count - 1 downto 0 do
       if FJSTimers.Data[i]^.Context = ctx then
@@ -2476,6 +2473,23 @@ begin
         DisposeTimerInfo(FDeadTimers[i]);
         FDeadTimers.Delete(i);
       end;
+end;
+
+procedure TGittanExtEngine.DropExtensionContext(Ext: PExtContextInfo);
+var
+  i: integer;
+  ctx: JSContext;
+begin
+  if (Ext = nil) or (Ext^.Ctx = nil) or not Assigned(FExtContexts) then
+    Exit;
+  i := FExtContexts.IndexOf(Ext);
+  if i < 0 then
+    Exit;
+  ctx := Ext^.Ctx;
+  FRegistry.RemoveContext(ctx);
+  FRegistry.RemoveSettingsOf(Ext^.ExtId);
+  { Its timers hold values of the context, so they go before it. }
+  DropTimersOf(ctx);
   { Out of the list first: a promise task of it then finds no generation
     and leaves its promise alone. }
   FExtContexts.Remove(Ext);
@@ -2489,7 +2503,9 @@ var
   WaitUntil: QWord;
   tmpCtx: JSContext;
 begin
-  if IsGlobalShutdown or ExtHost.Terminated then Exit;
+  if IsGlobalShutdown or ExtHost.Terminated or FUnloading then Exit;
+  FUnloading := true;
+  try
 
   // Let extensions flush state while their contexts (and timers) still exist.
   NotifyUnloadAll;
@@ -2548,6 +2564,9 @@ begin
         begin
           if FExtContexts[i]^.Ctx <> nil then
           try
+            { A timer made since the ones above went (by a promise reaction
+              the drain ran) holds values of the context: it goes first. }
+            DropTimersOf(FExtContexts[i]^.Ctx);
             FRegistry.RemoveContext(FExtContexts[i]^.Ctx);
             { What the script defines on its next load is what it has: a
               key it no longer defines goes. }
@@ -2563,6 +2582,9 @@ begin
   finally
     // Re-arm so a subsequent LoadExtensions can register and run scripts again.
     SetExtShuttingDown(false);
+  end;
+  finally
+    FUnloading := false;
   end;
 end;
 
