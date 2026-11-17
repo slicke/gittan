@@ -35,7 +35,10 @@ begin
 end;
 
 { When git config names no tracker and repo.toml's expression is not
-  trusted yet, a banner offers it, once per root and expression. }
+  trusted yet, a banner offers it, once per root and expression. It
+  stays until answered, as it is not offered again, and an earlier
+  offer goes: its Use It would trust the expression of now, which it
+  did not offer. }
 procedure TRepoFrame.OfferRepoIssues;
 var
   Key: string;
@@ -48,8 +51,9 @@ begin
   if Key = FIssuesOffered then
     Exit;
   FIssuesOffered := Key;
+  FBanner.CloseAction(@RepoIssuesTrustClick);
   FBanner.AddAction(rsRepoIssuesUntrusted, rsRepoIssuesUntrustedDetail, bkInfo,
-    BannerActionSeconds, rsRepoIssuesUse, @RepoIssuesTrustClick);
+    0, rsRepoIssuesUse, @RepoIssuesTrustClick);
 end;
 
 { Trusts the expression the banner was about, if it is still the

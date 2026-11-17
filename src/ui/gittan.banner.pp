@@ -93,6 +93,9 @@ type
       button that closes the message and calls AOnAction. }
     procedure AddAction(const ATitle, ADetail: string; AKind: TGittanBannerKind;
       ASeconds: integer; const AAction: string; AOnAction: TNotifyEvent);
+    {** Closes every message whose action calls AOnAction (an offer that
+      a newer one replaces), showing what is left. }
+    procedure CloseAction(AOnAction: TNotifyEvent);
     {** Closes the message in view, showing the one before it. }
     procedure CloseCurrent;
     {** Closes every message. }
@@ -201,6 +204,23 @@ begin
   Item.OnAction := AOnAction;
   Insert(Item, FItems, Length(FItems));
   ShowCurrent;
+end;
+
+procedure TGittanBanner.CloseAction(AOnAction: TNotifyEvent);
+var
+  i: integer;
+  Closed: boolean;
+begin
+  Closed := False;
+  for i := High(FItems) downto 0 do
+    if (TMethod(FItems[i].OnAction).Code = TMethod(AOnAction).Code) and
+      (TMethod(FItems[i].OnAction).Data = TMethod(AOnAction).Data) then
+    begin
+      Delete(FItems, i, 1);
+      Closed := True;
+    end;
+  if Closed then
+    ShowCurrent;
 end;
 
 procedure TGittanBanner.CloseCurrent;
