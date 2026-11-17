@@ -43,6 +43,8 @@ type
     procedure TestSwitchAndCreate;
     procedure TestDeleteAndRename;
     procedure TestRefused;
+    procedure TestMixedReset;
+    procedure TestMixedResetChanged;
     procedure TestRedoForgotten;
   end;
 
@@ -492,6 +494,50 @@ begin
   AssertFalse('git refuses', FRepo.RunSteps(Steps));
   AssertTrue(FRepo.Error <> '');
   AssertEquals('the change is kept', 'mine', ReadFile('b.txt'));
+end;
+
+{ A mixed reset leaves the commits' files in the work tree, which
+  --keep counts as local changes: a changed file "not uptodate", an
+  added one untracked. Undo puts HEAD and the index back over them. }
+procedure TUndoTest.TestMixedReset;
+var
+  Before, Status, Err: string;
+begin
+  Commit('a.txt', 'two', 'Second');
+  Commit('n.txt', 'new', 'Third');
+  Before := Rev('HEAD');
+  Track;
+  Git(['reset', '-q', 'HEAD~2']);
+  Track;
+  AssertEquals('Reset to ' + Copy(Rev('HEAD'), 1, 7), FHistory.UndoStep.Title);
+  Undo;
+  AssertEquals(Before, Rev('HEAD'));
+  AssertEquals('two', ReadFile('a.txt'));
+  AssertEquals('new', ReadFile('n.txt'));
+  AssertTrue(Err, RunGitIn(FDir, ['status', '--porcelain'], Status, Err));
+  AssertEquals('nothing left over', '', Trim(Status));
+end;
+
+{ A file changed since the reset is a change of its own: undo refuses
+  rather than take it into the index. }
+procedure TUndoTest.TestMixedResetChanged;
+var
+  Cur: TGittanRefState;
+  Step: TGittanUndoStep;
+  Steps: TGittanGitSteps;
+  Err: string;
+begin
+  Commit('a.txt', 'two', 'Second');
+  Track;
+  Git(['reset', '-q', 'HEAD~1']);
+  Track;
+  WriteFile('a.txt', 'mine');
+  Step := FHistory.UndoStep;
+  AssertTrue(FRepo.ReadRefState(Cur));
+  AssertTrue(PlanRefChange(Cur, Step.After, Step.Before, Step.Kind, [], Steps, Err));
+  AssertFalse('refused', FRepo.RunSteps(Steps));
+  AssertTrue('git''s reason', Pos('a.txt', FRepo.Error) > 0);
+  AssertEquals('the change is kept', 'mine', ReadFile('a.txt'));
 end;
 
 procedure TUndoTest.TestRedoForgotten;

@@ -307,6 +307,7 @@ type
     FConflictPaths: TStringArray;
     function RunGit(const ADir: string; const AArgs: array of string;
       out AOutput: string; const AIndexFile: string = ''): boolean;
+    function ResetToWorkTree(const ATarget: string): boolean;
     function RunRemote(const AArgs: array of string): boolean;
     function StoredSize(const APath, ARef: string; out ASize: int64): boolean;
     function LfsPointerAt(const APath, ARef: string; AStoredSize: int64; out AOid: string;
@@ -7487,6 +7488,76 @@ begin
   Result := True;
 end;
 
+{ What reset --keep to ATarget, which git refused, would have done,
+  when the work tree already holds ATarget's content in every file HEAD
+  and ATarget differ in: as a soft or mixed reset from ATarget leaves it,
+  whose files git counts as local changes ("not uptodate", "untracked
+  file would be overwritten"). HEAD moves to ATarget and those files'
+  index entries with it; the rest of the index and the work tree stay.
+  False, with git's refusal kept in Error, when a file differs. }
+function TGittanRepo.ResetToWorkTree(const ATarget: string): boolean;
+var
+  Refusal, Output, Index, ListFile: string;
+  Fields, Paths, Gone, Changed: TStringList;
+  i: integer;
+begin
+  Result := False;
+  Refusal := FError;
+  Fields := TStringList.Create;
+  Paths := TStringList.Create;
+  Gone := TStringList.Create;
+  Changed := TStringList.Create;
+  Index := TempFileName('gittan-undo-index');
+  ListFile := TempFileName('gittan-undo-paths');
+  try
+    if not RunGit(FRoot, ['diff', '--name-status', '-z', '--no-renames', 'HEAD', ATarget],
+      Output) then
+      Exit;
+    SplitNul(Output, Fields);
+    i := 0;
+    while i + 1 < Fields.Count do
+    begin
+      Paths.Add(Fields[i + 1]);
+      { Not in ATarget: the work tree must not have it either. }
+      if Fields[i] = 'D' then
+        Gone.Add(Fields[i + 1]);
+      Inc(i, 2);
+    end;
+    if Paths.Count = 0 then
+      Exit;
+    for i := 0 to Gone.Count - 1 do
+      if FileExists(FullPath(Gone[i])) or IsLinkAt(FullPath(Gone[i])) then
+        Exit;
+    { The work tree against ATarget through an index of its own: the
+      files that differ from it, of those ATarget has. The refresh
+      fails when some do, which the list then says. }
+    if not RunGit(FRoot, ['read-tree', ATarget], Output, Index) then
+      Exit;
+    RunGit(FRoot, ['update-index', '-q', '--refresh'], Output, Index);
+    if not RunGit(FRoot, ['diff-files', '--name-only', '-z'], Output, Index) then
+      Exit;
+    SplitNul(Output, Changed);
+    Changed.Sorted := True;
+    for i := 0 to Paths.Count - 1 do
+      if Changed.IndexOf(Paths[i]) >= 0 then
+        Exit;
+    WriteBytes(ListFile, NulList(Paths));
+    Result := RunGit(FRoot, ['reset', '--soft', ATarget], Output) and
+      RunGit(FRoot, ['--literal-pathspecs', 'reset', '-q', ATarget,
+      '--pathspec-from-file=' + ListFile, '--pathspec-file-nul'], Output);
+    Refusal := FError;
+  finally
+    if not Result then
+      FError := Refusal;
+    DeleteFile(Index);
+    DeleteFile(ListFile);
+    Changed.Free;
+    Gone.Free;
+    Paths.Free;
+    Fields.Free;
+  end;
+end;
+
 function TGittanRepo.RunSteps(const ASteps: TGittanGitSteps): boolean;
 var
   i: integer;
@@ -7495,7 +7566,14 @@ begin
   Result := FRoot <> '';
   for i := 0 to High(ASteps) do
     if not RunGit(FRoot, ASteps[i], Output) then
+    begin
+      { Undo of a soft or mixed reset: its files are local changes to
+        --keep, though they are what the target holds. }
+      if (Length(ASteps[i]) = 3) and (ASteps[i][0] = 'reset') and
+        (ASteps[i][1] = '--keep') and ResetToWorkTree(ASteps[i][2]) then
+        Continue;
       Exit(False);
+    end;
 end;
 
 { symbolic-ref names the branch even before its first commit; it fails

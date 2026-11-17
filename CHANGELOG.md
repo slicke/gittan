@@ -7,6 +7,7 @@
 - A `.gittan/repo.toml` or commands file with a dotted key or table header tens of thousands of parts long is refused instead of ending Gittan when the repository opens.
 - A Lazarus `.lpi` or `.lpk` nested thousands of levels deep is not read, instead of ending Gittan when the repository opens.
 - JSON an extension passes nested thousands of levels deep is refused instead of ending Gittan.
+- Undo of a mixed reset (Reset to Here › Mixed, or `git reset HEAD~1`) works, where git always refused it as "not uptodate" or over an untracked file.
 - A tag without a message is made when signing is on, instead of failing with "Terminal is dumb" or waiting for an editor, and no git command Gittan runs starts an editor any more.
 - On Windows and Linux above 100 % scaling, the dialogs (Settings, Interactive Rebase, Remotes, Patches, Identity, Clone, Clean and the others) have their intended size instead of growing by the scale twice, and the merge view's headers and splitters are no longer twice as large.
 - A tab closed while it loads a large file or waits for a parse closes once that is done, instead of going on in freed memory.
