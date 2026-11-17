@@ -7596,8 +7596,8 @@ end;
   False, with git's refusal kept in Error, when a file differs. }
 function TGittanRepo.ResetToWorkTree(const ATarget: string): boolean;
 var
-  Refusal, Output, Index, ListFile: string;
-  Fields, Paths, Gone, Changed: TStringList;
+  Refusal, Output, Index, ListFile, Head: string;
+  Fields, Paths, Gone, Changed, Staged: TStringList;
   i: integer;
 begin
   Result := False;
@@ -7606,6 +7606,7 @@ begin
   Paths := TStringList.Create;
   Gone := TStringList.Create;
   Changed := TStringList.Create;
+  Staged := TStringList.Create;
   Index := TempFileName('gittan-undo-index');
   ListFile := TempFileName('gittan-undo-paths');
   try
@@ -7640,16 +7641,48 @@ begin
     for i := 0 to Paths.Count - 1 do
       if Changed.IndexOf(Paths[i]) >= 0 then
         Exit;
+    { The real index: an entry staged since that is neither HEAD's nor
+      ATarget's is a change of its own, which the reset of the paths
+      would replace with ATarget's. }
+    if not RunGit(FRoot, ['diff', '--cached', '--name-only', '-z', '--no-renames', 'HEAD'],
+      Output) then
+      Exit;
+    Staged.Clear;
+    SplitNul(Output, Staged);
+    Staged.Sorted := True;
+    if not RunGit(FRoot, ['diff', '--cached', '--name-only', '-z', '--no-renames', ATarget],
+      Output) then
+      Exit;
+    Changed.Sorted := False;
+    Changed.Clear;
+    SplitNul(Output, Changed);
+    Changed.Sorted := True;
+    for i := 0 to Paths.Count - 1 do
+      if (Staged.IndexOf(Paths[i]) >= 0) and (Changed.IndexOf(Paths[i]) >= 0) then
+        Exit;
+    { The soft reset takes no lock on the index, so with another git at
+      work it would move HEAD and the reset of the paths fail; HEAD goes
+      back then. }
+    if not RunGit(FRoot, ['rev-parse', '--verify', '-q', 'HEAD'], Head) then
+      Exit;
+    Head := Trim(Head);
     WriteBytes(ListFile, NulList(Paths));
-    Result := RunGit(FRoot, ['reset', '--soft', ATarget], Output) and
-      RunGit(FRoot, ['--literal-pathspecs', 'reset', '-q', ATarget,
+    if not RunGit(FRoot, ['reset', '--soft', ATarget], Output) then
+    begin
+      Refusal := FError;
+      Exit;
+    end;
+    Result := RunGit(FRoot, ['--literal-pathspecs', 'reset', '-q', ATarget,
       '--pathspec-from-file=' + ListFile, '--pathspec-file-nul'], Output);
     Refusal := FError;
+    if not Result then
+      RunGit(FRoot, ['reset', '--soft', Head], Output);
   finally
     if not Result then
       FError := Refusal;
     DeleteFile(Index);
     DeleteFile(ListFile);
+    Staged.Free;
     Changed.Free;
     Gone.Free;
     Paths.Free;

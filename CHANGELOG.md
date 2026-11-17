@@ -28,7 +28,7 @@
 - Add to .gitignore, Track with Git LFS and the editor no longer write through a `.gitignore`, `.gitattributes` or other repository file that is a committed symbolic link, which could point at `.git/config` or outside the clone; the Config section leaves such links out.
 - The Project page opens only web links, so a Cargo.toml whose repository is a `file:`, `smb:` or similar URL can no longer start a program with a click.
 - An interactive rebase, a rebase onto another branch or a reset no longer goes ahead when the branch moved or was switched while you were asked, where a commit made meanwhile was dropped; a tag made at HEAD goes on the commit the question named.
-- Undo of a mixed reset (Reset to Here › Mixed, or `git reset HEAD~1`) works, where git always refused it as "not uptodate" or over an untracked file.
+- Undo of a mixed reset (Reset to Here › Mixed, or `git reset HEAD~1`) works, where git always refused it as "not uptodate" or over an untracked file. It refuses a file you have staged since with other content, rather than replace what you staged.
 - A tag without a message is made when signing is on, instead of failing with "Terminal is dumb" or waiting for an editor, and no git command Gittan runs starts an editor any more.
 - On Windows and Linux above 100 % scaling, the dialogs (Settings, Interactive Rebase, Remotes, Patches, Identity, Clone, Clean and the others) have their intended size instead of growing by the scale twice, and the merge view's headers and splitters are no longer twice as large.
 - A tab closed while it loads a large file or waits for a parse closes once that is done, instead of going on in freed memory.

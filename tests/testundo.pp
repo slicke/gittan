@@ -45,6 +45,8 @@ type
     procedure TestRefused;
     procedure TestMixedReset;
     procedure TestMixedResetChanged;
+    procedure TestMixedResetStaged;
+    procedure TestMixedResetLocked;
     procedure TestRedoForgotten;
   end;
 
@@ -538,6 +540,61 @@ begin
   AssertFalse('refused', FRepo.RunSteps(Steps));
   AssertTrue('git''s reason', Pos('a.txt', FRepo.Error) > 0);
   AssertEquals('the change is kept', 'mine', ReadFile('a.txt'));
+end;
+
+{ A file staged since the reset, with neither HEAD's content nor the
+  undo's, though the work tree has the undo's: the reset of the paths
+  would replace what was staged. }
+procedure TUndoTest.TestMixedResetStaged;
+var
+  Cur: TGittanRefState;
+  Step: TGittanUndoStep;
+  Steps: TGittanGitSteps;
+  Before, Staged, Err: string;
+begin
+  Commit('a.txt', 'two', 'Second');
+  Track;
+  Git(['reset', '-q', 'HEAD~1']);
+  Track;
+  Before := Rev('HEAD');
+  WriteFile('a.txt', 'mine');
+  Git(['add', 'a.txt']);
+  WriteFile('a.txt', 'two');
+  Step := FHistory.UndoStep;
+  AssertTrue(FRepo.ReadRefState(Cur));
+  AssertTrue(PlanRefChange(Cur, Step.After, Step.Before, Step.Kind, [], Steps, Err));
+  AssertFalse('refused', FRepo.RunSteps(Steps));
+  AssertEquals('HEAD stays', Before, Rev('HEAD'));
+  AssertTrue(Err, RunGitIn(FDir, ['show', ':a.txt'], Staged, Err));
+  AssertEquals('what was staged is kept', 'mine', Trim(Staged));
+end;
+
+{ With the index locked by another git the soft reset still moves HEAD
+  and the reset of the paths fails: HEAD goes back. }
+procedure TUndoTest.TestMixedResetLocked;
+var
+  Cur: TGittanRefState;
+  Step: TGittanUndoStep;
+  Steps: TGittanGitSteps;
+  Before, Lock: string;
+  Err: string;
+begin
+  Commit('a.txt', 'two', 'Second');
+  Track;
+  Git(['reset', '-q', 'HEAD~1']);
+  Track;
+  Before := Rev('HEAD');
+  Lock := IncludeTrailingPathDelimiter(FDir) + '.git' + PathDelim + 'index.lock';
+  WriteFile('.git' + PathDelim + 'index.lock', '');
+  try
+    Step := FHistory.UndoStep;
+    AssertTrue(FRepo.ReadRefState(Cur));
+    AssertTrue(PlanRefChange(Cur, Step.After, Step.Before, Step.Kind, [], Steps, Err));
+    AssertFalse('refused', FRepo.RunSteps(Steps));
+    AssertEquals('HEAD stays', Before, Rev('HEAD'));
+  finally
+    DeleteFile(Lock);
+  end;
 end;
 
 procedure TUndoTest.TestRedoForgotten;
