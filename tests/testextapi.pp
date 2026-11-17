@@ -333,10 +333,17 @@ begin
   finally
     Free;
   end;
-  Info := Load('async', 'Promise.all([Gittan.repo.diffAsync("a.txt"), Gittan.repo.diffAsync(),' +
-    'Gittan.repo.blameAsync("a.txt", "HEAD"), Gittan.repo.fileTextAsync("a.txt", "HEAD"),' +
-    'Gittan.repo.fileTextAsync("../outside.txt"), Gittan.repo.blameAsync("nope.txt")])' +
-    '.then(function (r) { globalThis.r = r; globalThis.done = true; });', AllPerms);
+  { One after the other: git on Haiku now and then fails or hangs with
+    several at once ("pthread_join failed", a read back empty). }
+  Info := Load('async', 'var reads = [function () { return Gittan.repo.diffAsync("a.txt"); },' +
+    'function () { return Gittan.repo.diffAsync(); },' +
+    'function () { return Gittan.repo.blameAsync("a.txt", "HEAD"); },' +
+    'function () { return Gittan.repo.fileTextAsync("a.txt", "HEAD"); },' +
+    'function () { return Gittan.repo.fileTextAsync("../outside.txt"); },' +
+    'function () { return Gittan.repo.blameAsync("nope.txt"); }];' +
+    'var r = [];' +
+    'reads.reduce(function (p, f) { return p.then(f).then(function (x) { r.push(x); }); },' +
+    '  Promise.resolve()).then(function () { globalThis.r = r; globalThis.done = true; });', AllPerms);
   WaitFor(Info^.Ctx, 'globalThis.done');
   AssertEquals('the file diff', 'true', EvalIn(Info^.Ctx, 'String(r[0].indexOf("+three") >= 0)'));
   AssertEquals('the whole diff', 'true', EvalIn(Info^.Ctx, 'String(r[1].indexOf("+three") >= 0)'));
@@ -388,10 +395,12 @@ procedure TExtApiTest.TestExecWithoutData;
 var
   Info: PExtContextInfo;
 begin
+  { One after the other: git on Haiku now and then fails or hangs with
+    several at once. }
   Info := Load('execonly', 'Gittan.git.run(["log", "--format=%s", "-n", "1"]).then(function (r) {' +
     'globalThis.out = r.ok + ":" + r.stdout.trim(); globalThis.err = r.status + " " + r.stderr; },' +
-    ' function (e) { globalThis.out = "rejected:" + String(e); });' +
-    'Gittan.exec.run("git", ["rev-parse", "--is-inside-work-tree"]).then(function (r) {' +
+    ' function (e) { globalThis.out = "rejected:" + String(e); }).then(function () {' +
+    'return Gittan.exec.run("git", ["rev-parse", "--is-inside-work-tree"]); }).then(function (r) {' +
     'globalThis.inside = r.stdout.trim(); }, function (e) { globalThis.inside = "rejected:" + String(e); });',
     PermBaseline + [epExec]);
   WaitFor(Info^.Ctx, 'globalThis.out && globalThis.inside');
