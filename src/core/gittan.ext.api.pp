@@ -930,6 +930,7 @@ const
 procedure JSMessage(res: PJSValue; ctx: JSContext; this_val: PJSValue;
   argc: integer; argv: PJSValues; magic: integer);
 var
+  Wait: TJSWait;
   Eng: TGittanExtEngine;
   Data: TJSONData;
   O: TJSONObject;
@@ -1052,8 +1053,13 @@ begin
     end;
     if not IndexOf('default', 0, 0, Default) or not IndexOf('cancel', -1, -1, Cancel) then
       Exit;
-    res^ := JS_NewInt32(ctx, ExtHost.Message(Eng.ExtensionNameForContext(ctx),
-      Title, Text, Kind, Buttons, Default, Cancel));
+    Wait := JSWaitBegin;
+    try
+      res^ := JS_NewInt32(ctx, ExtHost.Message(Eng.ExtensionNameForContext(ctx),
+        Title, Text, Kind, Buttons, Default, Cancel));
+    finally
+      JSWaitEnd(Wait);
+    end;
   finally
     Data.Free;
   end;

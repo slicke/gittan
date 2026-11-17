@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- An extension stuck in a loop that splits a long text or parses JSON over and over is stopped after 10 seconds, instead of freezing Gittan for good (at every start, when the loop runs as the extension loads); a dialog the extension shows does not count toward the 10 seconds.
 - Quitting or leaving a repository no longer waits for a background fetch, or a fetch you started, from a server that does not answer; the fetch is given up. Fetch, pull and push over ssh give up a server that stays silent for a minute or takes over 30 seconds to connect, and over HTTP a transfer that has stalled for a minute, unless your own ssh command or `http.lowSpeedLimit`/`lowSpeedTime` settings say otherwise. A pull request fetch now uses the same ssh settings as the other fetches.
 - The commit graph with No Merges no longer takes seconds and hundreds of megabytes on a long history (20,000 commits took 44 s); it lays out at once.
 - A large changed or untracked file no longer slows down every poll of the repository and every commit, stash or switch: its content is hashed only while it is being written (a 512 MB file cost 1.7 s a poll, now 40 ms), and those commands no longer wait for a poll under way.

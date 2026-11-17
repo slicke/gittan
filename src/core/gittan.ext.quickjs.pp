@@ -381,8 +381,7 @@ function JS_NewClass(rt: JSRuntime; classID: JSClassID; def: PJSClassDef): integ
 function JS_IsJobPending(rt: JSRuntime): ByteBool; cdecl; external QJSLIB;
 { pctx must point at a real JSContext variable: quickjs-ng writes the context
   that ran the job through it unconditionally, so passing nil crashes. }
-function JS_ExecutePendingJob(rt: JSRuntime; pctx: PJSContext): integer; cdecl;
-  external QJSLIB;
+function JS_ExecutePendingJob(rt: JSRuntime; pctx: PJSContext): integer;
 
 type
   {** Interrupt hook, polled from the interpreter loop every few thousand
@@ -446,6 +445,29 @@ JS_PUMP_CLOCK_EVERY = 64;
     context that actually ran each job, so a local copy is passed and the
     caller's variable is left alone. }
 function JS_DrainPendingJobs(rt: JSRuntime; ctx: JSContext): boolean;
+
+type
+  {** What JSWaitBegin put aside of the watchdog's clock. }
+  TJSWait = record
+    Depth: integer;
+    Start, Began: QWord;
+  end;
+
+var
+  {** The watchdog's clock (EngineInterruptHandler in gittan.ext.engine):
+      the calls the host has made into JS on the main thread and not yet
+      returned from (JS_Eval, JS_Call, JS_ExecutePendingJob), a call a
+      native makes back into JS among them, and when the outermost began.
+      A script's budget runs from there, so a loop is timed as a whole
+      however long its body spends inside a native, between the polls. }
+  JSEntryDepth: integer = 0;
+  JSEntryStart: QWord = 0;
+
+{** For a native that waits for the user (a dialog): the time until
+    JSWaitEnd is not the script's. JS run meanwhile (a timer while a
+    modal dialog is up) is timed as a call of its own. }
+function JSWaitBegin: TJSWait;
+procedure JSWaitEnd(const AWait: TJSWait);
 
 {** Evaluate source text. The caller owns the returned value. }
 function JS_Eval(ctx: JSContext; const src, filename: RawUtf8; flags: integer): JSValue;
@@ -581,6 +603,9 @@ function JS_NewFunctionData(ctx: JSContext; argCount, magic, dataLen: integer;
   data: PJSValues): JSValue;
 
 implementation
+
+uses
+  Classes;
 
 { --- shim imports ------------------------------------------------- }
 
@@ -769,6 +794,51 @@ begin
       [tq_abi_version, TQ_EXPECTED_ABI]);
 end;
 
+function JS_ExecutePendingJobRaw(rt: JSRuntime; pctx: PJSContext): integer; cdecl;
+  external QJSLIB name 'JS_ExecutePendingJob';
+
+{ Whether the call is the main thread's, the one JS runs on, so it counts
+  for the watchdog's clock. }
+function EnterJS: boolean; inline;
+begin
+  Result := GetCurrentThreadId = MainThreadID;
+  if not Result then
+    Exit;
+  if JSEntryDepth <= 0 then
+  begin
+    JSEntryDepth := 0;
+    JSEntryStart := GetTickCount64;
+  end;
+  Inc(JSEntryDepth);
+end;
+
+function JSWaitBegin: TJSWait;
+begin
+  Result.Depth := JSEntryDepth;
+  Result.Start := JSEntryStart;
+  Result.Began := GetTickCount64;
+  JSEntryDepth := 0;
+end;
+
+procedure JSWaitEnd(const AWait: TJSWait);
+begin
+  JSEntryDepth := AWait.Depth;
+  JSEntryStart := AWait.Start + (GetTickCount64 - AWait.Began);
+end;
+
+function JS_ExecutePendingJob(rt: JSRuntime; pctx: PJSContext): integer;
+var
+  Counted: boolean;
+begin
+  Counted := EnterJS;
+  try
+    Result := JS_ExecutePendingJobRaw(rt, pctx);
+  finally
+    if Counted then
+      Dec(JSEntryDepth);
+  end;
+end;
+
 function JS_DrainPendingJobs(rt: JSRuntime; ctx: JSContext): boolean;
 var
   runCtx: JSContext;
@@ -860,14 +930,30 @@ end;
 { ================================================================== }
 
 function JS_Eval(ctx: JSContext; const src, filename: RawUtf8; flags: integer): JSValue;
+var
+  Counted: boolean;
 begin
-  tq_eval(@Result, ctx, pansichar(src), Length(src), pansichar(filename), flags);
+  Counted := EnterJS;
+  try
+    tq_eval(@Result, ctx, pansichar(src), Length(src), pansichar(filename), flags);
+  finally
+    if Counted then
+      Dec(JSEntryDepth);
+  end;
 end;
 
 function JS_Call(ctx: JSContext; const func, this_obj: JSValue; argc: integer;
   argv: PJSValues): JSValue;
+var
+  Counted: boolean;
 begin
-  tq_call(@Result, ctx, @func, @this_obj, argc, argv);
+  Counted := EnterJS;
+  try
+    tq_call(@Result, ctx, @func, @this_obj, argc, argv);
+  finally
+    if Counted then
+      Dec(JSEntryDepth);
+  end;
 end;
 
 function JS_GetException(ctx: JSContext): JSValue;

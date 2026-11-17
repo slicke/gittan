@@ -78,13 +78,21 @@ argc: integer; argv: PJSValues; magic: integer);
 var
   i: integer;
   output: rawutf8;
+  Wait: TJSWait;
+  Yes: boolean;
 begin
   try
     output := '';
     for i := 0 to argc - 1 do
       output := output + ctx^.ToUtf8(argv^[i]);
 
-    if ExtHost.Confirm(TGittanExtEngine.Instance.ExtensionNameForContext(ctx), output) then
+    Wait := JSWaitBegin;
+    try
+      Yes := ExtHost.Confirm(TGittanExtEngine.Instance.ExtensionNameForContext(ctx), output);
+    finally
+      JSWaitEnd(Wait);
+    end;
+    if Yes then
       res^ := JS_TRUE
     else
       res^ := JS_FALSE;
@@ -115,6 +123,7 @@ argc: integer; argv: PJSValues; magic: integer);
 var
   Caption, desc, def: rawutf8;
   response: string;
+  Wait: TJSWait;
 begin
   res^ := JS_UNDEFINED;
   if argc < 3 then
@@ -125,8 +134,13 @@ begin
   Caption := ctx^.ToUtf8(argv^[0]);
   desc := ctx^.ToUtf8(argv^[1]);
   def := ctx^.ToUtf8(argv^[2]);
-  if not ExtHost.Prompt(Caption, desc, def, response) then
-    response := '';
+  Wait := JSWaitBegin;
+  try
+    if not ExtHost.Prompt(Caption, desc, def, response) then
+      response := '';
+  finally
+    JSWaitEnd(Wait);
+  end;
   res^ := JS_NewString(ctx, pansichar(Response));
 end;
 
@@ -150,6 +164,7 @@ var
   Caption, desc: rawutf8;
   response: int64;
   vals: TStringList;
+  Wait: TJSWait;
 begin
   if argc < 3 then
   begin
@@ -162,7 +177,12 @@ begin
     vals.Add(ctx^.ToUtf8(argv^[i]));
   Caption := ctx^.ToUtf8(argv^[0]);
   desc := ctx^.ToUtf8(argv^[1]);
-  response := ExtHost.Select(Caption, desc, vals.ToStringArray(2, argc - 1));
+  Wait := JSWaitBegin;
+  try
+    response := ExtHost.Select(Caption, desc, vals.ToStringArray(2, argc - 1));
+  finally
+    JSWaitEnd(Wait);
+  end;
   // Ignore the first params
   //  res := vals.strings[response+2];
   vals.Free;

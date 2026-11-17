@@ -121,6 +121,13 @@ end;
 
 TExtContextList = specialize TFPGList<PExtContextInfo>;
 
+var
+  {** How long a script may run, from the host's call into it, before the
+      watchdog aborts it, in milliseconds; the tests make it shorter. }
+  ExtWatchdogMs: QWord = 10000;
+
+type
+
   {** Embedded JavaScript engine wrapper using QuickJS via @link(gittan.ext.quickjs).
 
       Responsibilities:
@@ -864,8 +871,15 @@ end;
 
 {** Show a simple informational alert through the host. }
 procedure TGittanExtEngine.alert(const msg: string; const AName: string);
+var
+  Wait: TJSWait;
 begin
-  ExtHost.Alert(AName, msg);
+  Wait := JSWaitBegin;
+  try
+    ExtHost.Alert(AName, msg);
+  finally
+    JSWaitEnd(Wait);
+  end;
 end;
 
 {** Raise JS exception with filename context. }
@@ -1150,43 +1164,52 @@ end;
 ******************************************************************************}
 
 const
-  {** Runaway-extension guards: a script may execute continuously for this
-      long before the watchdog aborts it, and the shared runtime heap is
-      capped so a leaking extension cannot exhaust the process. }
-  JS_WATCHDOG_MS = 10000;
-  {** A gap this long between interrupt polls means no JS was executing (or
-      it sat inside a native call, e.g. a modal dialog awaiting the user), so
-      the watchdog budget restarts rather than count host/user time. }
+  {** For JS run outside the calls the binding counts (JSEntryDepth 0: a
+      toString or a getter the host reaches some other way), a gap this
+      long between interrupt polls starts the budget over. }
   JS_WATCHDOG_GAP_MS = 500;
+  {** The shared runtime heap is capped so a leaking extension cannot exhaust
+      the process (the time a script may run is ExtWatchdogMs). }
   JS_MEMORY_LIMIT_BYTES = 64 shl 20; // 64 MB across all extension contexts
   { Not on Haiku, where quickjs-ng cannot measure an allocation
     (js__malloc_usable_size gives 0) and counts its overhead alone. }
 
 {** Interrupt hook polled by quickjs-ng between bytecodes; returning 1 aborts
-    the running script with an uncatchable InterruptError. "Continuous
-    execution" is measured through poll gaps: while JS runs, polls arrive
-    every few thousand instructions, so a long gap means the engine was idle
-    or parked in a native call - either way the budget restarts. Runs on
-    whichever thread executes JS, which in Gittan is always the main thread. }
+    the running script with an uncatchable InterruptError. A script's budget
+    runs from the host's outermost call into JS (JSEntryStart, kept by the
+    binding's JS_Call, JS_Eval and JS_ExecutePendingJob), less the time a
+    native waited for the user (JSWaitBegin): the polls come only every ten
+    thousand or so calls and jumps, so a loop whose body sits in a native
+    (a split of a long text, a JSON.parse) is still timed as a whole. Runs
+    on whichever thread executes JS, which in Gittan is always the main
+    thread. }
 function EngineInterruptHandler(rt: JSRuntime; opaque: pointer): integer; cdecl;
 var
   eng: TGittanExtEngine;
-  tick: QWord;
+  tick, start: QWord;
 begin
   Result := 0;
   eng := TGittanExtEngine(opaque);
   if eng = nil then
     Exit;
   tick := GetTickCount64;
-  if tick - eng.FLastJSCheck > JS_WATCHDOG_GAP_MS then
-    eng.FJSBurstStart := tick;
-  eng.FLastJSCheck := tick;
-  if tick - eng.FJSBurstStart > JS_WATCHDOG_MS then
+  if JSEntryDepth > 0 then
+    start := JSEntryStart
+  else
   begin
-    // Zeroing the poll timestamp restarts the burst at the next poll, so the
-    // next script (say, another extension in the same broadcast) gets a
-    // fresh budget instead of dying to this script's spent one.
+    if tick - eng.FLastJSCheck > JS_WATCHDOG_GAP_MS then
+      eng.FJSBurstStart := tick;
+    eng.FLastJSCheck := tick;
+    start := eng.FJSBurstStart;
+  end;
+  if tick - start > ExtWatchdogMs then
+  begin
+    // The next script (say, another extension in the same broadcast) gets a
+    // fresh budget instead of dying to this script's spent one: a new
+    // outermost call starts its own, and the rest start over here.
     eng.FLastJSCheck := 0;
+    if JSEntryDepth > 0 then
+      JSEntryStart := tick;
     Result := 1;
   end;
 end;

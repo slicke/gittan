@@ -31,6 +31,8 @@ type
     ViewForge: string;
     Status, Cleared: string;
     ConfirmAnswer, PermissionAnswer: boolean;
+    { How long Confirm takes, as the user would, in milliseconds. }
+    ConfirmDelay: integer;
     PromptAnswer: string;
     SelectAnswer, Changed: integer;
     { What Message answers, and each message as
@@ -98,6 +100,7 @@ type
     procedure TestNoExceptionLeftPending;
     procedure TestConsoleLinesCut;
     procedure TestDialogTextFromChangingToString;
+    procedure TestWatchdogStopsNativeLoop;
   end;
 
 implementation
@@ -145,6 +148,8 @@ end;
 function TFakeExtHost.Confirm(const AName, AText: string): boolean;
 begin
   Alerts.Add('confirm:' + AText);
+  if ConfirmDelay > 0 then
+    Sleep(ConfirmDelay);
   Result := ConfirmAnswer;
 end;
 
@@ -511,6 +516,36 @@ begin
   AssertEquals('confirm has the second', 'confirm:' + StringOfChar('x', 32),
     FHost.Alerts[1]);
   AssertEquals('toString called once each', '2', EvalIn(Info^.Ctx, 'String(globalThis.n)'));
+end;
+
+{ A loop whose body sits in a native (a split of a long text) is polled
+  seldom, with gaps far over half a second between polls: the watchdog
+  still stops it once its budget, counted from the load, is spent. The
+  loop ends by itself after 30 s, so a broken watchdog fails the test
+  rather than hang it. A dialog's wait is not the script's. }
+procedure TExtEngineTest.TestWatchdogStopsNativeLoop;
+var
+  Res: string;
+  T: QWord;
+begin
+  ExtWatchdogMs := 1000;
+  try
+    T := GetTickCount64;
+    Res := LoadResult('splitloop',
+      'var text = "line of text\n".repeat(8000), end = Date.now() + 30000;' +
+      'while (Date.now() < end) text.split("\n"); "ran to the end";');
+    T := GetTickCount64 - T;
+    AssertTrue('stopped: ' + Res, Pos('Error:', Res) = 1);
+    AssertTrue('in its budget, not 30 s: ' + IntToStr(T), T < 15000);
+    FHost.ConfirmDelay := 1500;
+    Res := LoadResult('asks',
+      'function busy(ms) { var e = Date.now() + ms; while (Date.now() < e); }' +
+      'busy(300); Gittan.confirm("go on?"); busy(300); "done";');
+    AssertEquals('the wait for the user is not counted', 'done', Res);
+  finally
+    FHost.ConfirmDelay := 0;
+    ExtWatchdogMs := 10000;
+  end;
 end;
 
 procedure TExtEngineTest.TestPermissionGate;
