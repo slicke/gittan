@@ -593,7 +593,7 @@ begin
   if (Eng = nil) or (argc < 1) then
     Exit;
   try
-    Data := GetJSON(Arg(ctx, argc, argv, 0));
+    Data := GetJSONLimited(Arg(ctx, argc, argv, 0));
   except
     res^ := JS_ThrowError(ctx, 'Gittan.settings.define: a list of {key, type, label, default} is expected');
     Exit;
@@ -875,7 +875,7 @@ begin
   if (Eng = nil) or (argc < 1) then
     Exit;
   try
-    Data := GetJSON(Arg(ctx, argc, argv, 0));
+    Data := GetJSONLimited(Arg(ctx, argc, argv, 0));
   except
     res^ := JS_ThrowError(ctx, 'Gittan.ui.addCard: {path, line, text} is expected');
     Exit;
@@ -976,7 +976,7 @@ begin
   if Eng = nil then
     Exit;
   try
-    Data := GetJSON(Arg(ctx, argc, argv, 0));
+    Data := GetJSONLimited(Arg(ctx, argc, argv, 0));
   except
     Fail('{text, title?, kind?, buttons?} is expected');
     Exit;
@@ -1091,7 +1091,7 @@ begin
   if AJson = '' then
     Exit(True);
   try
-    Data := GetJSON(AJson);
+    Data := GetJSONLimited(AJson);
   except
     Exit;
   end;
@@ -1283,7 +1283,7 @@ var
 begin
   Result := False;
   try
-    State := GetJSON(ParamStr(params, 0));
+    State := GetJSONLimited(ParamStr(params, 0));
   except
     State := nil;
   end;
@@ -1373,7 +1373,7 @@ begin
   Headers := nil;
   if (HeadersJson <> '') and (HeadersJson <> '{}') then
   try
-    Data := GetJSON(HeadersJson);
+    Data := GetJSONLimited(HeadersJson);
     try
       if Data is TJSONObject then
       begin

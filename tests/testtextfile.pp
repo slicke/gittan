@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, StrUtils, {$IFDEF UNIX}BaseUnix, {$ENDIF}fpcunit, testregistry,
-  testhelpers, gittan.textfile;
+  fpjson, testhelpers, gittan.textfile;
 
 type
   TTextFileTest = class(TTestCase)
@@ -20,6 +20,7 @@ type
     procedure TestNextLine;
     procedure TestUnescapeC;
     procedure TestJsonTooDeep;
+    procedure TestGetJSONLimited;
     procedure TestUtf8Clean;
     procedure TestTomlTooDeep;
     procedure TestXmlTooDeep;
@@ -193,6 +194,27 @@ begin
   AssertFalse('floats in a long array',
     TomlTooDeep('x = [' + DupeString('1.5, ', 1000) + '2.5]'));
   AssertFalse('dots in a string key', TomlTooDeep('"' + DupeString('a.', 500) + '" = 1'));
+end;
+
+procedure TTextFileTest.TestGetJSONLimited;
+var
+  Data: TJSONData;
+  Raised: boolean;
+begin
+  Data := GetJSONLimited('{"a": [1, 2]}');
+  try
+    AssertEquals(2, TJSONObject(Data).Arrays['a'].Count);
+  finally
+    Data.Free;
+  end;
+  Raised := False;
+  try
+    GetJSONLimited(StringOfChar('[', 50000)).Free;
+  except
+    on E: EJSON do
+      Raised := Pos('Nested deeper', E.Message) > 0;
+  end;
+  AssertTrue('too deep', Raised);
 end;
 
 procedure TTextFileTest.TestXmlTooDeep;

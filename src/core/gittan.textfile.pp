@@ -12,7 +12,7 @@ unit gittan.textfile;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, fpjson;
 
 {** The bytes of the file AFileName, unconverted; raises when it cannot
   be read. }
@@ -47,6 +47,11 @@ resourcestring
 {** Whether AJson nests arrays and objects deeper than MaxNesting, its
   strings left out. }
 function JsonTooDeep(const AJson: string): boolean;
+
+{** GetJSON of AJson, which raises as on text that is not JSON when it
+  nests deeper than MaxNesting; for JSON that others write, an
+  extension's included. }
+function GetJSONLimited(const AJson: string): TJSONData;
 
 {** The same for TOML: its basic, literal and multi-line strings and its
   comments left out, inline tables and arrays counted, and the parts of
@@ -96,10 +101,10 @@ function WriteFileReplacing(const AFileName: RawByteString; const AText: RawByte
 
 implementation
 
-{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
 uses
-  BaseUnix;
-{$ENDIF}
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}BaseUnix,{$ENDIF}
+  { The parser GetJSON reads with. }
+  jsonparser;
 
 function ReadFileBytes(const AFileName: string): RawByteString;
 var
@@ -296,6 +301,13 @@ begin
     end;
   end;
   SetLength(Result, Out);
+end;
+
+function GetJSONLimited(const AJson: string): TJSONData;
+begin
+  if JsonTooDeep(AJson) then
+    raise EJSON.CreateFmt(rsNestedTooDeep, [MaxNesting]);
+  Result := GetJSON(AJson);
 end;
 
 function TomlTooDeep(const AToml: string): boolean;

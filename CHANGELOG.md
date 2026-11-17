@@ -6,6 +6,7 @@
 
 - A `.gittan/repo.toml` or commands file with a dotted key or table header tens of thousands of parts long is refused instead of ending Gittan when the repository opens.
 - A Lazarus `.lpi` or `.lpk` nested thousands of levels deep is not read, instead of ending Gittan when the repository opens.
+- JSON an extension passes nested thousands of levels deep is refused instead of ending Gittan.
 
 ## 0.21 (build-146, 2026-11-17)
 
