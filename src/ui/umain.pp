@@ -1612,6 +1612,7 @@ type
     procedure CacheBlame(const ARef, APath: string; ABlame: TGittanBlame);
     procedure BlameJobDone(Sender: TObject);
     procedure ClearBlameCache;
+    procedure AbandonBlameJobs;
     procedure StopBlame;
     procedure ApplyBlame;
     procedure SetBlameBand(AEd: TATSynEdit);
@@ -5035,20 +5036,37 @@ begin
   AbandonFixJob;
   AbandonWhyJob;
   AbandonSummaryJob;
-  FreeAndNil(FAI);
-  StopCommitJob(True);
-  FreeAndNil(FDroppedCommits);
-  StopRemoteJob(True);
-  Application.RemoveOnActivateHandler(@AppActivate);
-  Application.RemoveOnDeactivateHandler(@AppDeactivate);
-  Application.RemoveOnIdleHandler(@NavIdle);
-  FreeAndNil(FNavHistory);
-  FreeAndNil(FUndoHistory);
-  StopWatcher;
+  { Every job is let go of before the first wait (the commit and remote
+    jobs', the watcher's, the blame zombies'), which runs queued calls
+    and Synchronize: a done event that came then would queue a call on
+    the frame being freed, or start a job of its own (the pull request's
+    a review, the blame's the next blame) for the wait to wait on. }
   AbandonPullJob;
   AbandonPullAction;
   AbandonReviewJob;
   AbandonSubmoduleJobs;
+  AbandonBlameJobs;
+  { Those waited for below lose their handlers here, not one wait later:
+    RemoteJobDone asks questions, and the watcher's change refreshes. }
+  if FRemoteJob <> nil then
+  begin
+    FRemoteJob.OnDone := nil;
+    FRemoteJob.OnOutput := nil;
+  end;
+  if FAutoFetchJob <> nil then
+    FAutoFetchJob.OnDone := nil;
+  if FWatcher <> nil then
+    FWatcher.OnChange := nil;
+  FreeAndNil(FAI);
+  Application.RemoveOnActivateHandler(@AppActivate);
+  Application.RemoveOnDeactivateHandler(@AppDeactivate);
+  Application.RemoveOnIdleHandler(@NavIdle);
+  StopCommitJob(True);
+  FreeAndNil(FDroppedCommits);
+  StopRemoteJob(True);
+  StopWatcher;
+  FreeAndNil(FNavHistory);
+  FreeAndNil(FUndoHistory);
   FreeAndNil(FSubJobs);
   FreeAndNil(FForge);
   ClearRevertUndo;
@@ -5085,6 +5103,8 @@ begin
   FreeAndNil(FReviewInk);
   FreeAndNil(FCommitOn);
   FreeAndNil(FCommitOff);
+  { What the waits above queued, so nothing runs on the freed frame. }
+  Application.RemoveAsyncCalls(Self);
   inherited Destroy;
 end;
 
