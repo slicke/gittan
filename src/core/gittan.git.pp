@@ -2421,6 +2421,17 @@ begin
   AOutput := '';
 end;
 
+{ Whether AEnv sets the variable AName ("NAME=..."). }
+function HasEnvName(const AEnv: array of string; const AName: string): boolean;
+var
+  i: integer;
+begin
+  for i := 0 to High(AEnv) do
+    if Copy(AEnv[i], 1, Length(AName) + 1) = AName + '=' then
+      Exit(True);
+  Result := False;
+end;
+
 function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
   out AOutput, AError: string; const AIndexFile: string;
   AOnOutput: TGittanOutputEvent; ACancel: TGittanCancelEvent;
@@ -2456,6 +2467,16 @@ begin
     Env[i + 3] := 'GIT_INDEX_FILE=' + AIndexFile
   else
     SetLength(Env, i + 3);
+  { No editor: nobody could use it (started from the Dock git says
+    "Terminal is dumb", with core.editor "code --wait" the main thread
+    waits for a tab to close), so a command that wants one, a signed tag
+    without a message or a pull that rebases interactively, gets an
+    empty text or the todo as it is. A caller's own editor (a rebase's
+    todo) stands. }
+  if not HasEnvName(AEnv, 'GIT_EDITOR') then
+    Env := Concat(Env, ['GIT_EDITOR=:']);
+  if not HasEnvName(AEnv, 'GIT_SEQUENCE_EDITOR') then
+    Env := Concat(Env, ['GIT_SEQUENCE_EDITOR=:']);
   { The user's own GIT_INDEX_FILE goes even when none is given. }
   if not RunTool(GGitExe, ADir, Args, ['GIT_INDEX_FILE='], Env, AOutput, AError,
     Status, AOnOutput, AInput, ACancel) then
@@ -5409,10 +5430,13 @@ var
 begin
   if (FRoot = '') or (AName = '') then
     Exit(False);
+  { Without a message the tag is a lightweight one, which is never
+    signed: tag.gpgSign (which Gittan's own signing sets) would make git
+    want a message and start an editor for it. }
   if AMessage <> '' then
     Result := RunGit(FRoot, ['tag', '-a', '-m', AMessage, AName, AAt], Output)
   else
-    Result := RunGit(FRoot, ['tag', AName, AAt], Output);
+    Result := RunGit(FRoot, ['-c', 'tag.gpgSign=false', 'tag', AName, AAt], Output);
 end;
 
 function ParseTags(const AOutput: string): TGittanTags;

@@ -646,7 +646,10 @@ begin
         Ok := RunGitIn(ARoot, ['tag', '-a', '-m', ATagMessage, Tag, 'refs/heads/' + Target],
           Output, AError)
       else
-        Ok := RunGitIn(ARoot, ['tag', Tag, 'refs/heads/' + Target], Output, AError);
+        { A lightweight tag, never signed: tag.gpgSign would want a
+          message (TGittanRepo.CreateTag). }
+        Ok := RunGitIn(ARoot, ['-c', 'tag.gpgSign=false', 'tag', Tag, 'refs/heads/' + Target],
+          Output, AError);
       if not Ok then
         Exit;
     end;

@@ -34,6 +34,8 @@ type
     procedure TestWindowsArg;
     procedure TestEmptyArgument;
     procedure TestNulArgument;
+    procedure TestTagWithSigningOn;
+    procedure TestNoEditor;
     procedure TestInsteadOf;
     procedure TestChangeKind;
     procedure TestStageFlags;
@@ -4823,6 +4825,41 @@ begin
   AssertEquals('nothing run', 'before', Trim(Git(['config', 'gittan.test'])));
   AssertFalse('a tool too', RunCli('git', FDir, ['config', 'gittan.test'#0, 'x'], [], Output, Err));
   AssertTrue(Err, Pos('NUL', Err) > 0);
+end;
+
+{ Gittan's signing sets tag.gpgSign, with which git wants a message for
+  any tag and starts an editor for it ("Terminal is dumb" from the Dock).
+  A tag without a message is a lightweight one, never signed. }
+procedure TGitRepoTest.TestTagWithSigningOn;
+begin
+  MakeHistory;
+  Git(['config', 'tag.gpgSign', 'true']);
+  Git(['config', 'core.editor', 'false']);
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.CreateTag('v1', 'HEAD', ''));
+  AssertEquals('lightweight', 'commit', Trim(Git(['cat-file', '-t', 'v1'])));
+end;
+
+{ No command starts an editor: one that wants a text gets an empty one,
+  whatever core.editor says (false would fail as the editor). }
+procedure TGitRepoTest.TestNoEditor;
+var
+  Output, Err, Was: string;
+begin
+  MakeHistory;
+  Git(['config', 'core.editor', 'false']);
+  { A GIT_EDITOR the tests were started with (an agent's true) would
+    stand in for Gittan's. }
+  Was := GetEnvironmentVariable('GIT_EDITOR');
+  UnsetTestVariable('GIT_EDITOR');
+  try
+    AssertFalse('no message, no commit', RunGitIn(FDir, ['commit', '--allow-empty'],
+      Output, Err));
+    AssertTrue(Err, Pos('empty', LowerCase(Err)) > 0);
+  finally
+    if Was <> '' then
+      SetTestVariable('GIT_EDITOR', Was);
+  end;
 end;
 
 procedure TGitRepoTest.TestParseGitVersion;
