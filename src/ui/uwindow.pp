@@ -1207,6 +1207,15 @@ begin
   Index := FFrames.IndexOf(Frame);
   if (Index < 0) or (FClosing.IndexOf(Frame) >= 0) then
     Exit;
+  { Asked from inside a wait of the frame's that runs the message loop
+    (a file loading, a parse): freed now, it would go on in freed
+    memory once the wait returns. Asked again from the queue until the
+    wait is over. }
+  if Frame.InNestedLoop then
+  begin
+    Application.QueueAsyncCall(@CloseFrameAsync, Data);
+    Exit;
+  end;
   if Frame.NeedsSave then
     ActivateFrame(Frame);
   CanClose := True;

@@ -7,6 +7,7 @@
 - A `.gittan/repo.toml` or commands file with a dotted key or table header tens of thousands of parts long is refused instead of ending Gittan when the repository opens.
 - A Lazarus `.lpi` or `.lpk` nested thousands of levels deep is not read, instead of ending Gittan when the repository opens.
 - JSON an extension passes nested thousands of levels deep is refused instead of ending Gittan.
+- A tab closed while it loads a large file or waits for a parse closes once that is done, instead of going on in freed memory.
 - An argument with a NUL character is refused, so an extension can no longer slip a flag or command past the checks on what it may run with the forge's tool, git or a program.
 
 ## 0.21 (build-146, 2026-11-17)

@@ -2581,6 +2581,11 @@ type
     {** The file being edited has changes not saved, which
       FormCloseQuery asks about. }
     function NeedsSave: boolean;
+    {** The frame is in a wait that runs the message loop (a file
+      loading, a parse waited for, a hold of the refresh), with its own
+      code on the stack below: it must not be freed until it returns,
+      so the window puts off closing it. }
+    function InNestedLoop: boolean;
     {** The welcome view says ADir is opening, before it does; '' gives
       it its buttons back. }
     procedure ShowOpening(const ADir: string);
@@ -4920,6 +4925,15 @@ begin
   Result := ((FEditPath <> '') and Edit.Modified) or MergeDirty;
 end;
 
+{ Every wait of the frame that pumps messages sets one of these: the
+  index's and the scratch editor's loads, a hover's lookup, and a hold
+  of the refresh, which WaitForParse, OpenFile's load and FlushEdit's
+  question take. }
+function TRepoFrame.InNestedLoop: boolean;
+begin
+  Result := FIndexLoading or FScratchBusy or FHoverBusy or (FRefreshHold > 0);
+end;
+
 { Something the user would want to see happened; a frame in the
   background has its tab show it (TRepoWindow.FrameChanged). }
 procedure TRepoFrame.MarkNews;
@@ -6753,7 +6767,14 @@ begin
   Edit.BookmarkDeleteAll_2;
   ResetLineNumbers(Edit);
   Edit.ModeReadOnly := False;
-  Edit.LoadFromFile(AFileName, []);
+  { A large file's load pumps messages for its progress, where the tab
+    may be closed (InNestedLoop) or the watcher's refresh come. }
+  HoldRefresh;
+  try
+    Edit.LoadFromFile(AFileName, []);
+  finally
+    ReleaseRefresh;
+  end;
   Edit.ModeReadOnly := True;
   SetLineStatesBand(Edit, False);
   Edit.FileName := AFileName;
