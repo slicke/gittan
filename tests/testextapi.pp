@@ -428,22 +428,26 @@ begin
 end;
 
 { A program that writes without end, or does not end, is stopped with
-  a reason, past the output cap and the time limit. }
+  a reason, past the output cap and the time limit. The two run one
+  after the other, the talkative one with a long time limit: a slow
+  machine (the Haiku CI) did not write 1 MB within the short one. }
 procedure TExtApiTest.TestRunLimits;
 {$IFDEF UNIX}
 var
   Info: PExtContextInfo;
 begin
   ExtToolOutputLimit := 1 shl 20;
-  ExtToolTimeLimitMs := 1500;
+  ExtToolTimeLimitMs := 120000;
   try
     Info := Load('limits', 'Gittan.exec.run("sh", ["-c", "yes"]).then(function (r) {' +
-      'globalThis.chatty = r.ok + ":" + r.status + ":" + r.stdout.length + ":" + r.stderr; });' +
-      'Gittan.exec.run("sleep", ["30"]).then(function (r) {' +
-      'globalThis.hung = r.ok + ":" + r.status + ":" + r.stderr; });', AllPerms);
-    WaitFor(Info^.Ctx, 'globalThis.chatty && globalThis.hung');
+      'globalThis.chatty = r.ok + ":" + r.status + ":" + r.stdout.length + ":" + r.stderr; });', AllPerms);
+    WaitFor(Info^.Ctx, 'globalThis.chatty');
     AssertEquals('the talkative one', 'false:-1:0:The program was stopped, as it wrote more than 1 MB.',
       EvalIn(Info^.Ctx, 'globalThis.chatty'));
+    ExtToolTimeLimitMs := 1500;
+    EvalIn(Info^.Ctx, 'Gittan.exec.run("sleep", ["30"]).then(function (r) {' +
+      'globalThis.hung = r.ok + ":" + r.status + ":" + r.stderr; }), ""');
+    WaitFor(Info^.Ctx, 'globalThis.hung');
     AssertEquals('the hung one', 'false:-1:The program was stopped after 1 seconds.',
       EvalIn(Info^.Ctx, 'globalThis.hung'));
   finally
