@@ -5,6 +5,7 @@
 ### Fixed
 
 - Showing a large diff or file no longer slows down with its size: git's output is read without copying all of it for every piece (a 130 MB diff took 7.5 s, now a fraction of a second).
+- The Project page of a Lazarus repository no longer follows symbolic links when it looks for packages; a few committed links to the repository itself made it hang for minutes.
 - Two Gittan windows started as separate processes no longer undo each other's settings when they save: an extension turned off or its permissions reset, a trusted key or commands file and other changes made in one are kept when the other saves, and the settings dialog saves as it closes.
 - A signed commit shows as verified only when the key stands for the committer's e-mail; a commit signed with someone's trusted key but made out to another committer now says "Signed by X, not by the committer Y" with an outlined shield. A key trusted from GitHub before this asks to be trusted again, so its verified e-mails are kept, and the card names the GitHub user rather than the key's own user id.
 - A `.gittan/repo.toml` or commands file with a dotted key or table header tens of thousands of parts long is refused instead of ending Gittan when the repository opens.

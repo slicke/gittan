@@ -8,6 +8,7 @@ unit testprojlazarus;
 interface
 
 uses
+  {$IFDEF UNIX}BaseUnix,{$ENDIF}
   Classes, SysUtils, StrUtils, fpcunit, testregistry, gittan.manifest, gittan.project,
   gittan.submodules, gittan.proj.lazarus, testhelpers;
 
@@ -244,6 +245,22 @@ begin
   Put('mine.lpk', '<CONFIG/>');
   F := FindLazPackages(FDir);
   AssertEquals('mine.lpk vendor/a/pkg/a_package.lpk', string.Join(' ', F));
+  {$IFDEF UNIX}
+  { Committed links: to . (walked again at every level before) and to
+    a file; neither is followed. }
+  AssertEquals(0, fpSymlink('.', PChar(FDir + PathDelim + 'loop')));
+  AssertEquals(0, fpSymlink('..', PChar(FDir + PathDelim + 'vendor' + PathDelim + 'up')));
+  AssertEquals(0, fpSymlink('mine.lpk', PChar(FDir + PathDelim + 'linked.lpk')));
+  try
+    F := FindLazPackages(FDir);
+    AssertEquals('mine.lpk vendor/a/pkg/a_package.lpk', string.Join(' ', F));
+  finally
+    { Before TearDown's RemoveTree, which would follow them. }
+    fpUnlink(PChar(FDir + PathDelim + 'loop'));
+    fpUnlink(PChar(FDir + PathDelim + 'vendor' + PathDelim + 'up'));
+    fpUnlink(PChar(FDir + PathDelim + 'linked.lpk'));
+  end;
+  {$ENDIF}
   AssertTrue(IsLazarusPackage('lcl'));
   AssertFalse(IsLazarusPackage('atsynedit_package'));
 end;
