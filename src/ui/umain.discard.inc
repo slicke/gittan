@@ -590,7 +590,7 @@ begin
   if FConflictRoles <> nil then
     Exit;
   Captions := nil;
-  if IsRepoFile(FCurrentPath) then
+  if IsRepoFile(FCurrentPath) and ReachedWithoutLink(FRepo.Root, FCurrentPath) then
     Captions := [rsEditAction];
   if CanLeaveOut and ShownFileChosen and (FLeftOut.Count(FCurrentPath) > 0) then
   begin

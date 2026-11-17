@@ -524,7 +524,8 @@ end;
   and the header says when the file changed on disk behind it. }
 
 { Whether AFileName, a full name, is one of the repository's own files:
-  the exclude file, or a file under the root that IsRepoFile accepts. }
+  the exclude file, or a file under the root that IsRepoFile accepts
+  and that is reached through no link. }
 function TRepoFrame.RepoFileName(const AFileName: string): boolean;
 var
   Root, Rel: string;
@@ -536,8 +537,10 @@ begin
   Root := IncludeTrailingPathDelimiter(FRepo.Root);
   if Copy(AFileName, 1, Length(Root)) <> Root then
     Exit(False);
-  Rel := Copy(AFileName, Length(Root) + 1, MaxInt);
-  Result := IsRepoFile(StringReplace(Rel, PathDelim, '/', [rfReplaceAll]));
+  Rel := StringReplace(Copy(AFileName, Length(Root) + 1, MaxInt), PathDelim, '/', [rfReplaceAll]);
+  { A committed link (.gitignore -> .git/config) is not edited: a save
+    would write where it points. }
+  Result := IsRepoFile(Rel) and ReachedWithoutLink(FRepo.Root, Rel);
 end;
 
 { Opens the loaded file AFileName to edits. }

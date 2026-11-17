@@ -39,6 +39,17 @@ procedure ListRepoFiles(const ARoot: string; AList: TStrings);
   change. }
 function IsRepoFile(const ARelPath: string): boolean;
 
+{** Whether APath names a symbolic link (or on Windows a reparse point),
+  one whose target is missing too. A repository can commit
+  .gitignore -> .git/config, and git checks it out as a link: Gittan
+  writes and edits none of its own files through one. }
+function IsLinkPath(const APath: string): boolean;
+
+{** Whether the file ARelPath, relative to ARoot with "/" separators, is
+  reached through no link: neither it nor a folder between the root and
+  it is one. }
+function ReachedWithoutLink(const ARoot, ARelPath: string): boolean;
+
 {** The gitignore patterns that would hide APath, a path relative to the
   root with "/" separators: the file itself anchored at the root
   ("/dir/name.ext"), every file with its extension ("*.ext", when it has
@@ -49,7 +60,8 @@ function IgnorePatterns(const APath: string): TStringArray;
   or the exclude file), making the file and its folder when there is
   none, after a newline when the file lacks one at its end. A file that
   already has the line is left as it is. False when the file could not
-  be written. }
+  be written or is a link (IsLinkPath), which is written through by
+  nothing. }
 function AddIgnorePattern(const AFileName, APattern: string): boolean;
 
 const
@@ -76,22 +88,71 @@ function LfsPatternsOf(const AText, APath: string): TStringArray;
 {** Appends APattern with LfsAttributes to the attributes file AFileName
   as AddIgnorePattern appends a pattern; a file that tracks the pattern
   in Git LFS already is left as it is. False when it could not be
-  written. }
+  written or is a link. }
 function AddLfsTrack(const AFileName, APattern: string): boolean;
 
 {** Takes the lines that track APattern in Git LFS out of the attributes
   file AFileName, keeping the others and the file's line ends. False
-  when it could not be read or written. }
+  when it could not be read or written or is a link. }
 function RemoveLfsTrack(const AFileName, APattern: string): boolean;
 
 implementation
 
 uses
+  {$IFDEF UNIX}BaseUnix,{$ENDIF}
   gittan.textfile;
 
 { Adds every file under ADir (a full path) to AList as ARel + its name,
   walking into the folders. A link to a folder is not walked into: a
   repository can commit .github/a -> . (which never ends) or a link to /. }
+function IsLinkPath(const APath: string): boolean;
+var
+  Name: string;
+{$IFDEF UNIX}
+  Info: Stat;
+begin
+  { lstat: FileGetSymLinkTarget raises for a link whose target is
+    missing. }
+  Name := ExcludeTrailingPathDelimiter(APath);
+  Result := (fpLstat(Name, Info) = 0) and fpS_ISLNK(Info.st_mode);
+end;
+{$ELSE}
+  Link: TRawbyteSymLinkRec;
+  Info: TSearchRec;
+begin
+  Name := ExcludeTrailingPathDelimiter(APath);
+  try
+    Result := FileGetSymLinkTarget(Name, Link);
+  except
+    Result := False;
+  end;
+  if not Result and (FindFirst(Name, faAnyFile or faSymLink, Info) = 0) then
+  begin
+    Result := Info.Attr and faSymLink <> 0;
+    FindClose(Info);
+  end;
+end;
+{$ENDIF}
+
+function ReachedWithoutLink(const ARoot, ARelPath: string): boolean;
+var
+  Path, Part: string;
+begin
+  Result := False;
+  if (ARoot = '') or (ARelPath = '') then
+    Exit;
+  Path := ExcludeTrailingPathDelimiter(ARoot);
+  for Part in ARelPath.Split(['/']) do
+  begin
+    if (Part = '') or (Part = '.') or (Part = '..') then
+      Exit;
+    Path := Path + PathDelim + Part;
+    if IsLinkPath(Path) then
+      Exit;
+  end;
+  Result := True;
+end;
+
 procedure AddFolder(const ADir, ARel: string; AList: TStrings);
 var
   Info: TSearchRec;
@@ -102,7 +163,9 @@ begin
     repeat
       if (Info.Name = '.') or (Info.Name = '..') then
         Continue;
-      if (Info.Attr and faDirectory <> 0) and (Info.Attr and faSymLink <> 0) then
+      { A link to a file is left out too: the editor would write
+        through it. }
+      if Info.Attr and faSymLink <> 0 then
         Continue;
       if Info.Attr and faDirectory <> 0 then
         AddFolder(IncludeTrailingPathDelimiter(ADir) + Info.Name,
@@ -137,7 +200,7 @@ begin
     Exit;
   Root := IncludeTrailingPathDelimiter(ARoot);
   for Name in RepoRootFiles do
-    if FileExists(Root + Name) then
+    if FileExists(Root + Name) and not IsLinkPath(Root + Name) then
       AList.Add(Name);
   for Name in RepoFolders do
   begin
@@ -216,6 +279,8 @@ var
   F: TFileStream;
 begin
   Result := False;
+  if IsLinkPath(AFileName) then
+    Exit;
   try
     Text := '';
     if FileExists(AFileName) then
@@ -340,6 +405,8 @@ function AddLfsTrack(const AFileName, APattern: string): boolean;
 var
   Pattern: string;
 begin
+  if IsLinkPath(AFileName) then
+    Exit(False);
   try
     if FileExists(AFileName) then
       for Pattern in LfsTrackedPatterns(ReadFileBytes(AFileName)) do
@@ -359,6 +426,8 @@ var
   F: TFileStream;
 begin
   Result := False;
+  if IsLinkPath(AFileName) then
+    Exit;
   try
     Text := ReadFileBytes(AFileName);
     if Pos(#13#10, Text) > 0 then

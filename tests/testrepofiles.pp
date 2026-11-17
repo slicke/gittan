@@ -24,6 +24,8 @@ type
     procedure TestListOrder;
     procedure TestListEmpty;
     procedure TestListSkipsFolderLinks;
+    procedure TestListSkipsFileLinks;
+    procedure TestNoWriteThroughLink;
     procedure TestPatterns;
     procedure TestIsRepoFile;
     procedure TestAddMakesFile;
@@ -128,6 +130,60 @@ begin
     fpUnlink(PChar(Root + '.github/b'));
     fpUnlink(PChar(Root + '.gittan'));
   end;
+end;
+{$ELSE}
+begin
+end;
+{$ENDIF}
+
+{ A committed .gitignore -> .git/config is checked out as a link: the
+  list leaves it out, and no write goes through it, nor through a link
+  whose target is missing. }
+procedure TRepoFilesTest.TestListSkipsFileLinks;
+{$IFDEF UNIX}
+var
+  L: TStringList;
+  Root: string;
+begin
+  Touch('config');
+  Touch('.github/ci.yml');
+  Root := IncludeTrailingPathDelimiter(FDir);
+  AssertEquals(0, fpSymlink('config', PChar(Root + '.gitignore')));
+  AssertEquals(0, fpSymlink('../config', PChar(Root + '.github/link.yml')));
+  L := TStringList.Create;
+  try
+    ListRepoFiles(FDir, L);
+    AssertEquals(L.Text, 1, L.Count);
+    AssertEquals('.github/ci.yml', L[0]);
+    AssertTrue(ReachedWithoutLink(FDir, '.github/ci.yml'));
+    AssertFalse(ReachedWithoutLink(FDir, '.gitignore'));
+    AssertFalse(ReachedWithoutLink(FDir, '.github/link.yml'));
+    AssertFalse(ReachedWithoutLink(FDir, '../x'));
+  finally
+    L.Free;
+  end;
+end;
+{$ELSE}
+begin
+end;
+{$ENDIF}
+
+procedure TRepoFilesTest.TestNoWriteThroughLink;
+{$IFDEF UNIX}
+var
+  Root: string;
+begin
+  Touch('config');
+  Root := IncludeTrailingPathDelimiter(FDir);
+  AssertEquals(0, fpSymlink('config', PChar(Root + '.gitignore')));
+  AssertEquals(0, fpSymlink('config', PChar(Root + '.gitattributes')));
+  AssertEquals(0, fpSymlink('missing', PChar(Root + 'dangling')));
+  AssertFalse(AddIgnorePattern(Root + '.gitignore', '/node_modules/'));
+  AssertFalse(AddLfsTrack(Root + '.gitattributes', '*.psd'));
+  AssertFalse(RemoveLfsTrack(Root + '.gitattributes', '*.psd'));
+  AssertFalse('a link to a missing file', AddIgnorePattern(Root + 'dangling', '*.o'));
+  AssertFalse('nothing made where it points', FileExists(Root + 'missing'));
+  AssertEquals('the target untouched', 'config' + LineEnding, ReadAll('config'));
 end;
 {$ELSE}
 begin

@@ -7,6 +7,7 @@
 - A `.gittan/repo.toml` or commands file with a dotted key or table header tens of thousands of parts long is refused instead of ending Gittan when the repository opens.
 - A Lazarus `.lpi` or `.lpk` nested thousands of levels deep is not read, instead of ending Gittan when the repository opens.
 - JSON an extension passes nested thousands of levels deep is refused instead of ending Gittan.
+- Add to .gitignore, Track with Git LFS and the editor no longer write through a `.gitignore`, `.gitattributes` or other repository file that is a committed symbolic link, which could point at `.git/config` or outside the clone; the Config section leaves such links out.
 - The Project page opens only web links, so a Cargo.toml whose repository is a `file:`, `smb:` or similar URL can no longer start a program with a click.
 - An interactive rebase, a rebase onto another branch or a reset no longer goes ahead when the branch moved or was switched while you were asked, where a commit made meanwhile was dropped; a tag made at HEAD goes on the commit the question named.
 - Undo of a mixed reset (Reset to Here › Mixed, or `git reset HEAD~1`) works, where git always refused it as "not uptodate" or over an untracked file.
