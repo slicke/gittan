@@ -501,7 +501,7 @@ end;
   added one untracked. Undo puts HEAD and the index back over them. }
 procedure TUndoTest.TestMixedReset;
 var
-  Before, Status, Err: string;
+  Before, Porcelain, Err: string;
 begin
   Commit('a.txt', 'two', 'Second');
   Commit('n.txt', 'new', 'Third');
@@ -514,8 +514,8 @@ begin
   AssertEquals(Before, Rev('HEAD'));
   AssertEquals('two', ReadFile('a.txt'));
   AssertEquals('new', ReadFile('n.txt'));
-  AssertTrue(Err, RunGitIn(FDir, ['status', '--porcelain'], Status, Err));
-  AssertEquals('nothing left over', '', Trim(Status));
+  AssertTrue(Err, RunGitIn(FDir, ['status', '--porcelain'], Porcelain, Err));
+  AssertEquals('nothing left over', '', Trim(Porcelain));
 end;
 
 { A file changed since the reset is a change of its own: undo refuses

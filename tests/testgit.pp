@@ -4894,12 +4894,12 @@ procedure TGitRepoTest.TestLargeOutput;
 {$IFDEF UNIX}
 var
   Output, Err: string;
-  Status: integer;
+  Code: integer;
   T: QWord;
 begin
   T := GetTickCount64;
   AssertTrue(RunTool('/bin/sh', '', ['-c', 'head -c 40000000 /dev/zero | tr "\0" a; printf b'],
-    [], [], Output, Err, Status, nil));
+    [], [], Output, Err, Code, nil));
   AssertEquals(40000001, Length(Output));
   AssertEquals('a', Output[1]);
   AssertEquals('b', Output[Length(Output)]);
