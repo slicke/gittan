@@ -9,6 +9,7 @@
 - JSON an extension passes nested thousands of levels deep is refused instead of ending Gittan.
 - A tab closed while it loads a large file or waits for a parse closes once that is done, instead of going on in freed memory.
 - Typing in the file filter or a refresh while a hover or Go to Symbol in Repository reads the changed files no longer reaches a file row the tree has let go of.
+- Quitting with several tabs open no longer lets a tab still closing read the names of tabs already gone, and a tab closed during a save question at quit is passed over rather than skipping another.
 - Closing a tab or quitting while a pull request lookup, a blame or a fetch is under way no longer lets that finish on the tab being closed.
 - An argument with a NUL character is refused, so an extension can no longer slip a flag or command past the checks on what it may run with the forge's tool, git or a program.
 
