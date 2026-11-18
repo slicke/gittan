@@ -59,6 +59,7 @@ type
     procedure TestBlameSha256;
     procedure TestInputClosed;
     procedure TestInputHeldElsewhere;
+    procedure TestSpawnCloseOnExec;
     procedure TestConflictCrlf;
     procedure TestCommitRange;
     procedure TestLineHistory;
@@ -991,6 +992,43 @@ begin
   AssertEquals(0, Code);
   AssertTrue('returned in ' + IntToStr(GetTickCount64 - Started) + ' ms',
     GetTickCount64 - Started < 2500);
+  {$ENDIF}
+end;
+
+{ A process started through SpawnProcess keeps its pipes from what is
+  started after it: its ends are closed on exec. One without pipes
+  starts too. }
+procedure TGitRepoTest.TestSpawnCloseOnExec;
+{$IFDEF UNIX}
+var
+  P: TProcess;
+{$ENDIF}
+begin
+  {$IFDEF UNIX}
+  P := TProcess.Create(nil);
+  try
+    P.Executable := '/bin/cat';
+    P.Options := [poUsePipes];
+    SpawnProcess(P);
+    AssertEquals('input', 1, FpFcntl(P.Input.Handle, F_GETFD) and 1);
+    AssertEquals('output', 1, FpFcntl(P.Output.Handle, F_GETFD) and 1);
+    AssertEquals('stderr', 1, FpFcntl(P.Stderr.Handle, F_GETFD) and 1);
+    P.CloseInput;
+    P.WaitOnExit;
+  finally
+    P.Free;
+  end;
+  P := TProcess.Create(nil);
+  try
+    P.Executable := '/bin/sh';
+    P.Parameters.Add('-c');
+    P.Parameters.Add('exit 0');
+    P.Options := [poWaitOnExit];
+    SpawnProcess(P);
+    AssertEquals(0, P.ExitStatus);
+  finally
+    P.Free;
+  end;
   {$ENDIF}
 end;
 

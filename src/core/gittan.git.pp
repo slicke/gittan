@@ -10,7 +10,7 @@ unit gittan.git;
 interface
 
 uses
-  Classes, SysUtils, gittan.graph, gittan.rebase, gittan.undo, gittan.issuelinks;
+  Classes, SysUtils, Process, gittan.graph, gittan.rebase, gittan.undo, gittan.issuelinks;
 
 const
   {** Bits added to the kind in the Objects of ChangedPaths: the index
@@ -1376,6 +1376,15 @@ function RunTool(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of st
   AOnOutput: TGittanOutputEvent; const AInput: string = '';
   ACancel: TGittanCancelEvent = nil): boolean;
 
+{** Starts AProcess (its Execute, which raises as that does) so that no
+  other process Gittan starts inherits its pipes: on Unix under the lock
+  RunTool takes, with AProcess's own ends of its pipes closed on exec
+  before the next start. Everything that starts a process goes through
+  it; a long-lived one started without it (a command's dev server, an
+  editor) kept the input of a git fed on another thread open, and that
+  git waited for its end as long as the command lived. }
+procedure SpawnProcess(AProcess: TProcess);
+
 {** Runs a command line tool (AExe: a forge's, gh) in ADir with AArgs and
   AEnv ("NAME=value") added to the environment, and answers whether it
   exited with 0, with its standard output in AOutput and, on failure,
@@ -1621,7 +1630,7 @@ implementation
 
 uses
   {$ifdef unix}BaseUnix,{$endif}
-  Process, Pipes, md5, StrUtils, DateUtils, gittan.textfile;
+  Pipes, md5, StrUtils, DateUtils, gittan.textfile;
 
 constructor TGittanDeadline.Create(ASeconds: integer);
 begin
@@ -2399,11 +2408,30 @@ const
   { POSIX's value everywhere; BaseUnix names it on Darwin, not on Linux. }
   CloseOnExec = 1;
 begin
-  FpFcntl(P.Input.Handle, F_SETFD, CloseOnExec);
-  FpFcntl(P.Output.Handle, F_SETFD, CloseOnExec);
-  FpFcntl(P.Stderr.Handle, F_SETFD, CloseOnExec);
+  if P.Input <> nil then
+    FpFcntl(P.Input.Handle, F_SETFD, CloseOnExec);
+  if P.Output <> nil then
+    FpFcntl(P.Output.Handle, F_SETFD, CloseOnExec);
+  if P.Stderr <> nil then
+    FpFcntl(P.Stderr.Handle, F_SETFD, CloseOnExec);
 end;
 {$endif}
+
+procedure SpawnProcess(AProcess: TProcess);
+begin
+  {$ifdef unix}
+  EnterCriticalSection(GSpawnLock);
+  try
+    AProcess.Execute;
+    if poUsePipes in AProcess.Options then
+      KeepPipesFromChildren(AProcess);
+  finally
+    LeaveCriticalSection(GSpawnLock);
+  end;
+  {$else}
+  AProcess.Execute;
+  {$endif}
+end;
 
 function RunTool(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of string;
   out AOutput, AError: string; out AStatus: integer;
@@ -2472,22 +2500,10 @@ begin
       a megabyte (git cat-file --batch-check) went a kilobyte for every
       wait, ten seconds in all; Unix leaves its own. }
     P.PipeBufferSize := 64 * 1024;
-    {$ifdef unix}
-    EnterCriticalSection(GSpawnLock);
-    {$endif}
     try
-      try
-        P.Execute;
-      except
-        Exit(False);
-      end;
-      {$ifdef unix}
-      KeepPipesFromChildren(P);
-      {$endif}
-    finally
-      {$ifdef unix}
-      LeaveCriticalSection(GSpawnLock);
-      {$endif}
+      SpawnProcess(P);
+    except
+      Exit(False);
     end;
     { The input ends once AInput is written (at once without one): a
       hook or an alias that reads it would otherwise wait for ever, and

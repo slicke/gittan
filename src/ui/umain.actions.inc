@@ -21,7 +21,7 @@ begin
       P.Parameters.Add(S);
     P.Options := [poNoConsole];
     try
-      P.Execute;
+      SpawnProcess(P);
     except
       { The command is missing; nothing else to do. }
     end;

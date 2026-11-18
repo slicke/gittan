@@ -1311,7 +1311,7 @@ begin
     P.OnForkEvent := @ForkChild;
     {$endif}
     try
-      P.Execute;
+      SpawnProcess(P);
       FStarted := True;
     except
       on E: Exception do
