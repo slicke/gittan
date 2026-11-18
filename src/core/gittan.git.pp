@@ -389,8 +389,9 @@ type
       ABranch may be any commit, a tag say, and HEAD is left on it
       without a branch (`--detach`). With ATrack, a remote-tracking
       branch such as upstream/feature, the local branch ABranch is made
-      from it and tracks it (`git switch -c ABranch --track ATrack`),
-      so the remote picked is the one used even when another has a
+      from it and tracks it (`git switch -c ABranch --track
+      refs/remotes/ATrack`, by the full name so a tag of the same name
+      is not taken), so the remote picked is the one used even when another has a
       branch of the same name. }
     function Switch(const ABranch: string; AMerge: boolean = False;
       ADetach: boolean = False; const ATrack: string = ''): boolean;
@@ -3871,7 +3872,11 @@ begin
     Args := Concat(Args, ['--merge']);
   if ADetach then
     Args := Concat(Args, ['--detach']);
-  if ATrack <> '' then
+  { By its full name: a tag origin/feature would come before the
+    remote-tracking branch, and git refuses to track a tag. }
+  if (ATrack <> '') and (Copy(ATrack, 1, 5) <> 'refs/') then
+    Args := Concat(Args, ['-c', ABranch, '--track', 'refs/remotes/' + ATrack])
+  else if ATrack <> '' then
     Args := Concat(Args, ['-c', ABranch, '--track', ATrack])
   else
     Args := Concat(Args, [ABranch]);

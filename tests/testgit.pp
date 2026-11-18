@@ -4270,11 +4270,14 @@ begin
   Git(['update-ref', 'refs/remotes/upstream/feature', First]);
   Git(['update-ref', 'refs/remotes/team/x/topic/one', First]);
   Git(['config', 'checkout.defaultRemote', 'origin']);
+  { A tag of the same name is passed over. }
+  Git(['tag', 'upstream/feature', Second]);
 
   AssertTrue(FRepo.Error, FRepo.Switch('feature', False, False, 'upstream/feature'));
   AssertEquals('feature', FRepo.Branch);
   AssertEquals('the picked remote''s commit', First, Trim(Git(['rev-parse', 'HEAD'])));
-  AssertEquals('upstream/feature', FRepo.Upstream('feature'));
+  AssertEquals('tracks the picked remote', 'upstream', Trim(Git(['config', 'branch.feature.remote'])));
+  AssertEquals('refs/heads/feature', Trim(Git(['config', 'branch.feature.merge'])));
 
   Remotes := TStringList.Create;
   try

@@ -56,6 +56,7 @@
 - Undo Revert brings a file back with the permissions it had, so a new executable script, or a change that only made a file executable, is executable again.
 - A settings save whose write failed no longer counts what it took in from another Gittan as its own change, which the next save would write over a newer one.
 - Undo of a mixed reset is no longer refused because a file whose name differs only in case, such as foo beside Foo, has staged changes; and when it has to move HEAD back after a failed step, it no longer drops a commit another git made in the meantime.
+- Switching to a remote branch works when a tag has the same name as it, such as a tag origin/feature; git took the tag and refused to track it.
 
 ## 0.21 (build-146, 2026-11-17)
 
