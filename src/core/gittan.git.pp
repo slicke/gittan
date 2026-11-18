@@ -402,7 +402,9 @@ type
       on disk is written into the repository as a blob (`git
       hash-object -w`), so RestoreReverted can put it back: ASaved gets
       one line per file, the path, a NUL and the blob's id, which is
-      empty for a file that was not there. A symbolic link is saved as
+      empty for a file that was not there; on Unix a space and the
+      file's permissions in octal follow the id, so an executable comes
+      back executable. A symbolic link is saved as
       itself, not as the file it leads to: the path, two NULs and the
       link's target. A submodule is left alone. }
     function RevertFiles(APaths, ASaved: TStrings): boolean;
@@ -3912,6 +3914,9 @@ var
   Output, Entry, Path, Id, ListFile, Target: string;
   Fields, Chosen, Paths, InHead, Restore, Remove: TStringList;
   i: integer;
+  {$ifdef unix}
+  Info: Stat;
+  {$endif}
 
 begin
   ASaved.Clear;
@@ -3981,6 +3986,12 @@ begin
         if not RunGit(FRoot, ['hash-object', '-w', '--no-filters', '--', Path], Id) then
           Exit(False);
         Id := Trim(Id);
+        {$ifdef unix}
+        { The mode too: a new script, or a change that was a chmod +x
+          alone, would come back without it. }
+        if fpStat(FullPath(Path), Info) = 0 then
+          Id := Id + ' ' + OctStr(Info.st_mode and &7777, 4);
+        {$endif}
       end;
       ASaved.Add(Path + #0 + Id);
       if InHead.IndexOf(Path) >= 0 then
@@ -4017,7 +4028,7 @@ end;
 
 function TGittanRepo.RestoreReverted(ASaved: TStrings): boolean;
 var
-  i: integer;
+  i, Mode: integer;
   Path, Id, Data, Target: string;
 begin
   Result := FRoot <> '';
@@ -4053,6 +4064,12 @@ begin
         DeleteFile(FullPath(Path));
       Continue;
     end;
+    Mode := -1;
+    if Pos(' ', Id) > 0 then
+    begin
+      Mode := StrToIntDef('&' + Copy(Id, Pos(' ', Id) + 1, MaxInt), -1);
+      Id := Copy(Id, 1, Pos(' ', Id) - 1);
+    end;
     if not RunGit(FRoot, ['cat-file', 'blob', Id], Data) then
     begin
       Result := False;
@@ -4065,6 +4082,10 @@ begin
         raise EInOutError.CreateFmt('Could not remove the link %s.', [Path]);
       ForceDirectories(ExtractFileDir(FullPath(Path)));
       WriteBytes(FullPath(Path), Data);
+      {$ifdef unix}
+      if (Mode >= 0) and (fpChmod(FullPath(Path), Mode) <> 0) then
+        raise EInOutError.CreateFmt('Could not set the permissions of %s.', [Path]);
+      {$endif}
     except
       on E: Exception do
       begin

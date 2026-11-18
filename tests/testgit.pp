@@ -4578,6 +4578,17 @@ procedure TGitRepoTest.TestRevertFiles;
 var
   Paths, Saved: TStringList;
   Root: string;
+
+  {$ifdef unix}
+  function ModeOf(const AFile: string): integer;
+  var
+    Info: Stat;
+  begin
+    AssertEquals(0, fpStat(AFile, Info));
+    Result := Info.st_mode and &777;
+  end;
+  {$endif}
+
 begin
   MakeHistory;
   AssertTrue(FRepo.Open(FDir));
@@ -4587,10 +4598,18 @@ begin
   Git(['add', 'staged.txt']);
   DeleteFile(Root + 'del.txt');
   WriteFile('added.txt', 'added'#10);
+  {$ifdef unix}
+  { A new script. }
+  fpChmod(Root + 'added.txt', &755);
+  {$endif}
   Git(['add', 'added.txt']);
   WriteFile('un=tracked.txt', 'untracked'#10);
   Git(['mv', QuoteName, 'moved.txt']);
   WriteFile('dir sp/fil å.txt', 'kept'#10);
+  {$ifdef unix}
+  { A change that adds the executable bit too. }
+  fpChmod(Root + 'a.txt', &755);
+  {$endif}
   Paths := TStringList.Create;
   Saved := TStringList.Create;
   try
@@ -4619,6 +4638,10 @@ begin
     AssertEquals('added'#10, FileText(Root + 'added.txt'));
     AssertEquals('untracked'#10, FileText(Root + 'un=tracked.txt'));
     AssertEquals('x'#10, FileText(Root + 'moved.txt'));
+    {$ifdef unix}
+    AssertEquals('the new script is executable again', &755, ModeOf(Root + 'added.txt'));
+    AssertEquals('and the changed file', &755, ModeOf(Root + 'a.txt'));
+    {$endif}
   finally
     Paths.Free;
     Saved.Free;
