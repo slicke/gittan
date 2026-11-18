@@ -250,7 +250,9 @@ end;
 
 function ImageTooLarge(AWidth, AHeight: double): boolean;
 begin
-  Result := AWidth * AHeight > MaxImagePixels;
+  { A top-down BMP gives a negative height, and its reader allocates
+    the absolute value. }
+  Result := Abs(AWidth) * Abs(AHeight) > MaxImagePixels;
 end;
 
 { The size a WebP's header gives, from its first chunk: VP8X's canvas,
