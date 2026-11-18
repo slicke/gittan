@@ -39,6 +39,7 @@
 - Switching to a remote branch from the branch list makes the local branch from the remote you picked, even when another remote has a branch of the same name or `checkout.defaultRemote` names another. Before, git refused, or quietly tracked the other remote's commit. A remote with a slash in its name now gives the right branch name.
 - Batch's maintenance task that points a remote's HEAD at its new default branch now works when that branch was force-pushed since the last fetch. Before, git rejected the fetch and the HEAD was never set.
 - A repository in a folder whose name ends in a space opens. Before, Gittan dropped the space from its path and git's calls failed or ran in the wrong folder.
+- A Bun project with only `bun.lockb`, Bun's binary lock file before 1.2, no longer gets the "No lock file" warning on its project page.
 
 ## 0.21 (build-146, 2026-11-17)
 

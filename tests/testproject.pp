@@ -1062,6 +1062,12 @@ begin
     AssertEquals(2, Length(C));
     AssertEquals('/node_modules/', C[0].IgnorePattern);
     AssertEquals('no lock: about no file', '', C[1].Path);
+    { Bun's binary lock before 1.2 is a lock, if one nothing reads. }
+    Put('bun.lockb', 'bun-lockfile-format-v0'#0);
+    Tracked.Clear;
+    C := ChecksOf(DetectProjects(FDir)[0].Kind, Tracked);
+    AssertEquals(0, Length(C));
+    DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'bun.lockb');
     Put('package-lock.json', '{}');
     Tracked.Clear;
     C := ChecksOf(DetectProjects(FDir)[0].Kind, Tracked);
