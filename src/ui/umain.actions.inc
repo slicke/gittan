@@ -2148,8 +2148,10 @@ begin
     FGraph.Tip := ''
   else
     FGraph.Tip := Format(rsGraphDragTip, [FBranch]);
+  { Read to the search's limit already, which GraphMore would read
+    again. }
   FGraph.Popup(Commits, Length(Commits) >= Limit, FBranch, FAhead, FBehind,
-    FHasUpstream, Filter, Keep);
+    FHasUpstream, Filter, Keep, Limit >= GraphSearchLimit);
   if FGraph.Visible then
   begin
     FSideNav.Selected := navGraph;

@@ -284,10 +284,11 @@ type
       one; AMore says the log was cut, which the last row says. AFilter
       goes into the search field. The focus goes to the field, the
       highlight to AKeep when it is among the commits, else to the
-      commit HEAD is on. }
+      commit HEAD is on. With AAllAsked the commits are already as many
+      as OnMore would give, so a filter does not ask for them again. }
     procedure Popup(const ACommits: TGittanGraphCommits; AMore: boolean;
       const ABranch: string; AAhead, ABehind: integer; AHasUpstream: boolean;
-      const AFilter: string = ''; const AKeep: string = '');
+      const AFilter: string = ''; const AKeep: string = ''; AAllAsked: boolean = False);
     {** The hashes of the rows the filter shows, newest first: the order
       the owner steps through after a pick. }
     function ShownHashes: TStringArray;
@@ -873,7 +874,7 @@ end;
 
 procedure TGittanCommitGraph.Popup(const ACommits: TGittanGraphCommits;
   AMore: boolean; const ABranch: string; AAhead, ABehind: integer;
-  AHasUpstream: boolean; const AFilter: string; const AKeep: string);
+  AHasUpstream: boolean; const AFilter: string; const AKeep: string; AAllAsked: boolean);
 begin
   if Parent = nil then
     Exit;
@@ -884,7 +885,7 @@ begin
   FHasUpstream := AHasUpstream;
   FCloseHot := False;
   FFooterHot := False;
-  FAskedMore := False;
+  FAskedMore := AAllAsked;
   FStatsOn := False;
   FStatsHot := False;
   FPathKey := '';
