@@ -3390,6 +3390,7 @@ resourcestring
   rsBmCommitMenu = 'Commit %s';
   rsGraphDragTip = 'Drag a commit onto %s to merge it.';
   rsGraphLoadFailed = 'Could not read the history';
+  rsOpenFileFailed = 'Could not open %s';
   rsBmCommitPick = 'Pick a Commit in the Graph...';
   rsBmNewItem = '&New Branch...';
   rsToBranchMoveIncludedItem = 'Move &Included Files to New Branch...';
@@ -6805,7 +6806,18 @@ begin
     may be closed (InNestedLoop) or the watcher's refresh come. }
   HoldRefresh;
   try
-    Edit.LoadFromFile(AFileName, []);
+    try
+      Edit.LoadFromFile(AFileName, []);
+    except
+      { No permission, locked by another program on Windows, or gone
+        since it was listed: the view stays read-only, and says why. }
+      on E: Exception do
+      begin
+        Edit.ModeReadOnly := True;
+        BannerError(Format(rsOpenFileFailed, [ExtractFileName(AFileName)]), E.Message);
+        Exit;
+      end;
+    end;
   finally
     ReleaseRefresh;
   end;
