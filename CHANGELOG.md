@@ -78,6 +78,7 @@
 - On Windows and Linux, a command picked in the menu button's menu or the Alt menu bar while a refresh rebuilt Compare With, Open Recent or Pull no longer clicks a freed menu item.
 - The welcome view no longer hangs when its error is wrapped in a box narrower than its padding.
 - A middle click on the tab bar's "+N" on macOS no longer closes a tab that is not shown.
+- A remote with several URLs shows the first one in Remotes, the one fetch uses, so changing only its push URL no longer replaces the first URL with the last.
 
 ## 0.21 (build-146, 2026-11-17)
 

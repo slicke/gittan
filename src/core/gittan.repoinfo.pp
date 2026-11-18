@@ -251,9 +251,11 @@ begin
   ARemotes := ParseRemotes(Output);
   for i := 0 to High(ARemotes) do
   begin
-    if RunGitIn(ARoot, ['config', '--get', 'remote.' + ARemotes[i].Name + '.url'],
-      Output, Err) then
-      ARemotes[i].Url := Trim(Output);
+    { The first url, as remote -v and git fetch take it: --get gives the
+      last of several. }
+    if RunGitIn(ARoot, ['config', '--get-all', 'remote.' + ARemotes[i].Name + '.url'],
+      Output, Err) and (Trim(Output) <> '') then
+      ARemotes[i].Url := Trim(Output.Split([#10])[0]);
     if RunGitIn(ARoot, ['config', '--get-all', 'remote.' + ARemotes[i].Name + '.pushurl'],
       Output, Err) and (Trim(Output) <> '') then
       ARemotes[i].PushUrl := Trim(Output.Split([#10])[0])

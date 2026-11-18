@@ -5831,6 +5831,12 @@ begin
   AssertEquals('the web page git reaches', 'https://example.invalid/e', R[0].Web);
   Git(['config', '--unset', 'url.git@example.invalid:.pushInsteadOf']);
   Git(['config', '--unset', 'url.https://example.invalid/.insteadOf']);
+  { Two urls (a push to a mirror as well): the first is the one fetch
+    takes, which --get alone would not give. }
+  Git(['config', '--add', 'remote.' + R[0].Name + '.url', 'https://example.invalid/mirror.git']);
+  AssertTrue(ReadRemotes(FDir, R, Err));
+  AssertEquals('the first url', 'ex:e.git', R[0].Url);
+  Git(['config', '--unset', 'remote.' + R[0].Name + '.url', 'mirror']);
 
   { A rename takes the remote-tracking branches and the upstream along. }
   Git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
