@@ -75,6 +75,7 @@
 - The Name and Email dialog keeps the key it picked when none is set, so Save is no longer off for a name change with signing on and no key; and turning SSH signing on offers the key set in git, not the first one in ~/.ssh.
 - Every tab's unfinished commit message is kept when Gittan quits; before, only the shown tab's came back.
 - The Files page of a folder with thousands of entries no longer grows past the height a control can have, and the mouse moving over it repaints only the rows it leaves and reaches.
+- On Windows and Linux, a command picked in the menu button's menu or the Alt menu bar while a refresh rebuilt Compare With, Open Recent or Pull no longer clicks a freed menu item.
 
 ## 0.21 (build-146, 2026-11-17)
 
