@@ -361,6 +361,14 @@ begin
   AssertTrue(FileExists(IncludeTrailingPathDelimiter(FRepo.Root) + 'a.txt'));
   FRepo.Close;
   AssertEquals('', FRepo.Root);
+  { A folder whose name ends in a space keeps it, in the root and the
+    git directory. Windows has no such folders. }
+  {$ifdef unix}
+  Git(['init', '-q', 'trail ']);
+  AssertTrue(FRepo.Error, FRepo.Open(IncludeTrailingPathDelimiter(FDir) + 'trail '));
+  AssertEquals('trail ', ExtractFileName(FRepo.Root));
+  AssertEquals(IncludeTrailingPathDelimiter(FRepo.Root) + '.git', FRepo.GitDir);
+  {$endif}
 end;
 
 { An untracked file that cannot be read when it is counted (gone since

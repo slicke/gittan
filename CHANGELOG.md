@@ -38,6 +38,7 @@
 - An argument with a NUL character is refused, so an extension can no longer slip a flag or command past the checks on what it may run with the forge's tool, git or a program.
 - Switching to a remote branch from the branch list makes the local branch from the remote you picked, even when another remote has a branch of the same name or `checkout.defaultRemote` names another. Before, git refused, or quietly tracked the other remote's commit. A remote with a slash in its name now gives the right branch name.
 - Batch's maintenance task that points a remote's HEAD at its new default branch now works when that branch was force-pushed since the last fetch. Before, git rejected the fetch and the HEAD was never set.
+- A repository in a folder whose name ends in a space opens. Before, Gittan dropped the space from its path and git's calls failed or ran in the wrong folder.
 
 ## 0.21 (build-146, 2026-11-17)
 

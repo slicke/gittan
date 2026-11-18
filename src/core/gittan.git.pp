@@ -2899,6 +2899,14 @@ begin
   end;
 end;
 
+{ ALine without the CR a Windows line end leaves before its LF. }
+function LineWithoutCr(const ALine: string): string;
+begin
+  Result := ALine;
+  if (Result <> '') and (Result[Length(Result)] = #13) then
+    SetLength(Result, Length(Result) - 1);
+end;
+
 { TGittanRepo }
 
 destructor TGittanRepo.Destroy;
@@ -2922,10 +2930,12 @@ begin
   Result := RunGit(ADir, ['rev-parse', '--show-toplevel', '--absolute-git-dir'], Top);
   if Result then
   begin
-    Lines := Trim(Top).Split([#10]);
-    FRoot := Trim(Lines[0]);
+    { Only the line ends go: a folder may end in a space. }
+    Lines := Top.Split([#10]);
+    if Length(Lines) > 0 then
+      FRoot := LineWithoutCr(Lines[0]);
     if Length(Lines) > 1 then
-      FGitDir := Trim(Lines[1]);
+      FGitDir := LineWithoutCr(Lines[1]);
   end
   { git's message is in English (RunGit sets LC_ALL=C), so the common
     case gets a shorter one; any other failure keeps git's own. }
