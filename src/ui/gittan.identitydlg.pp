@@ -586,8 +586,22 @@ begin
       F.FSign.ItemIndex := 0;
     if ASigning.Sign and (ASigning.Format = sfX509) then
       F.FX509Key := ASigning.Key;
+    { The key set is the one FillKeys picks for its format, and for SSH
+      too when it is a key file or an SSH key whatever gpg.format says
+      (signing off, work.pub set): an empty one leaves FillKeys its
+      first key, which SetKeyValue('') after it would clear again. }
+    if ASigning.Key <> '' then
+    begin
+      if ASigning.Format in [sfSsh, sfOpenPgp] then
+        F.FKept[ASigning.Format] := ASigning.Key
+      else if ASigning.Format = sfX509 then
+        { Shown under GPG, told apart by FX509Key (FormatToSave). }
+        F.FKept[sfOpenPgp] := ASigning.Key;
+      if SameText(ExtractFileExt(ASigning.Key), '.pub') or
+        (Copy(ASigning.Key, 1, 5) = 'key::') or (Copy(ASigning.Key, 1, 4) = 'ssh-') then
+        F.FKept[sfSsh] := ASigning.Key;
+    end;
     F.FillKeys;
-    F.SetKeyValue(ASigning.Key);
     F.Check(nil);
     { As shown, the key FillKeys chose for an empty field included:
       only a choice made in the dialog counts as a change. }
