@@ -49,6 +49,7 @@
 - Show History and other filtered views of the commit graph read the log once instead of twice, which halves the wait on a large repository.
 - Moving the mouse from one link to the next on the commands page or the project page shows the new link's tooltip instead of keeping the last one's.
 - A file that cannot be read when it is opened (no permission, locked by another program on Windows, or gone since it was listed) is said in a banner, and the view is no longer left editable with no syntax colors.
+- On Haiku, Reveal opens the folder in Tracker and Open in Terminal opens Haiku's Terminal; before, both did nothing.
 
 ## 0.21 (build-146, 2026-11-17)
 

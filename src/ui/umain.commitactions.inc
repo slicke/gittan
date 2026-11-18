@@ -644,7 +644,8 @@ begin
 end;
 
 { Shows AFile selected in Finder, Explorer or, where neither is, its
-  folder in the file manager. }
+  folder in the file manager: Tracker through open on Haiku, which has
+  no xdg-open. }
 procedure TRepoFrame.RevealFile(const AFile: string);
 begin
   {$IFDEF DARWIN}
@@ -653,7 +654,11 @@ begin
   {$IFDEF WINDOWS}
   RunDetached('explorer.exe', ['/select,' + AFile]);
   {$ELSE}
+  {$IFDEF HAIKU}
+  RunDetached('/bin/open', [ExtractFileDir(AFile)]);
+  {$ELSE}
   RunDetached('xdg-open', [ExtractFileDir(AFile)]);
+  {$ENDIF}
   {$ENDIF}
   {$ENDIF}
 end;

@@ -158,15 +158,7 @@ begin
     wmOpen:
       OpenWorktree(Wt);
     wmReveal:
-      {$IFDEF DARWIN}
-      RunDetached('open', ['-R', ExcludeTrailingPathDelimiter(Wt.Path)]);
-      {$ELSE}
-      {$IFDEF WINDOWS}
-      RunDetached('explorer.exe', ['/select,' + ExcludeTrailingPathDelimiter(Wt.Path)]);
-      {$ELSE}
-      RunDetached('xdg-open', [ExtractFileDir(ExcludeTrailingPathDelimiter(Wt.Path))]);
-      {$ENDIF}
-      {$ENDIF}
+      RevealFile(ExcludeTrailingPathDelimiter(Wt.Path));
     wmLock, wmUnlock:
       if LockWorktree(FRepo.Root, Wt.Path, (Sender as TMenuItem).Tag = wmLock, Err) then
       begin

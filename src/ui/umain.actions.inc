@@ -1790,15 +1790,7 @@ procedure TRepoFrame.MenuRevealClick(Sender: TObject);
 begin
   if FContextPath = '' then
     Exit;
-  {$IFDEF DARWIN}
-  RunDetached('open', ['-R', ContextFullPath]);
-  {$ELSE}
-  {$IFDEF WINDOWS}
-  RunDetached('explorer.exe', ['/select,' + ContextFullPath]);
-  {$ELSE}
-  RunDetached('xdg-open', [ExtractFileDir(ContextFullPath)]);
-  {$ENDIF}
-  {$ENDIF}
+  RevealFile(ContextFullPath);
 end;
 
 { ---------------------------------------------------------------------------
@@ -2735,7 +2727,11 @@ end;
   xfce4-terminal, and -e for the rest (x-terminal-emulator takes -e as
   xterm does, whichever terminal it is). }
 procedure TRepoFrame.OpenTerminalIn(const ARoot, ACommand: string);
-{$IF not defined(DARWIN) and not defined(WINDOWS)}
+{$IFDEF HAIKU}
+const
+  HaikuTerminal = '/boot/system/apps/Terminal';
+{$ENDIF}
+{$IF not defined(DARWIN) and not defined(WINDOWS) and not defined(HAIKU)}
 const
   Terminals: array[0..4] of string = ('x-terminal-emulator', 'gnome-terminal',
     'konsole', 'xfce4-terminal', 'xterm');
@@ -2784,6 +2780,14 @@ begin
   else
     RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe', '/K', ACommand], ARoot);
   {$ELSE}
+  {$IFDEF HAIKU}
+  { Haiku's own Terminal, which is not on PATH and takes the folder with
+    -w and the command after it. }
+  if ACommand = '' then
+    RunDetached(HaikuTerminal, ['-w', ARoot], ARoot)
+  else
+    RunDetached(HaikuTerminal, ['-w', ARoot, 'sh', '-c', ShellLineIn(ARoot, ACommand)], ARoot);
+  {$ELSE}
   for T in Terminals do
     if FindDefaultExecutablePath(T) <> '' then
     begin
@@ -2800,6 +2804,7 @@ begin
           ARoot);
       Exit;
     end;
+  {$ENDIF}
   {$ENDIF}
   {$ENDIF}
 end;
