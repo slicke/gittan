@@ -39,6 +39,7 @@ type
     procedure TestBuild;
     procedure TestBuildEmptiedFile;
     procedure TestRunAll;
+    procedure TestRunHookPrefix;
     procedure TestRunIntoFixup;
     procedure TestRunSome;
     procedure TestRunWhitespaceIgnored;
@@ -368,6 +369,42 @@ begin
   finally
     Plan.Free;
   end;
+end;
+
+{ A prepare-commit-msg hook that puts a ticket before the subject, as
+  it does with --no-verify too: the fixups still go into their commits,
+  found by their ids. }
+procedure TAbsorbTest.TestRunHookPrefix;
+{$IFDEF UNIX}
+var
+  Plan: TGittanAbsorbPlan;
+  Commits: integer;
+  Conflicts, Stopped: boolean;
+  Err, Hook: string;
+{$ENDIF}
+begin
+  {$IFDEF UNIX}
+  MakeBranch;
+  Hook := IncludeTrailingPathDelimiter(FDir) + '.git' + PathDelim + 'hooks' + PathDelim +
+    'prepare-commit-msg';
+  ForceDirectories(ExtractFileDir(Hook));
+  WriteLines('.git/hooks/prepare-commit-msg', ['#!/bin/sh',
+    'case "$(head -n 1 "$1")" in fixup!*) { printf "ABC-12: "; cat "$1"; } > "$1.new" && mv "$1.new" "$1";; esac']);
+  FpChmod(Hook, &755);
+  ChangeWorkTree;
+  Plan := TGittanAbsorbPlan.Create;
+  try
+    AssertEquals('', Build(Plan, ['a.txt', 'b.txt']));
+    AssertTrue('run: ' + Err, AbsorbRun(FRepo, Plan, [True, True, True, True], [],
+      Commits, Conflicts, Stopped, Err));
+    AssertEquals('fixups', 3, Commits);
+    AssertEquals('no fixup left', 'Change beta|Change five|Change two|Base', Subjects);
+    AssertEquals('Change two holds two!!', 'one|two!!|three|four|five|six|seven|eight|nine|ten',
+      StringReplace(GitOut(['show', 'HEAD~2:a.txt']), #10, '|', [rfReplaceAll]));
+  finally
+    Plan.Free;
+  end;
+  {$ENDIF}
 end;
 
 { A change of a commit that is a fixup of one not on the branch goes
