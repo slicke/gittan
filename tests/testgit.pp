@@ -5837,6 +5837,11 @@ begin
   AssertTrue(ReadRemotes(FDir, R, Err));
   AssertEquals('the first url', 'ex:e.git', R[0].Url);
   Git(['config', '--unset', 'remote.' + R[0].Name + '.url', 'mirror']);
+  { A value may hold a line break, which ends no value of -z. }
+  Git(['config', '--add', 'remote.' + R[0].Name + '.pushurl', '/tmp/up'#10'stream.git']);
+  AssertTrue(ReadRemotes(FDir, R, Err));
+  AssertEquals('a line break kept', '/tmp/up'#10'stream.git', R[0].PushUrl);
+  Git(['config', '--unset-all', 'remote.' + R[0].Name + '.pushurl']);
 
   { A rename takes the remote-tracking branches and the upstream along. }
   Git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);

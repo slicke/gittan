@@ -238,6 +238,18 @@ begin
   end;
 end;
 
+{ The first value of git config -z --get-all's output. }
+function FirstValue(const AOutput: string): string;
+var
+  p: SizeInt;
+begin
+  p := Pos(#0, AOutput);
+  if p > 0 then
+    Result := Copy(AOutput, 1, p - 1)
+  else
+    Result := AOutput;
+end;
+
 function ReadRemotes(const ARoot: string; out ARemotes: TGittanRemotes;
   out AError: string): boolean;
 var
@@ -252,13 +264,14 @@ begin
   for i := 0 to High(ARemotes) do
   begin
     { The first url, as remote -v and git fetch take it: --get gives the
-      last of several. }
-    if RunGitIn(ARoot, ['config', '--get-all', 'remote.' + ARemotes[i].Name + '.url'],
-      Output, Err) and (Trim(Output) <> '') then
-      ARemotes[i].Url := Trim(Output.Split([#10])[0]);
-    if RunGitIn(ARoot, ['config', '--get-all', 'remote.' + ARemotes[i].Name + '.pushurl'],
-      Output, Err) and (Trim(Output) <> '') then
-      ARemotes[i].PushUrl := Trim(Output.Split([#10])[0])
+      last of several. Ended by NULs (-z), as a value may hold a line
+      break (a local path). }
+    if RunGitIn(ARoot, ['config', '-z', '--get-all', 'remote.' + ARemotes[i].Name + '.url'],
+      Output, Err) and (FirstValue(Output) <> '') then
+      ARemotes[i].Url := FirstValue(Output);
+    if RunGitIn(ARoot, ['config', '-z', '--get-all', 'remote.' + ARemotes[i].Name + '.pushurl'],
+      Output, Err) and (FirstValue(Output) <> '') then
+      ARemotes[i].PushUrl := FirstValue(Output)
     else
       ARemotes[i].PushUrl := ARemotes[i].Url;
   end;
