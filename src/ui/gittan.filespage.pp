@@ -128,8 +128,13 @@ resourcestring
   rsEmptyFolder = 'Nothing in this folder.';
   rsSubmoduleAt = '@ %s';
   rsLinkKind = 'link';
+  rsMoreEntries = '%d more are not shown: the page cannot be taller.';
 
 const
+  { The tallest the page gets: the LCL sends a size in 16 bits, so a
+    control over 32767 px fails (on GTK the rows past it cannot be
+    scrolled to), as for the summary (MaxSummaryHeight). }
+  MaxPageHeight = 32000;
   FolderLink = 'gittan:folder:';
   EntryLink = 'gittan:entry:';
   Pad = 24;
@@ -325,12 +330,19 @@ procedure TGittanFilesPage.SetHot(AValue: integer);
 begin
   if FHot = AValue then
     Exit;
+  { The rows the hover leaves and reaches alone: a folder of a thousand
+    entries was drawn whole on every move. }
+  if (FHot >= 0) and (FHot <= High(FLinkRects)) and HandleAllocated then
+    InvalidateRect(Handle, @FLinkRects[FHot], False);
   FHot := AValue;
   if AValue < 0 then
     Cursor := crDefault
   else
     Cursor := crHandPoint;
-  Invalidate;
+  if (FHot >= 0) and (FHot <= High(FLinkRects)) and HandleAllocated then
+    InvalidateRect(Handle, @FLinkRects[FHot], False)
+  else if FHot >= 0 then
+    Invalidate;
 end;
 
 procedure TGittanFilesPage.AddLink(const ARect: TRect; const AUrl: string);
@@ -429,8 +441,8 @@ end;
   kind dimmed after it, the size at the right. Every row leads on. }
 procedure TGittanFilesPage.PaintRows(var Y: integer);
 var
-  i, TextH, RowH, X, Right, NameW: integer;
-  R: TRect;
+  i, TextH, RowH, X, Right, NameW, Shown: integer;
+  R, Clip: TRect;
   Detail, SizeText: string;
   E: TGittanTreeEntry;
 begin
@@ -438,7 +450,17 @@ begin
   FC.Brush.Style := bsClear;
   TextH := FC.TextHeight('Xg');
   RowH := Max(TextH, Px(IconSize)) + 2 * Px(RowPadY);
-  for i := 0 to High(FEntries) do
+  { The rows that fit under MaxPageHeight, room kept for the line that
+    tells how many more there are. }
+  Shown := Length(FEntries);
+  if Y + Shown * RowH + Px(Pad) > MaxPageHeight then
+    Shown := Max(0, (MaxPageHeight - Y - 3 * Px(Pad)) div RowH - 1);
+  { Only the rows the paint asks for are drawn; every one is a link. }
+  if FC = Canvas then
+    Clip := Canvas.ClipRect
+  else
+    Clip := Rect(0, 0, Width, MaxInt);
+  for i := 0 to Shown - 1 do
   begin
     E := FEntries[i];
     R := Rect(Px(Pad), Y, Width - Px(Pad), Y + RowH);
@@ -446,6 +468,11 @@ begin
       AddLink(R, FolderLink + E.Path)
     else
       AddLink(R, EntryLink + IntToStr(i));
+    if (FC <> Canvas) or (R.Bottom < Clip.Top) or (R.Top > Clip.Bottom) then
+    begin
+      Inc(Y, RowH);
+      Continue;
+    end;
     if FHot = High(FLinkRects) then
       FillHover(FC, R, Px(RowRadius), FHover);
     X := R.Left + Px(Gap) div 2;
@@ -484,6 +511,11 @@ begin
         FitTextRight(FC, Detail, Right - X - NameW - Px(Gap) div 2));
     end;
     Inc(Y, RowH);
+  end;
+  if Shown < Length(FEntries) then
+  begin
+    Inc(Y, Px(Gap));
+    PaintNote(Y, Format(rsMoreEntries, [Length(FEntries) - Shown]), FDim);
   end;
 end;
 
