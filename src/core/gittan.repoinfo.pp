@@ -81,7 +81,12 @@ type
 function ParseRemotes(const AOutput: string): TGittanRemotes;
 
 {** The remotes of the repository at ARoot, read by ParseRemotes; false,
-  with git's message in AError, when git failed. }
+  with git's message in AError, when git failed. Url and PushUrl are as
+  the config has them (remote.<name>.url, the first pushurl, else the
+  url), not as `remote -v` shows them after url.<base>.insteadOf and
+  pushInsteadOf: an edit writes them back, and the rewritten push URL
+  would be saved as a pushurl of its own. Web is from the rewritten URL,
+  the address git reaches. }
 function ReadRemotes(const ARoot: string; out ARemotes: TGittanRemotes;
   out AError: string): boolean;
 
@@ -236,12 +241,25 @@ end;
 function ReadRemotes(const ARoot: string; out ARemotes: TGittanRemotes;
   out AError: string): boolean;
 var
-  Output: string;
+  Output, Err: string;
+  i: integer;
 begin
   ARemotes := nil;
   Result := RunGitIn(ARoot, ['remote', '-v'], Output, AError);
-  if Result then
-    ARemotes := ParseRemotes(Output);
+  if not Result then
+    Exit;
+  ARemotes := ParseRemotes(Output);
+  for i := 0 to High(ARemotes) do
+  begin
+    if RunGitIn(ARoot, ['config', '--get', 'remote.' + ARemotes[i].Name + '.url'],
+      Output, Err) then
+      ARemotes[i].Url := Trim(Output);
+    if RunGitIn(ARoot, ['config', '--get-all', 'remote.' + ARemotes[i].Name + '.pushurl'],
+      Output, Err) and (Trim(Output) <> '') then
+      ARemotes[i].PushUrl := Trim(Output.Split([#10])[0])
+    else
+      ARemotes[i].PushUrl := ARemotes[i].Url;
+  end;
 end;
 
 function RemoteWebUrl(const AUrl: string): string;

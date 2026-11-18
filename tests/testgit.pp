@@ -5818,6 +5818,17 @@ begin
   AssertEquals('https://example.invalid/d.git', R[0].PushUrl);
   AssertTrue('without a push URL to unset', FRepo.SetRemoteUrls('origin',
     'https://example.invalid/d.git', 'https://example.invalid/d.git'));
+  { The URLs as the config has them, not rewritten: an edit writes
+    them back, and a rewritten push URL would become a pushurl. }
+  Git(['config', 'url.git@example.invalid:.pushInsteadOf', 'https://example.invalid/']);
+  Git(['config', 'url.https://example.invalid/.insteadOf', 'ex:']);
+  Git(['remote', 'set-url', 'origin', 'ex:e.git']);
+  AssertTrue(ReadRemotes(FDir, R, Err));
+  AssertEquals('ex:e.git', R[0].Url);
+  AssertEquals('no pushurl of its own', 'ex:e.git', R[0].PushUrl);
+  AssertEquals('the web page git reaches', 'https://example.invalid/e', R[0].Web);
+  Git(['config', '--unset', 'url.git@example.invalid:.pushInsteadOf']);
+  Git(['config', '--unset', 'url.https://example.invalid/.insteadOf']);
 
   { A rename takes the remote-tracking branches and the upstream along. }
   Git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);

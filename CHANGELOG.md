@@ -71,6 +71,7 @@
 - Changing the syntax while resolving a conflict in the merge editor no longer marks the result as edited by hand, which dimmed the panes, stopped the picks and asked to save on leaving.
 - A long subject or body line that wraps in the summary or a review thread keeps its quotes: Revert "Add the feature" lost them, and a line with a lone quote, such as 12" screen, had the rest of its paragraph broken letter by letter.
 - The welcome view no longer hangs Gittan when it shows why a repository did not open in a pane narrower than its padding.
+- Editing a remote's URL in the Remotes dialog no longer saves the old push address as a push URL of its own when git's pushInsteadOf rewrites it, which kept pushes going to the old repository.
 
 ## 0.21 (build-146, 2026-11-17)
 
