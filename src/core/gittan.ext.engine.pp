@@ -186,6 +186,15 @@ private
         uninterrupted execution burst began. }
   FLastJSCheck: QWord;
   FJSBurstStart: QWord;
+  { A chain of jobs that requeue themselves (a reaction that queues
+    another and returns) runs each job in the watchdog's budget and never
+    empties the queue, so the rejections would never be reported again:
+    the time of the timer's pumps that left jobs queued, waits for the
+    user left out (FChainSpent), and once it is past ExtWatchdogMs the
+    jobs run in a pump are stopped (FChainAbort) until the queue empties.
+    FPumping is set while PumpJobs runs them. }
+  FChainSpent: QWord;
+  FChainAbort, FPumping: boolean;
 
     {** Loaded per-extension contexts (Path B). Each user .js script lives in its own ctx. }
   FExtContexts: TExtContextList;
@@ -1210,6 +1219,10 @@ begin
   eng := TGittanExtEngine(opaque);
   if eng = nil then
     Exit;
+  { A chain past its budget: each job the pump runs stops at its first
+    poll, before it can queue the next. }
+  if eng.FChainAbort and eng.FPumping then
+    Exit(1);
   tick := GetTickCount64;
   if JSEntryDepth > 0 then
     start := JSEntryStart
@@ -3501,15 +3514,26 @@ end;
     one in gittan.ext.promise share an implementation and a budget; see it for
     why the drain is bounded. }
 function TGittanExtEngine.PumpJobs: boolean;
+var
+  WasPumping: boolean;
 begin
   Result := true;
   if IsExtShuttingDown or (FRuntime = nil) then
     Exit;
-  Result := DrainPendingJobs(FContext);
+  WasPumping := FPumping;
+  FPumping := True;
+  try
+    Result := DrainPendingJobs(FContext);
+  finally
+    FPumping := WasPumping;
+  end;
 end;
 
 {** Pump the QuickJS job queue (Promises/microtasks) on each timer tick. }
 procedure TGittanExtEngine.OnJSTimer(Sender: TObject);
+var
+  Began, Waited, Spent: QWord;
+  Drained: boolean;
 begin
   if IsExtShuttingDown or (FRuntime = nil) then
     Exit;
@@ -3524,10 +3548,27 @@ begin
   // them may be the .catch() that handles a rejection already on the pending
   // list, so reporting now would open a modal alert for a rejection that is
   // about to be handled. The next tick pumps again and reports it then if it
-  // survives; a runaway chain that truncates every tick is ended by the
-  // watchdog, after which the queue empties and reporting resumes.
-  if PumpJobs then
+  // survives. A runaway chain that truncates every tick is not ended by the
+  // watchdog, which times each job alone: its pumps are added up here, and
+  // past ExtWatchdogMs its jobs are stopped, after which the queue empties
+  // and reporting resumes. A finite chain within that time runs to its end.
+  Began := GetTickCount64;
+  Waited := JSWaitedMs;
+  Drained := PumpJobs;
+  if Drained then
+  begin
+    FChainSpent := 0;
+    FChainAbort := False;
     FlushPendingRejections;
+  end
+  else
+  begin
+    Spent := GetTickCount64 - Began;
+    if JSWaitedMs - Waited < Spent then
+      Inc(FChainSpent, Spent - (JSWaitedMs - Waited));
+    if FChainSpent > ExtWatchdogMs then
+      FChainAbort := True;
+  end;
 end;
 
 procedure TGittanExtEngine.NoteRejection(key: UInt64; const msg: string);

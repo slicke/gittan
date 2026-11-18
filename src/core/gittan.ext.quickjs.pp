@@ -473,6 +473,11 @@ var
       however long its body spends inside a native, between the polls. }
   JSEntryDepth: integer = 0;
   JSEntryStart: QWord = 0;
+  {** Milliseconds spent in waits for the user (JSWaitBegin to JSWaitEnd)
+      so far, a wait inside another counted once, for a budget that runs
+      over several calls and leaves them out. }
+  JSWaitedMs: QWord = 0;
+  JSWaitNest: integer = 0;
 
 {** For a native that waits for the user (a dialog): the time until
     JSWaitEnd is not the script's. JS run meanwhile (a timer while a
@@ -833,10 +838,17 @@ begin
   Result.Start := JSEntryStart;
   Result.Began := GetTickCount64;
   JSEntryDepth := 0;
+  Inc(JSWaitNest);
 end;
 
 procedure JSWaitEnd(const AWait: TJSWait);
 begin
+  Dec(JSWaitNest);
+  if JSWaitNest <= 0 then
+  begin
+    JSWaitNest := 0;
+    Inc(JSWaitedMs, GetTickCount64 - AWait.Began);
+  end;
   JSEntryDepth := AWait.Depth;
   JSEntryStart := AWait.Start + (GetTickCount64 - AWait.Began);
 end;

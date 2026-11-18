@@ -107,6 +107,7 @@ type
     procedure TestConsoleLinesCut;
     procedure TestDialogTextFromChangingToString;
     procedure TestWatchdogStopsNativeLoop;
+    procedure TestRunawayChainEnded;
     procedure TestUnloadWithPromisePending;
     procedure TestLogGoesToConsole;
     procedure TestNoExceptionCrossesExtensions;
@@ -584,6 +585,49 @@ begin
     AssertEquals('nor the time the log is read', 'done', Res);
   finally
     FHost.ConfirmDelay := 0;
+    ExtWatchdogMs := 10000;
+  end;
+end;
+
+{ A reaction that queues the next and returns runs each job well inside
+  the watchdog's budget and never empties the queue, so no rejection was
+  reported again: the timer's pumps that leave jobs queued count up, and
+  past the budget the chain is stopped. A finite one runs to its end. }
+procedure TExtEngineTest.TestRunawayChainEnded;
+var
+  Fin, Chain: PExtContextInfo;
+  GiveUpAt: QWord;
+  Drained: boolean;
+  Runs: string;
+begin
+  ExtWatchdogMs := 300;
+  try
+    Fin := Load('finite', 'globalThis.left = 20000; function step() {' +
+      ' if (--globalThis.left > 0) Promise.resolve().then(step); } step(); "loaded";', PermBaseline);
+    AssertLoaded('finite', string(FEngine.ExtExecuteFile(Fin)));
+    GiveUpAt := GetTickCount64 + 5000;
+    while (EvalIn(Fin^.Ctx, 'String(globalThis.left)') <> '0') and (GetTickCount64 < GiveUpAt) do
+      FEngine.OnJSTimer(nil);
+    AssertEquals('a finite chain runs to its end', '0', EvalIn(Fin^.Ctx, 'String(globalThis.left)'));
+    Chain := Load('chain', 'globalThis.runs = 0; function again() { globalThis.runs++;' +
+      ' Promise.resolve().then(again); } again(); "loaded";', PermBaseline);
+    AssertLoaded('chain', string(FEngine.ExtExecuteFile(Chain)));
+    Drained := False;
+    GiveUpAt := GetTickCount64 + 5000;
+    while not Drained and (GetTickCount64 < GiveUpAt) do
+    begin
+      FEngine.OnJSTimer(nil);
+      Drained := FEngine.PumpJobs;
+    end;
+    AssertTrue('the chain was stopped', Drained);
+    Runs := EvalIn(Chain^.Ctx, 'String(globalThis.runs)');
+    FEngine.OnJSTimer(nil);
+    AssertEquals('and stays stopped', Runs, EvalIn(Chain^.Ctx, 'String(globalThis.runs)'));
+    FHost.Alerts.Clear;
+    LoadResult('rejecter', 'Promise.reject(new Error("seen")); "loaded";');
+    FEngine.OnJSTimer(nil);
+    AssertTrue('a rejection is reported again: ' + FHost.Alerts.Text, Pos('seen', FHost.Alerts.Text) > 0);
+  finally
     ExtWatchdogMs := 10000;
   end;
 end;
