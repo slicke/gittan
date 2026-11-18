@@ -8832,7 +8832,7 @@ begin
     FHeader.SetStage(FStats[i].Staged, FStats[i].Unstaged);
     if FStats[i].Kind = ckConflict then
     begin
-      FConflictRoles := ConflictRoles(FChangeLines);
+      FConflictRoles := ConflictRoles(FChangeLines, FRepo.ConflictMarkerSize(APath));
       FConflictStarts := ConflictStarts(FConflictRoles, FChangeLines);
       SetLength(FConflictEnds, Length(FConflictStarts));
       for c := 0 to High(FConflictStarts) do

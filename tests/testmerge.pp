@@ -22,6 +22,7 @@ type
     procedure TearDown; override;
   published
     procedure TestChunks;
+    procedure TestMarkerSize;
     procedure TestRebaseSwapsSides;
     procedure TestUntouchedKeepsMarkers;
     procedure TestPickLines;
@@ -266,6 +267,32 @@ begin
     AssertEquals('a|t1|m2|b', Joined(M.Output));
     AssertEquals('0210', JoinedInts(M.Origins));
     AssertEquals('013', JoinedInts(M.OutputStarts));
+  finally
+    M.Free;
+  end;
+end;
+
+{ Markers ten long, from conflict-marker-size, with their names. }
+procedure TMergeTest.TestMarkerSize;
+var
+  M: TGittanMerge;
+begin
+  FLines.Clear;
+  FLines.Add('<<<<<<<<<< HEAD');
+  FLines.Add('m');
+  FLines.Add('|||||||||| base');
+  FLines.Add('=======');
+  FLines.Add('==========');
+  FLines.Add('t');
+  FLines.Add('>>>>>>>>>> f');
+  M := TGittanMerge.Create(FLines, False, 10);
+  try
+    AssertEquals(1, Length(M.Conflicts));
+    AssertEquals('HEAD', M.Chunks[0].Names[msMine]);
+    AssertEquals('f', M.Chunks[0].Names[msTheirs]);
+    AssertEquals('base', M.Chunks[0].BaseName);
+    AssertEquals('seven = signs are a base line', '=======', Joined(M.Chunks[0].Base));
+    AssertEquals('t', Joined(M.Chunks[0].Sides[msTheirs]));
   finally
     M.Free;
   end;

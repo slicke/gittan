@@ -502,6 +502,10 @@ type
       A side that starts with a dash is refused, since git would take
       it for an option (--output=file..x writes to file). }
     function IsCompareRef(const ARef: string): boolean;
+    {** How long the conflict markers in APath (relative to Root) are:
+      its conflict-marker-size attribute (`git check-attr`), 7 when it
+      has none or git cannot say. }
+    function ConflictMarkerSize(const APath: string): integer;
     {** Whether ARef, a full name such as refs/tags/v1, is a ref of the
       repository, whatever it points at. }
     function HasRef(const ARef: string): boolean;
@@ -3283,6 +3287,25 @@ begin
       Any := True;
     end;
   Result := Any;
+end;
+
+function TGittanRepo.ConflictMarkerSize(const APath: string): integer;
+var
+  Output, Value: string;
+begin
+  Result := 7;
+  if (FRoot = '') or (APath = '') or not RunGit(FRoot, ['check-attr', '-z',
+    'conflict-marker-size', '--', APath], Output) then
+    Exit;
+  { -z: path NUL attribute NUL value NUL. }
+  Value := Output;
+  if (Value <> '') and (Value[Length(Value)] = #0) then
+    SetLength(Value, Length(Value) - 1);
+  if LastDelimiter(#0, Value) > 0 then
+    Value := Copy(Value, LastDelimiter(#0, Value) + 1, MaxInt);
+  Result := StrToIntDef(Value, 7);
+  if (Result < 1) or (Result > 1000) then
+    Result := 7;
 end;
 
 function TGittanRepo.HasRef(const ARef: string): boolean;

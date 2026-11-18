@@ -51,6 +51,7 @@
 - A file that cannot be read when it is opened (no permission, locked by another program on Windows, or gone since it was listed) is said in a banner, and the view is no longer left editable with no syntax colors.
 - On Haiku, Reveal opens the folder in Tracker and Open in Terminal opens Haiku's Terminal; before, both did nothing.
 - Delete Gone Branches leaves out a branch checked out in another worktree, which git will not delete, and a branch it could not delete for another reason is named in a banner with git's reason. Before, the status bar told only of the ones deleted, with no word of the rest, and the row kept coming back.
+- A file whose `.gitattributes` sets `conflict-marker-size` has its conflicts found: the change view's pick buttons, the merge editor's blocks and Mark Resolved's check for markers left all go by that size. Before, none were found, and Mark Resolved staged the file with its markers in it.
 
 ## 0.21 (build-146, 2026-11-17)
 

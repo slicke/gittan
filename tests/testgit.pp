@@ -85,6 +85,7 @@ type
     procedure TestBranchesAndSwitch;
     procedure TestSwitchTrack;
     procedure TestCompareRef;
+    procedure TestConflictMarkerSize;
     procedure TestGoneBranches;
     procedure TestGoneUpstreams;
     procedure TestCommit;
@@ -4288,6 +4289,19 @@ begin
   AssertTrue(FRepo.Error, FRepo.Switch('topic/one', False, False, 'team/x/topic/one'));
   AssertEquals('topic/one', FRepo.Branch);
   AssertEquals('team/x/topic/one', FRepo.Upstream('topic/one'));
+end;
+
+{ The markers' length from .gitattributes, 7 without it. }
+procedure TGitRepoTest.TestConflictMarkerSize;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertEquals(7, FRepo.ConflictMarkerSize('a.txt'));
+  WriteFile('.gitattributes', '*.txt conflict-marker-size=10'#10'odd.md conflict-marker-size=x'#10);
+  AssertEquals(10, FRepo.ConflictMarkerSize('a.txt'));
+  AssertEquals(10, FRepo.ConflictMarkerSize('dir sp/fil å.txt'));
+  AssertEquals('not a number', 7, FRepo.ConflictMarkerSize('odd.md'));
+  AssertEquals(7, FRepo.ConflictMarkerSize('other.md'));
 end;
 
 { What Compare With takes: a commit or a range of commits, never a side

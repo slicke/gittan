@@ -79,8 +79,9 @@ type
     procedure TakeSide(AChunk: integer; ASide: TGittanMergeSide; ATaken: boolean);
   public
     {** Cuts ALines, the file's lines as they are on disk, into chunks.
-      ARebase: git is rebasing, so its theirs is the user's side. }
-    constructor Create(ALines: TStrings; ARebase: boolean);
+      ARebase: git is rebasing, so its theirs is the user's side.
+      AMarkerSize: the markers' length, from conflict-marker-size. }
+    constructor Create(ALines: TStrings; ARebase: boolean; AMarkerSize: integer = 7);
     {** The chunk's index of every conflict, in order. }
     function Conflicts: TIntegerDynArray;
     {** Whether any conflict holds the merge base. }
@@ -155,7 +156,7 @@ end;
 
 { TGittanMerge }
 
-constructor TGittanMerge.Create(ALines: TStrings; ARebase: boolean);
+constructor TGittanMerge.Create(ALines: TStrings; ARebase: boolean; AMarkerSize: integer);
 var
   Diff: TStringList;
   Roles: TIntegerDynArray;
@@ -193,7 +194,7 @@ begin
       FFileLines[i] := ALines[i];
       Diff.Add(' ' + ALines[i]);
     end;
-    Roles := ConflictRoles(Diff);
+    Roles := ConflictRoles(Diff, AMarkerSize);
   finally
     Diff.Free;
   end;
@@ -207,11 +208,11 @@ begin
         StartChunk(False);
       InConflict := False;
     end
-    else if (Roles[i] = crMarker) and (Copy(FFileLines[i], 1, 7) = '<<<<<<<') then
+    else if (Roles[i] = crMarker) and (Copy(FFileLines[i], 1, 1) = '<') then
     begin
       StartChunk(True);
       InConflict := True;
-      FChunks[n].Names[Ours] := Trim(Copy(FFileLines[i], 9, MaxInt));
+      FChunks[n].Names[Ours] := MarkerName(' ' + FFileLines[i]);
     end;
     Append(FChunks[n].Lines, FFileLines[i]);
     case Roles[i] of
@@ -219,14 +220,14 @@ begin
       crBase: Append(FChunks[n].Base, FFileLines[i]);
       crTheirs: Append(FChunks[n].Sides[Theirs], FFileLines[i]);
       crMarker:
-        if Copy(FFileLines[i], 1, 7) = '|||||||' then
+        if Copy(FFileLines[i], 1, 1) = '|' then
         begin
           FChunks[n].HasBase := True;
-          FChunks[n].BaseName := Trim(Copy(FFileLines[i], 9, MaxInt));
+          FChunks[n].BaseName := MarkerName(' ' + FFileLines[i]);
         end
-        else if Copy(FFileLines[i], 1, 7) = '>>>>>>>' then
+        else if Copy(FFileLines[i], 1, 1) = '>' then
         begin
-          FChunks[n].Names[Theirs] := Trim(Copy(FFileLines[i], 9, MaxInt));
+          FChunks[n].Names[Theirs] := MarkerName(' ' + FFileLines[i]);
           { The next line starts a chunk of its own, even another
             conflict's. }
           InConflict := True;
