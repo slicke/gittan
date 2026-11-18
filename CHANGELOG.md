@@ -59,6 +59,7 @@
 - Switching to a remote branch works when a tag has the same name as it, such as a tag origin/feature; git took the tag and refused to track it.
 - Saving a repository file such as .gitignore checks again that it is not a link, so a pull that made it one after it was opened no longer has the save write where the link points.
 - A git command or extension program given input no longer waits for a process it left running in the background that holds the input open without reading it, such as a hook's job; it returns when the command ends.
+- Undo Discard after a discard that brought a deleted file back deletes the file again; before, it left an empty file, which a commit would take.
 
 ## 0.21 (build-146, 2026-11-17)
 

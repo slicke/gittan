@@ -216,6 +216,7 @@ var
   Ours, Theirs: TStringArray;
   Text: string;
 begin
+  Result := Default(TGittanDiscard);
   Result.FileName := AFileName;
   Result.Resolved := False;
   Result.OldLines := nil;

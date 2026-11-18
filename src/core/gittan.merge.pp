@@ -526,6 +526,7 @@ end;
 function TGittanMerge.ResultBlock(const AResult: TStringArray;
   const AFileName: string): TGittanDiscard;
 begin
+  Result := Default(TGittanDiscard);
   Result.FileName := AFileName;
   Result.Line := 1;
   Result.NewLines := Copy(FFileLines);

@@ -482,6 +482,7 @@ end;
 procedure TRepoFrame.DiscardThis(const ABlock: TGittanDiscard);
 var
   Path, Err: string;
+  Noted: TGittanDiscard;
 begin
   Path := FCurrentPath;
   if AskDlg(rsAppName, Format(rsDiscardAsk, [ExtractFileName(Path),
@@ -489,12 +490,14 @@ begin
     [mrYes, rsDiscardAction, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
     Exit;
   SetHotDiscard(Edit, -1, -1, -1);
+  Noted := ABlock;
+  Noted.Created := not FileExists(ABlock.FileName);
   if not DiscardBlock(ABlock, Err) then
   begin
     StatusNote(Format(rsDiscardFailed, [Err]), True);
     Exit;
   end;
-  NoteDiscard(ABlock);
+  NoteDiscard(Noted);
   RefreshRepository;
   StatusNote(Format(rsDiscarded, [ABlock.Line, Path]));
   UpdateDiscardItems;
