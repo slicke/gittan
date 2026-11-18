@@ -17,6 +17,7 @@ type
     procedure TestParse;
     procedure TestParseDropsCommitWithoutHunk;
     procedure TestParseEmpty;
+    procedure TestParseTypeChange;
     procedure TestPrependTruncate;
     procedure TestLayers;
     procedure TestUncommittedHunk;
@@ -61,6 +62,41 @@ begin
     ' five'#10 +
     '+six'#10 +
     '\ No newline at end of file'#10;
+end;
+
+{ A file made a link: git gives a diff that deletes the file and
+  another that adds the link, whose header lines are no lines of the
+  first hunk. }
+procedure THistoryTest.TestParseTypeChange;
+var
+  H: TGittanHistory;
+begin
+  H := TGittanHistory.Create;
+  try
+    AssertTrue(H.Parse(#1 + HashA + #31'Anna'#31'1700086400'#31'Link'#10#10 +
+      'diff --git a/x b/x'#10 +
+      'deleted file mode 100644'#10 +
+      '--- a/x'#10 +
+      '+++ /dev/null'#10 +
+      '@@ -1,2 +0,0 @@'#10 +
+      '-one'#10 +
+      '-two'#10 +
+      'diff --git a/x b/x'#10 +
+      'new file mode 120000'#10 +
+      '--- /dev/null'#10 +
+      '+++ b/x'#10 +
+      '@@ -0,0 +1 @@'#10 +
+      '+target'#10 +
+      '\ No newline at end of file'#10));
+    AssertEquals(2, Length(H.Commits[0].Hunks));
+    AssertEquals('the second header is not in the first', 2,
+      Length(H.Commits[0].Hunks[0].Lines));
+    AssertEquals('-two', H.Commits[0].Hunks[0].Lines[1]);
+    AssertEquals(1, Length(H.Commits[0].Hunks[1].Lines));
+    AssertEquals('+target', H.Commits[0].Hunks[1].Lines[0]);
+  finally
+    H.Free;
+  end;
 end;
 
 procedure THistoryTest.TestParse;

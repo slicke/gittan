@@ -4561,6 +4561,14 @@ begin
     WriteFile('crlf.txt', 'x'#13#10'y'#13#10);
     AssertTrue(FRepo.FileChanges('crlf.txt', Lines));
     AssertEquals('+x|+y|', Joined(Lines));
+    { A tracked file made a link: git gives two diffs, and the second's
+      header is no line of the first. }
+    {$ifdef unix}
+    DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'cr.txt');
+    AssertEquals(0, fpSymlink('target', PChar(IncludeTrailingPathDelimiter(FDir) + 'cr.txt')));
+    AssertTrue(FRepo.FileChanges('cr.txt', Lines));
+    AssertEquals('-a'#13' b|-c|-d|-e|+target|', Joined(Lines));
+    {$endif}
   finally
     Lines.Free;
   end;

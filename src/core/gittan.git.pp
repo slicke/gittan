@@ -8796,7 +8796,12 @@ begin
       else if (Line <> '') and (Line[1] = '\') and (ALines.Count > 0) then
         { "\ No newline at end of file": the line before ends its side
           without one, which Discard and Leave Out keep (NoNewlineMark). }
-        ALines.Objects[ALines.Count - 1] := NoNewlineMark;
+        ALines.Objects[ALines.Count - 1] := NoNewlineMark
+      else
+        { Any other line ends the hunk: a file whose type changed (a
+          file made a link) has a second diff after the first, whose
+          header (--- /dev/null, +++ b/x) is no line of either side. }
+        InHunk := False;
   finally
     Raw.Free;
   end;
