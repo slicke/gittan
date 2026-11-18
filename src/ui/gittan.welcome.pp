@@ -489,7 +489,9 @@ begin
     if Line <> '' then
       ALines.Add(Line);
     Line := Word;
-    while FC.TextWidth(Line) > AWidth do
+    { Line <> '' as well: with a width below zero the empty rest is
+      wider still. }
+    while (Line <> '') and (FC.TextWidth(Line) > AWidth) do
     begin
       { The longest head that fits, of whole characters, ending after
         a slash when one is there; a head of at least one character, so
