@@ -497,6 +497,11 @@ type
     function HeadPaths(AList: TStrings): boolean;
     {** Whether ARef names a commit in the repository. }
     function HasCommit(const ARef: string): boolean;
+    {** Whether ARef can be compared with: a commit, or a range a..b or
+      a...b whose sides are commits (one may be empty, git's HEAD).
+      A side that starts with a dash is refused, since git would take
+      it for an option (--output=file..x writes to file). }
+    function IsCompareRef(const ARef: string): boolean;
     {** Whether ARef, a full name such as refs/tags/v1, is a ref of the
       repository, whatever it points at. }
     function HasRef(const ARef: string): boolean;
@@ -3250,6 +3255,33 @@ var
 begin
   Result := (FRoot <> '') and (ARef <> '') and
     RunGit(FRoot, ['rev-parse', '--verify', '-q', ARef + '^{commit}'], Id);
+end;
+
+function TGittanRepo.IsCompareRef(const ARef: string): boolean;
+var
+  Sides: TStringArray;
+  Side: string;
+  Any: boolean;
+begin
+  if Pos('...', ARef) > 0 then
+    Sides := ARef.Split(['...'])
+  else
+    Sides := ARef.Split(['..']);
+  if Length(Sides) = 0 then
+    Exit(False);
+  if Length(Sides) = 1 then
+    SetLength(Sides, 2);
+  if Length(Sides) > 2 then
+    Exit(False);
+  Any := False;
+  for Side in Sides do
+    if Side <> '' then
+    begin
+      if (Side[1] = '-') or not HasCommit(Side) then
+        Exit(False);
+      Any := True;
+    end;
+  Result := Any;
 end;
 
 function TGittanRepo.HasRef(const ARef: string): boolean;

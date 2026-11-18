@@ -84,6 +84,7 @@ type
     procedure TestOperation;
     procedure TestBranchesAndSwitch;
     procedure TestSwitchTrack;
+    procedure TestCompareRef;
     procedure TestGoneBranches;
     procedure TestGoneUpstreams;
     procedure TestCommit;
@@ -4281,6 +4282,29 @@ begin
   AssertTrue(FRepo.Error, FRepo.Switch('topic/one', False, False, 'team/x/topic/one'));
   AssertEquals('topic/one', FRepo.Branch);
   AssertEquals('team/x/topic/one', FRepo.Upstream('topic/one'));
+end;
+
+{ What Compare With takes: a commit or a range of commits, never a side
+  git would read as an option. }
+procedure TGitRepoTest.TestCompareRef;
+begin
+  MakeHistory;
+  WriteFile('a.txt', 'second'#10);
+  Commit('second');
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.IsCompareRef('HEAD~1'));
+  AssertTrue(FRepo.IsCompareRef('HEAD~1..HEAD'));
+  AssertTrue(FRepo.IsCompareRef('HEAD~1...HEAD'));
+  AssertTrue('the other side is HEAD', FRepo.IsCompareRef('HEAD~1..'));
+  AssertTrue(FRepo.IsCompareRef('..HEAD~1'));
+  AssertFalse(FRepo.IsCompareRef(''));
+  AssertFalse(FRepo.IsCompareRef('..'));
+  AssertFalse(FRepo.IsCompareRef('no-such-ref'));
+  AssertFalse(FRepo.IsCompareRef('HEAD..no-such-ref'));
+  AssertFalse(FRepo.IsCompareRef('--output=' + FDir + '/out..HEAD'));
+  AssertFalse(FRepo.IsCompareRef('HEAD..-p'));
+  AssertFalse(FRepo.IsCompareRef('-p'));
+  AssertFalse(FileExists(IncludeTrailingPathDelimiter(FDir) + 'out'));
 end;
 
 { A switch the local changes block names the files; a stash clears the

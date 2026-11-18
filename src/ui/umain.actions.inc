@@ -2916,14 +2916,15 @@ begin
   SetBase(TMenuItem(Sender).Hint, TMenuItem(Sender).Tag = 1);
 end;
 
-{ A commit git can find; a range (a..b, a...b) is left to SetBase. }
+{ A commit git can find, or a range (a..b, a...b) of them; nothing
+  that starts with a dash, which git would take for an option. }
 function TRepoFrame.CheckCompareRef(const AValues: array of string): string;
 var
   Ref: string;
 begin
   Result := '';
   Ref := Trim(AValues[0]);
-  if (Pos('..', Ref) = 0) and not FRepo.HasCommit(Ref) then
+  if not FRepo.IsCompareRef(Ref) then
     Result := Format(rsAskNoSuchRef, [Ref]);
 end;
 
