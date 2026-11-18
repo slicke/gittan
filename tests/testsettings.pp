@@ -381,6 +381,25 @@ begin
   finally
     Back.Free;
   end;
+  { Removed and written, then opened again: the next Save keeps it. }
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    S.RemoveRecent('/repo/a');
+    S.SaveRecent;
+    S.AddRecent('/repo/a');
+    S.Save;
+  finally
+    S.Free;
+  end;
+  Back := TGittanSettings.Create(FDir);
+  try
+    Back.Load;
+    AssertEquals('opened again', 1, Back.Recent.Count);
+    AssertEquals('/repo/a', Back.Recent[0]);
+  finally
+    Back.Free;
+  end;
 end;
 
 procedure TSettingsTest.TestTabs;

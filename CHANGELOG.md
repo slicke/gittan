@@ -85,6 +85,7 @@
 - An extension's console.log dialog left open for a while no longer gets the script stopped by the 10-second limit once it is closed.
 - A module extension whose loading was queued behind other extensions' work runs the text that was granted, not its file read again.
 - A remote URL with a line break in it (a local path) is read whole in Remotes.
+- A repository removed from Recent and then opened again in the same session stays in Recent.
 
 ## 0.21 (build-146, 2026-11-17)
 

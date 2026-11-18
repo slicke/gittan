@@ -1215,7 +1215,16 @@ begin
       Doc.Integers['version'] := SettingsVersion;
       Doc.Arrays['recent'] := ListJson(FRecent);
       Doc.Arrays['paletteRecent'] := ListJson(FPaletteRecent);
-      WriteFileReplacing(StateFile, Doc.FormatJSON(JsonLayout) + LineEnding);
+      { Written, the lists are on disk as they are here: the base takes
+        them, and nothing else of the file, or a repository removed,
+        saved and opened again would equal the base at the next Save,
+        which would take the file's list without it. }
+      if WriteFileReplacing(StateFile, Doc.FormatJSON(JsonLayout) + LineEnding) and
+        (FStateBase <> nil) then
+      begin
+        FStateBase.Arrays['recent'] := ListJson(FRecent);
+        FStateBase.Arrays['paletteRecent'] := ListJson(FPaletteRecent);
+      end;
     finally
       Doc.Free;
     end;
