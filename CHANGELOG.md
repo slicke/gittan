@@ -45,6 +45,7 @@
 - Compare With > Other refuses a range one of whose sides is not a commit or starts with a dash. Before, a range went to git unchecked, so `--output=<file>..x` made `git diff` write to that file.
 - Fetching a pull request with no remote to fetch it from, or with no ref from the forge, says so, instead of failing with an empty message.
 - Trusting a signing key adds its line at the end of the allowed signers file instead of rewriting the file, so a full disk or a crash meanwhile can no longer leave it empty, and what was there keeps its line ends.
+- A settings.json or state.json that begins with a UTF-8 byte order mark, as Notepad and PowerShell 5 write it, is read instead of reset to the defaults, and one that cannot be read (no permission, or locked by another program) is no longer written over with the defaults on the next save.
 
 ## 0.21 (build-146, 2026-11-17)
 

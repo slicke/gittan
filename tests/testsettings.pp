@@ -32,6 +32,7 @@ type
     procedure TestCoAuthors;
     procedure TestBatchOperationIndex;
     procedure TestDamagedFileGivesDefaults;
+    procedure TestBomAndUnreadable;
     procedure TestWrongTypesSaved;
     procedure TestDraftUnknownKept;
     procedure TestExtValueList;
@@ -496,6 +497,50 @@ begin
       S.Free;
     end;
   end;
+end;
+
+{ A file with a UTF-8 byte order mark is read; one that cannot be read
+  is never written over, by Save or SaveRecent. Root reads a file with
+  mode 0, so that half has nothing to show then. }
+procedure TSettingsTest.TestBomAndUnreadable;
+var
+  S: TGittanSettings;
+  Name: string;
+begin
+  Put('settings.json', #$EF#$BB#$BF'{"diff": {"contextLines": 5}}');
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertEquals('', S.DamagedFiles);
+    AssertEquals(5, S.ContextLines);
+  finally
+    S.Free;
+  end;
+  {$IFDEF UNIX}
+  if FpGeteuid = 0 then
+    Exit;
+  Name := IncludeTrailingPathDelimiter(FDir) + 'settings.json';
+  Put('settings.json', '{"diff": {"contextLines": 9}}');
+  Put('state.json', '{"recent": ["/a"]}');
+  FpChmod(Name, 0);
+  FpChmod(IncludeTrailingPathDelimiter(FDir) + 'state.json', 0);
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertEquals(3, S.ContextLines);
+    S.ContextLines := 4;
+    S.Save;
+    S.SaveRecent;
+  finally
+    S.Free;
+    FpChmod(Name, &600);
+    FpChmod(IncludeTrailingPathDelimiter(FDir) + 'state.json', &600);
+  end;
+  AssertEquals('{"diff": {"contextLines": 9}}', string(ReadFileBytes(Name)));
+  AssertEquals('{"recent": ["/a"]}', string(ReadFileBytes(
+    IncludeTrailingPathDelimiter(FDir) + 'state.json')));
+  AssertFalse(FileExists(Name + DamagedSuffix));
+  {$ENDIF}
 end;
 
 procedure TSettingsTest.TestDamagedFileGivesDefaults;

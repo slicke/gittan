@@ -570,19 +570,32 @@ end;
   cannot be read or is not an object. One with text that does not parse
   or is no object (ADamaged; an edit by hand that left a comma too
   many) is copied to AFileName + DamagedSuffix first, since the next
-  save writes the defaults over it. }
-function ReadDoc(const AFileName: string; out ADamaged: boolean): TJSONObject;
+  save writes the defaults over it. One that is there but cannot be
+  read (no permission, locked by another program) is AUnreadable, and
+  no save may write over it. A UTF-8 byte order mark, which Notepad and
+  PowerShell 5 write, is skipped. }
+function ReadDoc(const AFileName: string; out ADamaged, AUnreadable: boolean): TJSONObject;
 var
   Data: TJSONData;
   Text: RawByteString;
 begin
   Result := nil;
   ADamaged := False;
+  AUnreadable := False;
   Text := '';
   if FileExists(AFileName) then
+  begin
+    try
+      Text := ReadFileBytes(AFileName);
+    except
+      AUnreadable := True;
+    end;
+    if AUnreadable then
+      Exit(TJSONObject.Create);
+    if Copy(Text, 1, 3) = #$EF#$BB#$BF then
+      Delete(Text, 1, 3);
     try
       { The bytes are UTF-8 whatever the system's code page is. }
-      Text := ReadFileBytes(AFileName);
       SetCodePage(Text, CP_UTF8, False);
       ADamaged := Trim(Text) <> '';
       Data := GetJSON(UTF8String(Text));
@@ -596,6 +609,7 @@ begin
     except
       { A damaged file is treated as none. }
     end;
+  end;
   if ADamaged then
     WriteFileReplacing(AFileName + DamagedSuffix, Text, &600);
   if Result = nil then
@@ -713,17 +727,17 @@ end;
 
 procedure TGittanSettings.Load;
 var
-  Damaged: boolean;
+  Damaged, Unreadable: boolean;
 begin
   FreeAndNil(FSettingsDoc);
   FreeAndNil(FStateDoc);
   FOldIniFound := not FileExists(SettingsFile) and not FileExists(StateFile) and
     FileExists(IncludeTrailingPathDelimiter(FDir) + OldIniFileName);
-  FSettingsDoc := ReadDoc(SettingsFile, Damaged);
+  FSettingsDoc := ReadDoc(SettingsFile, Damaged, Unreadable);
   FDamagedFiles := '';
   if Damaged then
     FDamagedFiles := SettingsFileName;
-  FStateDoc := ReadDoc(StateFile, Damaged);
+  FStateDoc := ReadDoc(StateFile, Damaged, Unreadable);
   if Damaged and (FDamagedFiles <> '') then
     FDamagedFiles := FDamagedFiles + ', ' + StateFileName
   else if Damaged then
@@ -1067,15 +1081,17 @@ end;
 { Reads AFileName again and gives what to write: ADoc merged into it
   against ABase. A file missing, broken or empty now (ReadDoc does not
   count an empty one as damaged, and no save writes an empty object) is
-  taken as the base, so what was never changed here is kept. }
+  taken as the base, so what was never changed here is kept. One that
+  is there but cannot be read is AUnreadable, and must not be written. }
 function MergedWithFile(const AFileName: string; ABase, ADoc: TJSONObject;
-  ATrustedKeys: boolean): TJSONObject;
+  ATrustedKeys: boolean; out AUnreadable: boolean): TJSONObject;
 var
   Theirs: TJSONObject;
   Damaged: boolean;
 begin
+  AUnreadable := False;
   if FileExists(AFileName) then
-    Theirs := ReadDoc(AFileName, Damaged)
+    Theirs := ReadDoc(AFileName, Damaged, AUnreadable)
   else
   begin
     Theirs := nil;
@@ -1098,16 +1114,29 @@ end;
 procedure TGittanSettings.Save;
 var
   Doc: TJSONObject;
+  SettingsUnreadable, StateUnreadable: boolean;
 begin
   try
     PutSettings;
     PutState;
-    Doc := MergedWithFile(SettingsFile, FSettingsBase, FSettingsDoc, True);
-    FSettingsDoc.Free;
-    FSettingsDoc := Doc;
-    Doc := MergedWithFile(StateFile, FStateBase, FStateDoc, False);
-    FStateDoc.Free;
-    FStateDoc := Doc;
+    { A file that is there but cannot be read now is left as it is: the
+      defaults merged into nothing would replace everything in it. }
+    Doc := MergedWithFile(SettingsFile, FSettingsBase, FSettingsDoc, True, SettingsUnreadable);
+    if SettingsUnreadable then
+      Doc.Free
+    else
+    begin
+      FSettingsDoc.Free;
+      FSettingsDoc := Doc;
+    end;
+    Doc := MergedWithFile(StateFile, FStateBase, FStateDoc, False, StateUnreadable);
+    if StateUnreadable then
+      Doc.Free
+    else
+    begin
+      FStateDoc.Free;
+      FStateDoc := Doc;
+    end;
     { The other process's changes are this one's now, and the fields
       follow; the base is what went to disk, so a file that could not be
       written keeps its old one and this process's changes to it are
@@ -1116,12 +1145,12 @@ begin
     PutSettings;
     PutState;
     { The API key is in the file as it is, so no one else may read it. }
-    if WriteFileReplacing(SettingsFile, FSettingsDoc.FormatJSON(JsonLayout) + LineEnding, &600) then
+    if not SettingsUnreadable and WriteFileReplacing(SettingsFile, FSettingsDoc.FormatJSON(JsonLayout) + LineEnding, &600) then
     begin
       FSettingsBase.Free;
       FSettingsBase := TJSONObject(FSettingsDoc.Clone);
     end;
-    if WriteFileReplacing(StateFile, FStateDoc.FormatJSON(JsonLayout) + LineEnding) then
+    if not StateUnreadable and WriteFileReplacing(StateFile, FStateDoc.FormatJSON(JsonLayout) + LineEnding) then
     begin
       FStateBase.Free;
       FStateBase := TJSONObject(FStateDoc.Clone);
@@ -1134,13 +1163,15 @@ end;
 procedure TGittanSettings.SaveRecent;
 var
   Doc: TJSONObject;
-  Damaged: boolean;
+  Damaged, Unreadable: boolean;
 begin
   { The file as it is now, which another instance may have written since
     Load, with the recent lists put in, and nothing else. }
   try
-    Doc := ReadDoc(StateFile, Damaged);
+    Doc := ReadDoc(StateFile, Damaged, Unreadable);
     try
+      if Unreadable then
+        Exit;
       Doc.Integers['version'] := SettingsVersion;
       Doc.Arrays['recent'] := ListJson(FRecent);
       Doc.Arrays['paletteRecent'] := ListJson(FPaletteRecent);
