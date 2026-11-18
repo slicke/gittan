@@ -5141,7 +5141,9 @@ end;
 { A NUL would end the C string the argument is passed as, so the tool
   would get less than was checked: refused on every system. }
 { A large output comes whole and fast: each piece appended to the
-  string copied all of it, 7.5 s for 130 MB. }
+  string copied all of it, 7.5 s for 130 MB. NUL bytes straight from
+  head, as a filter such as tr took most of the time itself and hid
+  the copying: some 0.03 s read into the buffer, 1.8 s copied whole. }
 procedure TGitRepoTest.TestLargeOutput;
 {$IFDEF UNIX}
 var
@@ -5150,13 +5152,13 @@ var
   T: QWord;
 begin
   T := GetTickCount64;
-  AssertTrue(RunTool('/bin/sh', '', ['-c', 'head -c 40000000 /dev/zero | tr "\0" a; printf b'],
+  AssertTrue(RunTool('/bin/sh', '', ['-c', 'head -c 40000000 /dev/zero; printf b'],
     [], [], Output, Err, Code, nil));
   AssertEquals(40000001, Length(Output));
-  AssertEquals('a', Output[1]);
+  AssertEquals(#0, Output[1]);
   AssertEquals('b', Output[Length(Output)]);
   AssertEquals('', Err);
-  AssertTrue('took ' + IntToStr(GetTickCount64 - T) + ' ms', GetTickCount64 - T < 3000);
+  AssertTrue('took ' + IntToStr(GetTickCount64 - T) + ' ms', GetTickCount64 - T < 1000);
 end;
 {$ELSE}
 begin
