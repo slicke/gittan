@@ -115,6 +115,12 @@ TExtContextInfo = record
   Repos: TStringArray;       // @repos: the repositories it runs for, all when empty
   Forges: TStringArray;      // @forges: the forges it runs for, lower case, all when empty
   Generation: QWord;         // a number of its own, never reused, unlike Ctx's address
+  { A module entry's text as it was read and hashed, until the module
+    loader takes it in place of the file: the import() that loads it is
+    a job, which a PumpJobs with jobs of others queued before it may not
+    reach, so it stays here, not only for the call, until it is taken or
+    the context goes. }
+  EntrySource: RawUtf8;
 end;
 
 TExtContextList = specialize TFPGList<PExtContextInfo>;
@@ -172,8 +178,6 @@ private
   FUnloading: boolean;
     { The entry file being loaded and the text read of it, which the module
       loader takes instead of reading the file again (ExtExecuteSource). }
-  FEntryFile: string;
-  FEntrySource: RawUtf8;
     {** Rejections seen by PromiseRejectionTracker, reported (or cancelled)
         on the next job-pump tick. }
   FPendingRejections: array of TPendingRejection;
@@ -1058,6 +1062,36 @@ begin
   end;
 end;
 
+{ The entry text kept for ctx's extension (EntrySource) when AFileName
+  is its file, taken once: true and AScript set, the record's dropped. }
+function TakeEntrySource(ctx: JSContext; opaque: pointer; const AFileName: string;
+  out AScript: RawUtf8): boolean;
+var
+  Engine: TGittanExtEngine;
+  i: integer;
+  Info: PExtContextInfo;
+begin
+  Result := False;
+  AScript := '';
+  Engine := TGittanExtEngine(opaque);
+  if (Engine = nil) or not Assigned(Engine.FExtContexts) then
+    Exit;
+  for i := 0 to Engine.FExtContexts.Count - 1 do
+  begin
+    Info := Engine.FExtContexts[i];
+    if (Info = nil) or (Info^.Ctx <> ctx) then
+      Continue;
+    if (Info^.EntrySource <> '') and
+      (ExpandFileName(AFileName) = ExpandFileName(Info^.FileName)) then
+    begin
+      AScript := Info^.EntrySource;
+      Info^.EntrySource := '';
+      Result := True;
+    end;
+    Exit;
+  end;
+end;
+
 {** Module loader for QuickJS: compiles a module from disk.
 
     QuickJS uses the return value as a @code(JSModuleDef*), so the source has to
@@ -1103,9 +1137,8 @@ begin
 
   if FileName = GittanModuleSpecifier then
     Script := GittanModuleSource
-  else if (TGittanExtEngine(opaque) <> nil) and (TGittanExtEngine(opaque).FEntryFile <> '') and
-    (ExpandFileName(FileName) = ExpandFileName(TGittanExtEngine(opaque).FEntryFile)) then
-    Script := TGittanExtEngine(opaque).FEntrySource
+  else if TakeEntrySource(ctx, opaque, FileName, Script) then
+    { The text read and hashed, not the file read again. }
   else if not FileExists(FileName) then
   begin
     Fail('module not found: ' + FileName);
@@ -2801,14 +2834,8 @@ begin
 
   if ScriptLooksLikeModule(Script) then
   begin
-    FEntryFile := Ext^.FileName;
-    FEntrySource := Script;
-    try
-      Exit(ExtExecuteModule(Ext));
-    finally
-      FEntryFile := '';
-      FEntrySource := '';
-    end;
+    Ext^.EntrySource := Script;
+    Exit(ExtExecuteModule(Ext));
   end;
 
   EvalResult := ctx^.Eval(Script, ExtractFileName(Ext^.FileName),

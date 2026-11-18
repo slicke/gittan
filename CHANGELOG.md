@@ -83,6 +83,7 @@
 - A branch switch or a commit right after the watcher of a slow repository began refreshing the index no longer fails because index.lock is taken.
 - Marking a block Reviewed no longer moves the caret to the end of the diff when it was on one of the last lines.
 - An extension's console.log dialog left open for a while no longer gets the script stopped by the 10-second limit once it is closed.
+- A module extension whose loading was queued behind other extensions' work runs the text that was granted, not its file read again.
 
 ## 0.21 (build-146, 2026-11-17)
 

@@ -45,6 +45,7 @@ type
     procedure TestCaseTwinWithEqualsRefused;
     procedure TestNameRefused;
     procedure TestRunsWhatWasRead;
+    procedure TestQueuedImportRunsWhatWasRead;
     procedure TestNoReloadDuringUnload;
   end;
 
@@ -112,6 +113,28 @@ begin
   FLoader.Load;
   AssertEquals('what was read ran', 'a,b,c,d', FHost.Alerts.CommaText);
   AssertTrue('the removed one loaded', FLoader.Info(2).Loaded);
+end;
+
+{ A module's import() is a job: with more jobs of another extension
+  queued before it than one pump runs, it comes after its load has
+  returned, and still runs the text that was read, not the file. }
+procedure TExtLoaderTest.TestQueuedImportRunsWhatWasRead;
+var
+  GiveUpAt: QWord;
+begin
+  { Jobs of a millisecond each: a pump stops after 50 ms of them. }
+  Put('a.js', '/* @name Ay */ globalThis.n = 0; for (var i = 0; i < 2000; i++)' +
+    ' Promise.resolve().then(function () { var e = Date.now() + 1; while (Date.now() < e);' +
+    ' if (++globalThis.n == 2000) Gittan.alert("a done"); });');
+  Put('b.js', '/* @name Bee */ export {}; Gittan.alert("b");');
+  FLoader.OnProvision := @SwapFiles;
+  FLoader.Load;
+  AssertEquals('the import is still queued', '', FHost.Alerts.CommaText);
+  GiveUpAt := GetTickCount64 + 20000;
+  while (FHost.Alerts.Count < 2) and (GetTickCount64 < GiveUpAt) do
+    TGittanExtEngine.Instance.PumpJobs;
+  AssertEquals('both ran', 2, FHost.Alerts.Count);
+  AssertEquals('what was read ran', 'b', FHost.Alerts[1]);
 end;
 
 procedure TExtLoaderTest.AddSlowTask(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
