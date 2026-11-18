@@ -149,7 +149,8 @@ type
     function AccountsKey: string;
     procedure AccountTimerTimer(Sender: TObject);
   public
-    procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
+    procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil;
+      AInto: TRepoFrame = nil);
       override;
     function HasOpen(const ARoot: string): boolean; override;
     function IsActive(AFrame: TRepoFrame): boolean; override;
@@ -653,7 +654,8 @@ begin
   Result := False;
 end;
 
-procedure TGittanWindow.OpenRepository(const ADir: string; AOnOpened: TNotifyEvent);
+procedure TGittanWindow.OpenRepository(const ADir: string; AOnOpened: TNotifyEvent;
+  AInto: TRepoFrame);
 var
   Root: string;
   Target: TRepoFrame;
@@ -678,7 +680,12 @@ begin
         Frames[i].WhenOpened(AOnOpened);
         Exit;
       end;
-  if (FActive <> nil) and FActive.IsBlank then
+  { The frame asked for while it is blank (a clone's, which finished
+    there), not brought to the front when it is behind another: what
+    the user turned to meanwhile stays in front. }
+  if (AInto <> nil) and (FFrames.IndexOf(AInto) >= 0) and AInto.IsBlank then
+    Target := AInto
+  else if (FActive <> nil) and FActive.IsBlank then
   begin
     Target := FActive;
     { Opened from the forge view: the frame takes the window back. }

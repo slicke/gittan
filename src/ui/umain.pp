@@ -164,9 +164,11 @@ type
     {** Opens the repository at ADir: shows the frame that has it open,
       else opens it in the frame shown while that one is empty, else in
       a new frame. AOnOpened as TRepoFrame.OpenRepository, called with
-      the frame that has it as Sender, also when it was open already. }
-    procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
-      virtual; abstract;
+      the frame that has it as Sender, also when it was open already.
+      AInto, when it is empty, is the frame used, and is not brought to
+      the front when another frame is (a clone done behind it). }
+    procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil;
+      AInto: TRepoFrame = nil); virtual; abstract;
     {** Whether a frame has the repository at ARoot open, or is opening
       it. }
     function HasOpen(const ARoot: string): boolean; virtual; abstract;

@@ -64,6 +64,7 @@
 - Absorb folds its fixups into their commits when a prepare-commit-msg hook changes their subjects, such as by putting a ticket number first; before, they stayed as commits of their own while Absorb said the changes were absorbed.
 - A repository command that keeps running, such as a dev server, or an editor Gittan starts, no longer makes a background job that feeds git its input (checking signatures, Absorb, the batch actions) hang for as long as it runs.
 - An image or binary file in Git LFS that is in conflict and not downloaded keeps Use Mine, Use Theirs and Mark Resolved beside Download; before, Download took their place, and a click on it asked whether to resolve with Mine.
+- A clone that finishes while another tab is in front opens in the tab it was started in, which stays behind; before, it opened a new tab that took the front, and the clone's tab stayed empty.
 
 ## 0.21 (build-146, 2026-11-17)
 

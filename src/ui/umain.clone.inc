@@ -54,7 +54,9 @@ begin
     ShowRemoteFailure(AJob, False);
     Exit;
   end;
-  FWindow.OpenRepository(AJob.Root, @ClonedOpened);
+  { In this frame, where the clone was started, even when another is in
+    front now. }
+  FWindow.OpenRepository(AJob.Root, @ClonedOpened, Self);
 end;
 
 { The notes after a clone or an init wait for the repository, which
