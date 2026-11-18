@@ -230,15 +230,17 @@ end;
 
 { The branches whose upstream is gone, the current one left out: the
   merged ones go with -d, then those that are not merged, listed, after
-  a second question. }
+  a second question. One git refuses for another reason is named in a
+  banner with git's words. }
 procedure TRepoFrame.DeleteGoneBranches;
 var
-  Names, Unmerged: TStringList;
+  Names, Unmerged, Failed: TStringList;
   NotMerged: boolean;
   Deleted, i: integer;
 begin
   Names := TStringList.Create;
   Unmerged := TStringList.Create;
+  Failed := TStringList.Create;
   try
     Names.Assign(FGoneToDelete);
     if Names.Count = 0 then
@@ -252,13 +254,17 @@ begin
       if FRepo.DeleteBranch(Names[i], False, NotMerged) then
         Inc(Deleted)
       else if NotMerged then
-        Unmerged.Add(Names[i]);
+        Unmerged.Add(Names[i])
+      else
+        Failed.Add(Names[i] + ': ' + FRepo.Error);
     if (Unmerged.Count > 0) and (AskDlg(rsBmGoneTitle, Format(rsBmGoneUnmerged,
       [Unmerged.Count]) + LineEnding + LineEnding + Unmerged.Text, mtWarning,
       [mrYes, rsBmDeleteAction, mrCancel, rsCancelButton, 'IsCancel', 'IsDefault'], 0) = mrYes) then
       for i := 0 to Unmerged.Count - 1 do
         if FRepo.DeleteBranch(Unmerged[i], True, NotMerged) then
-          Inc(Deleted);
+          Inc(Deleted)
+        else
+          Failed.Add(Unmerged[i] + ': ' + FRepo.Error);
     for i := FGoneBranches.Count - 1 downto 0 do
       if not FRepo.HasCommit('refs/heads/' + FGoneBranches[i]) then
         FGoneBranches.Delete(i);
@@ -267,9 +273,12 @@ begin
       StatusNote(rsBmGoneDeletedOne)
     else
       StatusNote(Format(rsBmGoneDeleted, [Deleted]));
+    if Failed.Count > 0 then
+      BannerError(Format(rsBmGoneFailed, [Failed.Count]), Trim(Failed.Text));
   finally
     Names.Free;
     Unmerged.Free;
+    Failed.Free;
   end;
 end;
 

@@ -1577,11 +1577,23 @@ begin
   ShowBranchList(blSwitch, AScreenRect);
 end;
 
+{ Whether ABranch is checked out in one of ATrees. }
+function BranchInWorktree(const ATrees: TGittanWorktrees; const ABranch: string): boolean;
+var
+  i: integer;
+begin
+  for i := 0 to High(ATrees) do
+    if ATrees[i].Branch = ABranch then
+      Exit(True);
+  Result := False;
+end;
+
 procedure TRepoFrame.ShowBranchList(AMode: TGittanBranchListMode; const AScreenRect: TRect);
 var
   Local, Remote, Gone, Remotes: TStringList;
+  Trees: TGittanWorktrees;
   i: integer;
-  Short, Detail, RemoteName: string;
+  Short, Detail, RemoteName, TreesError: string;
   HasRemoteHeader: boolean;
 begin
   if FRepo.Root = '' then
@@ -1609,8 +1621,13 @@ begin
     FBranchNames.Clear;
     FBranchRefs.Clear;
     FGoneToDelete.Clear;
+    { Nor one checked out in another worktree, which git will not
+      delete; its row still says its upstream is gone. }
+    if not ListWorktrees(FRepo.Root, Trees, TreesError) then
+      Trees := nil;
     for i := 0 to Local.Count - 1 do
-      if (Gone.IndexOf(Local[i]) >= 0) and (Local[i] <> FBranch) then
+      if (Gone.IndexOf(Local[i]) >= 0) and (Local[i] <> FBranch) and
+        not BranchInWorktree(Trees, Local[i]) then
         FGoneToDelete.Add(Local[i]);
     if (AMode = blSwitch) and (FOperation = '') then
     begin

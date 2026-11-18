@@ -3464,6 +3464,7 @@ resourcestring
   rsBmGoneUnmerged = 'These %d have commits that are in no other branch. Delete them too?';
   rsBmGoneDeleted = 'Deleted %d branches';
   rsBmGoneDeletedOne = 'Deleted 1 branch';
+  rsBmGoneFailed = 'Could not delete %d of the branches';
   rsBmUpstream = 'Set Upstream...';
   rsBmUpstreamItem = 'Set &Upstream of %s...';
   rsUpstreamHeader = 'Upstream of %s';

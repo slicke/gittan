@@ -50,6 +50,7 @@
 - Moving the mouse from one link to the next on the commands page or the project page shows the new link's tooltip instead of keeping the last one's.
 - A file that cannot be read when it is opened (no permission, locked by another program on Windows, or gone since it was listed) is said in a banner, and the view is no longer left editable with no syntax colors.
 - On Haiku, Reveal opens the folder in Tracker and Open in Terminal opens Haiku's Terminal; before, both did nothing.
+- Delete Gone Branches leaves out a branch checked out in another worktree, which git will not delete, and a branch it could not delete for another reason is named in a banner with git's reason. Before, the status bar told only of the ones deleted, with no word of the rest, and the row kept coming back.
 
 ## 0.21 (build-146, 2026-11-17)
 
