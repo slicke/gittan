@@ -1275,6 +1275,9 @@ begin
   if (AEvent.buttonNumber <> 2) or FFixed then
     Exit;
   P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
+  { "+N" is the hidden tab it brings in, which is not under the mouse. }
+  if PointIn(P, OverflowRect(FStrip.bounds)) then
+    Exit;
   HitTest(P, FStrip.bounds, Index, InCross, InPlus, Nav);
   if (Index >= 0) and Assigned(FOnClose) then
     FOnClose(Self, Index);

@@ -77,6 +77,7 @@
 - The Files page of a folder with thousands of entries no longer grows past the height a control can have, and the mouse moving over it repaints only the rows it leaves and reaches.
 - On Windows and Linux, a command picked in the menu button's menu or the Alt menu bar while a refresh rebuilt Compare With, Open Recent or Pull no longer clicks a freed menu item.
 - The welcome view no longer hangs when its error is wrapped in a box narrower than its padding.
+- A middle click on the tab bar's "+N" on macOS no longer closes a tab that is not shown.
 
 ## 0.21 (build-146, 2026-11-17)
 
