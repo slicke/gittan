@@ -631,6 +631,13 @@ begin
   if FEditPath = '' then
     Exit;
   Shown := ExtractFileName(FEditPath);
+  { Checked again: a pull may have made the file a link since it was
+    opened, and the save would write where it points. }
+  if not RepoFileName(FEditPath) then
+  begin
+    StatusNote(Format(rsSaveFailed, [Shown, rsSaveNotRepoFile]), True);
+    Exit;
+  end;
   try
     Edit.SaveToFile(FEditPath);
   except

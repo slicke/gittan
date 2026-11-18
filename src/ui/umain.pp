@@ -3844,6 +3844,7 @@ resourcestring
   rsRevertAsk = 'Drop the changes to %s and load it from disk again?';
   rsSaved = 'Saved %s';
   rsSaveFailed = 'Could not save %s: %s';
+  rsSaveNotRepoFile = 'it is a link now, or no longer one of the repository''s own files';
   rsSaveFailedAsk = 'Could not save %s. Try again, or drop the changes?';
   rsSaveAgain = 'Save Again';
   rsChangedOnDisk = 'changed on disk';
