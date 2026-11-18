@@ -1146,9 +1146,10 @@ begin
   case AItem.Task of
     mtSetHead:
       { set-head needs refs/remotes/<remote>/<want>, which a branch
-        made on the remote since the last fetch does not have yet. }
+        made on the remote since the last fetch does not have yet; the
+        + takes one force-pushed there since. }
       AItem.Done := ((AItem.Want = '') or RunGitEnv(APath, ['fetch', '--', AItem.Remote,
-        'refs/heads/' + AItem.Want + ':refs/remotes/' + AItem.Remote + '/' + AItem.Want],
+        '+refs/heads/' + AItem.Want + ':refs/remotes/' + AItem.Remote + '/' + AItem.Want],
         BatchRemoteEnv(APath), Output, Err)) and
         RunGitEnv(APath, ['remote', 'set-head', AItem.Remote, '--auto'],
         BatchRemoteEnv(APath), Output, Err);
