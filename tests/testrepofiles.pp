@@ -225,6 +225,12 @@ begin
   { A glob character is the character itself. }
   P := IgnorePatterns('pages/[id].tsx');
   AssertEquals('/pages/\[id\].tsx', P[0]);
+  { macOS's folder icon file, which git would read as /Icon, and a line
+    break, which would split the pattern in two. }
+  P := IgnorePatterns('Icon'#13);
+  AssertEquals('/Icon['#13']', P[0]);
+  P := IgnorePatterns('a'#10'b');
+  AssertEquals('/a?b', P[0]);
 end;
 
 procedure TRepoFilesTest.TestIsRepoFile;

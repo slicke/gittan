@@ -233,14 +233,21 @@ end;
 
 { AText as a .gitignore pattern that matches it alone: the glob
   characters and the backslash escaped (pages/[id].tsx is that file, not
-  pages/d.tsx), and a space at the end, which git drops, too. }
+  pages/d.tsx), and a space at the end, which git drops, too. A CR,
+  which git drops at the end of a line (macOS's Icon\r), goes in
+  brackets, and an LF, which would end the pattern, becomes ?, the one
+  character a pattern cannot hold. }
 function IgnoreLiteral(const AText: string): string;
 var
   i: integer;
 begin
   Result := '';
   for i := 1 to Length(AText) do
-    if AText[i] in ['[', ']', '*', '?', '\'] then
+    if AText[i] = #13 then
+      Result := Result + '['#13']'
+    else if AText[i] = #10 then
+      Result := Result + '?'
+    else if AText[i] in ['[', ']', '*', '?', '\'] then
       Result := Result + '\' + AText[i]
     else if (AText[i] = ' ') and (Trim(Copy(AText, i, MaxInt)) = '') then
       Result := Result + '\ '
