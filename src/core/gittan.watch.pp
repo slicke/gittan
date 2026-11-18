@@ -33,6 +33,9 @@ type
     FFailed: boolean;
     { Polls in a row that took SlowPollMs or more and found nothing new. }
     FSlowPolls: integer;
+    { Held while the thread refreshes the index, which takes index.lock;
+      Detach waits on it. }
+    FIndexLock: TRTLCriticalSection;
     FSnapshot: TGittanRepoSnapshot;
     FOnChange: TNotifyEvent;
     procedure Notify;
@@ -49,7 +52,9 @@ type
       the caller hands it to a TGittanJobReaper, so a stop does not
       hold the main thread for the rest of a poll. The thread's git runs
       with GIT_OPTIONAL_LOCKS=0, so it takes no lock the caller's next
-      command would trip over. }
+      command would trip over, but for the index refresh of a slow
+      repository, which writes the index: a refresh under way is waited
+      for, and none starts after. }
     procedure Detach;
     {** Polls at once instead of when the current interval runs out. }
     procedure Poll;
@@ -130,6 +135,7 @@ begin
   FInterval := AInterval;
   FRepo := TGittanRepo.Create;
   FWake := RTLEventCreate;
+  InitCriticalSection(FIndexLock);
   { The thread's repository is opened in Execute; the base must be set
     after Open, which clears it. }
   FBase := ABase;
@@ -143,6 +149,7 @@ begin
   { Removes any Notify still waiting in the thread queue. }
   inherited Destroy;
   RTLEventDestroy(FWake);
+  DoneCriticalSection(FIndexLock);
   FRepo.Free;
 end;
 
@@ -193,7 +200,17 @@ begin
         FSlowPolls := 0;
       { Once, until the polls are quick again. }
       if FSlowPolls = 2 then
-        FRepo.RefreshIndex;
+      begin
+        { Terminated asked under the lock, so a Detach that has passed
+          it sees no refresh begin. }
+        EnterCriticalSection(FIndexLock);
+        try
+          if not Terminated then
+            FRepo.RefreshIndex;
+        finally
+          LeaveCriticalSection(FIndexLock);
+        end;
+      end;
       if Fingerprint <> FLast then
       begin
         Ok := FRepo.Snapshot(FSnapshot);
@@ -240,6 +257,8 @@ procedure TGittanWatcher.Detach;
 begin
   FOnChange := nil;
   Terminate;
+  EnterCriticalSection(FIndexLock);
+  LeaveCriticalSection(FIndexLock);
 end;
 
 { TGittanOpenJob }
