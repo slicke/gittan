@@ -1059,6 +1059,9 @@ type
       Again (FRetryRefs), and the sides of the image or binary file shown
       that are not downloaded (FLfsSides), for the header's Download. }
     FLfsRefs, FRetryRefs, FLfsSides: TStringArray;
+    { The header pill of that Download: after the conflict's pills for
+      a file in conflict, which stay. }
+    FLfsPill: integer;
     { The background fetch (umain.remote.inc): its job, apart from
       FRemoteJob so the rest of the form is never busy for it, the timer
       that looks once a minute whether one is due, and what StartRemote
@@ -1506,6 +1509,7 @@ type
     procedure ShowEditor;
     procedure ShowImageChanges(const APath: string);
     procedure ShowBinaryChanges(const APath: string);
+    procedure ShowLfsDownload(const APath: string);
     procedure StartLfsDownload(const APath: string; const ARefs: TStringArray);
     procedure CheckLfs;
     procedure LfsCheckDone(Sender: TObject);
@@ -8518,8 +8522,7 @@ begin
     FLfsSides := Concat(FLfsSides, [OldRef]);
   if HasNew and ParseLfsPointer(NewData, Oid, Size) then
     FLfsSides := Concat(FLfsSides, [NewRef]);
-  if FLfsSides <> nil then
-    FHeader.SetActions([rsLfsDownloadAction]);
+  ShowLfsDownload(APath);
   FView := gvImage;
   HideMergeView;
   FSymbolBar.Visible := False;
@@ -8534,6 +8537,26 @@ begin
   FImageDiff.Visible := True;
   FSummary.Selected := APath;
   FStatus.SetPosition('');
+end;
+
+{ Download in the header while a side of the file shown is not
+  downloaded (FLfsSides): after Use Mine, Use Theirs and Mark Resolved
+  for a file in conflict, alone otherwise. }
+procedure TRepoFrame.ShowLfsDownload(const APath: string);
+begin
+  FLfsPill := -1;
+  if FLfsSides = nil then
+    Exit;
+  if IsConflictPath(APath) then
+  begin
+    FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved, rsLfsDownloadAction]);
+    FLfsPill := 3;
+  end
+  else
+  begin
+    FHeader.SetActions([rsLfsDownloadAction]);
+    FLfsPill := 0;
+  end;
 end;
 
 { A binary file in the change view: its sizes before and after in
@@ -8556,10 +8579,8 @@ begin
   if HasNew and NewMissing then
     FLfsSides := Concat(FLfsSides, [NewRef]);
   if FLfsSides <> nil then
-  begin
     FBinaryView.SetNote(rsLfsNotDownloaded);
-    FHeader.SetActions([rsLfsDownloadAction]);
-  end;
+  ShowLfsDownload(APath);
   FView := gvBinary;
   HideMergeView;
   FSymbolBar.Visible := False;

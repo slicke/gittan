@@ -708,14 +708,15 @@ begin
     MergeHeaderAction(AIndex);
     Exit;
   end;
-  if ConflictHeaderAction(AIndex) then
-    Exit;
-  { Download, the one pill of an image or binary file in Git LFS. }
-  if (FView in [gvImage, gvBinary]) and (FLfsSides <> nil) then
+  { Download, of an image or binary file in Git LFS: its own pill, after
+    the conflict's when the file is in conflict. }
+  if (FView in [gvImage, gvBinary]) and (FLfsSides <> nil) and (AIndex = FLfsPill) then
   begin
     StartLfsDownload(FCurrentPath, FLfsSides);
     Exit;
   end;
+  if ConflictHeaderAction(AIndex) then
+    Exit;
   if FView = gvSubmodule then
   begin
     if AIndex = FSubUpdatePill then
