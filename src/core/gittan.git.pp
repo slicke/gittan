@@ -7725,7 +7725,7 @@ end;
   False, with git's refusal kept in Error, when a file differs. }
 function TGittanRepo.ResetToWorkTree(const ATarget: string): boolean;
 var
-  Refusal, Output, Index, ListFile, Head: string;
+  Refusal, Output, Index, ListFile, Head, Target: string;
   Fields, Paths, Gone, Changed, Staged: TStringList;
   i: integer;
 begin
@@ -7736,6 +7736,9 @@ begin
   Gone := TStringList.Create;
   Changed := TStringList.Create;
   Staged := TStringList.Create;
+  { Git's paths: Foo is not foo. }
+  Changed.CaseSensitive := True;
+  Staged.CaseSensitive := True;
   Index := TempFileName('gittan-undo-index');
   ListFile := TempFileName('gittan-undo-paths');
   try
@@ -7791,10 +7794,14 @@ begin
         Exit;
     { The soft reset takes no lock on the index, so with another git at
       work it would move HEAD and the reset of the paths fail; HEAD goes
-      back then. }
+      back then, but only from where the soft reset put it, so a commit
+      the other git made meanwhile is not dropped. }
     if not RunGit(FRoot, ['rev-parse', '--verify', '-q', 'HEAD'], Head) then
       Exit;
     Head := Trim(Head);
+    if not RunGit(FRoot, ['rev-parse', '--verify', '-q', ATarget + '^{commit}'], Target) then
+      Exit;
+    Target := Trim(Target);
     WriteBytes(ListFile, NulList(Paths));
     if not RunGit(FRoot, ['reset', '--soft', ATarget], Output) then
     begin
@@ -7804,8 +7811,10 @@ begin
     Result := RunGit(FRoot, ['--literal-pathspecs', 'reset', '-q', ATarget,
       '--pathspec-from-file=' + ListFile, '--pathspec-file-nul'], Output);
     Refusal := FError;
-    if not Result then
-      RunGit(FRoot, ['reset', '--soft', Head], Output);
+    if not Result and not RunGit(FRoot, ['update-ref', '-m', 'reset: moving to ' + Head,
+      'HEAD', Head, Target], Output) then
+      Refusal := Refusal + LineEnding +
+        'HEAD was not moved back to ' + Head + ': it has moved since the reset.';
   finally
     if not Result then
       FError := Refusal;

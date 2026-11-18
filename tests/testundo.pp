@@ -46,6 +46,7 @@ type
     procedure TestMixedReset;
     procedure TestMixedResetChanged;
     procedure TestMixedResetStaged;
+    procedure TestMixedResetStagedCase;
     procedure TestMixedResetLocked;
     procedure TestRedoForgotten;
   end;
@@ -567,6 +568,37 @@ begin
   AssertEquals('HEAD stays', Before, Rev('HEAD'));
   AssertTrue(Err, RunGitIn(FDir, ['show', ':a.txt'], Staged, Err));
   AssertEquals('what was staged is kept', 'mine', Trim(Staged));
+end;
+
+{ A path staged since is told from another by its case: foo staged
+  does not hold back the reset of Foo. Only where the file system tells
+  them apart. }
+procedure TUndoTest.TestMixedResetStagedCase;
+var
+  Cur: TGittanRefState;
+  Step: TGittanUndoStep;
+  Steps: TGittanGitSteps;
+  Err, Second: string;
+begin
+  WriteFile('case.probe', '');
+  if FileExists(IncludeTrailingPathDelimiter(FDir) + 'CASE.PROBE') then
+    Exit;
+  DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'case.probe');
+  WriteFile('foo', 'x');
+  Commit('Foo', 'one', 'Both');
+  Commit('Foo', 'two', 'Second');
+  Second := Rev('HEAD');
+  Track;
+  Git(['reset', '-q', 'HEAD~1']);
+  Track;
+  WriteFile('foo', 'y');
+  Git(['add', 'foo']);
+  WriteFile('foo', 'x');
+  Step := FHistory.UndoStep;
+  AssertTrue(FRepo.ReadRefState(Cur));
+  AssertTrue(PlanRefChange(Cur, Step.After, Step.Before, Step.Kind, [], Steps, Err));
+  AssertTrue(FRepo.Error, FRepo.RunSteps(Steps));
+  AssertEquals('HEAD at Second', Second, Rev('HEAD'));
 end;
 
 { With the index locked by another git the soft reset still moves HEAD
