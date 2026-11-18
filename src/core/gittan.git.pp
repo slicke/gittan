@@ -2292,21 +2292,83 @@ const
   F_SETNOSIGPIPE = 73;
 var
   Mask: TSigSet;
-{$endif}
+  Fds: TFDSet;
+  Tv: TTimeVal;
+  H: THandle;
+  Done, Wrote: SizeInt;
 begin
-  {$ifdef unix}
   FpSigEmptySet(Mask);
   FpSigAddSet(Mask, SIGPIPE);
   FpSigProcMask(SIG_BLOCK, @Mask, nil);
+  H := FProcess.Input.Handle;
   {$ifdef darwin}
-  FpFcntl(FProcess.Input.Handle, F_SETNOSIGPIPE, 1);
+  FpFcntl(H, F_SETNOSIGPIPE, 1);
   {$endif}
-  {$endif}
+  { Without blocking, a piece at a time while the pipe has room, so a
+    stop (Terminate) is seen within 50 ms even when no one reads. }
+  FpFcntl(H, F_SETFL, FpFcntl(H, F_GETFL) or O_NONBLOCK);
+  Done := 0;
+  while (Done < Length(FInput)) and not Terminated do
+  begin
+    Wrote := FpWrite(H, FInput[Done + 1], Length(FInput) - Done);
+    if Wrote > 0 then
+      Inc(Done, Wrote)
+    else if (Wrote < 0) and ((FpGetErrno = ESysEAGAIN) or (FpGetErrno = ESysEINTR)) then
+    begin
+      fpFD_ZERO(Fds);
+      fpFD_SET(H, Fds);
+      Tv.tv_sec := 0;
+      Tv.tv_usec := 50000;
+      fpSelect(H + 1, nil, @Fds, nil, @Tv);
+    end
+    else
+      Break;
+  end;
+  FProcess.CloseInput;
+end;
+{$else}
+const
+  Piece = 65536;
+var
+  Done, Size: SizeInt;
+begin
+  { In pieces, so a stop between them is seen; one blocked in WriteFile
+    is ended by RunTool (CancelSynchronousIo). }
+  Done := 0;
   try
-    FProcess.Input.WriteBuffer(FInput[1], Length(FInput));
+    while (Done < Length(FInput)) and not Terminated do
+    begin
+      Size := Length(FInput) - Done;
+      if Size > Piece then
+        Size := Piece;
+      FProcess.Input.WriteBuffer(FInput[Done + 1], Size);
+      Inc(Done, Size);
+    end;
   except
   end;
   FProcess.CloseInput;
+end;
+{$endif}
+
+{$ifdef windows}
+function CancelSynchronousIo(AThread: THandle): LongBool; stdcall;
+  external 'kernel32' name 'CancelSynchronousIo';
+{$endif}
+
+{ Stops AWriter and waits for it: the tool has ended, but what it left
+  behind (a hook's job in the background) may hold its input open and
+  read none of it, and the writer would wait as long. }
+procedure StopInputWriter(AWriter: TToolInputWriter);
+begin
+  AWriter.Terminate;
+  {$ifdef windows}
+  while not AWriter.Finished do
+  begin
+    CancelSynchronousIo(AWriter.Handle);
+    Sleep(10);
+  end;
+  {$endif}
+  AWriter.WaitFor;
 end;
 
 { Runs AExe in ADir with AArgs, in the environment with ASkip (prefixes
@@ -2466,11 +2528,11 @@ begin
     { The buffers to what was read, on every way out. }
     SetLength(AOutput, OutLen);
     SetLength(AError, ErrLen);
-    { The tool has ended (or was ended), so the writer's pipe is read or
-      broken and it returns. }
+    { The tool has ended (or was ended); the writer is told to stop, as
+      the pipe may still be held by what the tool left behind. }
     if Writer <> nil then
     begin
-      Writer.WaitFor;
+      StopInputWriter(Writer);
       Writer.Free;
     end;
     P.Free;

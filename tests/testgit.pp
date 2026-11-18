@@ -58,6 +58,7 @@ type
     procedure TestBlame;
     procedure TestBlameSha256;
     procedure TestInputClosed;
+    procedure TestInputHeldElsewhere;
     procedure TestConflictCrlf;
     procedure TestCommitRange;
     procedure TestLineHistory;
@@ -970,6 +971,27 @@ begin
   AssertTrue(Err, RunGitIn(FDir, ['-c', 'alias.readall=!cat; echo read', 'readall'],
     Output, Err));
   AssertEquals('read', Trim(Output));
+end;
+
+{ A tool that ends without reading its input while a process it left
+  behind holds the pipe, as a hook's background job may: RunTool
+  returns at once rather than when that process ends. }
+procedure TGitRepoTest.TestInputHeldElsewhere;
+{$IFDEF UNIX}
+var
+  Output, Err: string;
+  Code: integer;
+  Started: QWord;
+{$ENDIF}
+begin
+  {$IFDEF UNIX}
+  Started := GetTickCount64;
+  AssertTrue(RunTool('/bin/sh', '', ['-c', 'exec 3<&0; sleep 4 <&3 3<&- >/dev/null 2>&1 & exit 0'],
+    [], [], Output, Err, Code, nil, StringOfChar('a', 4 * 1024 * 1024)));
+  AssertEquals(0, Code);
+  AssertTrue('returned in ' + IntToStr(GetTickCount64 - Started) + ' ms',
+    GetTickCount64 - Started < 2500);
+  {$ENDIF}
 end;
 
 { The range of a commit runs from its parent; a root commit, which has
