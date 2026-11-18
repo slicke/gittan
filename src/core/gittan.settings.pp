@@ -1113,47 +1113,74 @@ end;
 
 procedure TGittanSettings.Save;
 var
-  Doc: TJSONObject;
-  SettingsUnreadable, StateUnreadable: boolean;
+  Doc, OldSettings, OldState: TJSONObject;
+  SettingsUnreadable, StateUnreadable, SettingsWritten, StateWritten: boolean;
 begin
+  OldSettings := nil;
+  OldState := nil;
   try
-    PutSettings;
-    PutState;
-    { A file that is there but cannot be read now is left as it is: the
-      defaults merged into nothing would replace everything in it. }
-    Doc := MergedWithFile(SettingsFile, FSettingsBase, FSettingsDoc, True, SettingsUnreadable);
-    if SettingsUnreadable then
-      Doc.Free
-    else
-    begin
-      FSettingsDoc.Free;
-      FSettingsDoc := Doc;
-    end;
-    Doc := MergedWithFile(StateFile, FStateBase, FStateDoc, False, StateUnreadable);
-    if StateUnreadable then
-      Doc.Free
-    else
-    begin
-      FStateDoc.Free;
-      FStateDoc := Doc;
-    end;
-    { The other process's changes are this one's now, and the fields
-      follow; the base is what went to disk, so a file that could not be
-      written keeps its old one and this process's changes to it are
-      still changes at the next save. }
-    ReadFields;
-    PutSettings;
-    PutState;
-    { The API key is in the file as it is, so no one else may read it. }
-    if not SettingsUnreadable and WriteFileReplacing(SettingsFile, FSettingsDoc.FormatJSON(JsonLayout) + LineEnding, &600) then
-    begin
-      FSettingsBase.Free;
-      FSettingsBase := TJSONObject(FSettingsDoc.Clone);
-    end;
-    if not StateUnreadable and WriteFileReplacing(StateFile, FStateDoc.FormatJSON(JsonLayout) + LineEnding) then
-    begin
-      FStateBase.Free;
-      FStateBase := TJSONObject(FStateDoc.Clone);
+    try
+      PutSettings;
+      PutState;
+      { A file that is there but cannot be read now is left as it is: the
+        defaults merged into nothing would replace everything in it. }
+      Doc := MergedWithFile(SettingsFile, FSettingsBase, FSettingsDoc, True, SettingsUnreadable);
+      if SettingsUnreadable then
+        Doc.Free
+      else
+      begin
+        OldSettings := FSettingsDoc;
+        FSettingsDoc := Doc;
+      end;
+      Doc := MergedWithFile(StateFile, FStateBase, FStateDoc, False, StateUnreadable);
+      if StateUnreadable then
+        Doc.Free
+      else
+      begin
+        OldState := FStateDoc;
+        FStateDoc := Doc;
+      end;
+      { The other process's changes are this one's now, and the fields
+        follow; the base is what went to disk. }
+      ReadFields;
+      PutSettings;
+      PutState;
+      { The API key is in the file as it is, so no one else may read it. }
+      SettingsWritten := not SettingsUnreadable and
+        WriteFileReplacing(SettingsFile, FSettingsDoc.FormatJSON(JsonLayout) + LineEnding, &600);
+      if SettingsWritten then
+      begin
+        FSettingsBase.Free;
+        FSettingsBase := TJSONObject(FSettingsDoc.Clone);
+      end;
+      StateWritten := not StateUnreadable and
+        WriteFileReplacing(StateFile, FStateDoc.FormatJSON(JsonLayout) + LineEnding);
+      if StateWritten then
+      begin
+        FStateBase.Free;
+        FStateBase := TJSONObject(FStateDoc.Clone);
+      end;
+      { A file that could not be written keeps the document it had, this
+        process's own, and its old base: what the merge took in from the
+        other process is not this one's change at the next save, which
+        merges again with the file as it is then. }
+      if (OldSettings <> nil) and not SettingsWritten then
+      begin
+        FSettingsDoc.Free;
+        FSettingsDoc := OldSettings;
+        OldSettings := nil;
+      end;
+      if (OldState <> nil) and not StateWritten then
+      begin
+        FStateDoc.Free;
+        FStateDoc := OldState;
+        OldState := nil;
+      end;
+      if not SettingsWritten or not StateWritten then
+        ReadFields;
+    finally
+      OldSettings.Free;
+      OldState.Free;
     end;
   except
     { Nothing to do; the next run starts with what was saved before. }

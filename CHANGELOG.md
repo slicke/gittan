@@ -54,6 +54,7 @@
 - A file whose `.gitattributes` sets `conflict-marker-size` has its conflicts found: the change view's pick buttons, the merge editor's blocks and Mark Resolved's check for markers left all go by that size. Before, none were found, and Mark Resolved staged the file with its markers in it.
 - A file replaced with a symbolic link shows its old lines deleted and the link added, instead of the second diff's header (`--- /dev/null`, `+++ b/x`) as changed lines; the line history reads such a commit the same way.
 - Undo Revert brings a file back with the permissions it had, so a new executable script, or a change that only made a file executable, is executable again.
+- A settings save whose write failed no longer counts what it took in from another Gittan as its own change, which the next save would write over a newer one.
 
 ## 0.21 (build-146, 2026-11-17)
 

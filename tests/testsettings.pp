@@ -853,6 +853,43 @@ begin
   finally
     C.Free;
   end;
+
+  { What a failed save merged in from another process is not this one's
+    change at the next save: a third write since stays. }
+  {$IFDEF UNIX}
+  if FpGeteuid = 0 then
+    Exit;
+  A := TGittanSettings.Create(FDir);
+  B := TGittanSettings.Create(FDir);
+  try
+    A.Load;
+    B.Load;
+    B.Zoom := 125;
+    B.Save;
+    A.Width := 700;
+    FpChmod(FDir, &555);
+    try
+      A.Save;
+    finally
+      FpChmod(FDir, &755);
+    end;
+    AssertEquals('the fields keep their own', 130, A.Zoom);
+    B.Zoom := 135;
+    B.Save;
+    A.Save;
+  finally
+    A.Free;
+    B.Free;
+  end;
+  C := TGittanSettings.Create(FDir);
+  try
+    C.Load;
+    AssertEquals('the third write kept', 135, C.Zoom);
+    AssertEquals('A''s change written', 700, C.Width);
+  finally
+    C.Free;
+  end;
+  {$ENDIF}
 end;
 
 procedure TSettingsTest.TestTrust;
