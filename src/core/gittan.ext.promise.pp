@@ -32,6 +32,7 @@ TJSAsyncTask = class(TThread)
 private
   FContext: JSContext;      /// QuickJS context for this task
   FRuntime: JSRuntime;      /// Its runtime, which outlives a context unloaded
+  FRuntimeGen: QWord;       /// ExtRuntimeGeneration then: FRuntime's while it lives
   funcs: JSDoubleVal;       /// Promise resolve/reject function handles
   FPairHeld: boolean;       /// funcs not yet released
   FPromise: TJSCallback;
@@ -211,6 +212,7 @@ begin
     FGeneration := ExtContextGeneration(Context);
   // Copy resolve/reject function refs locally
   FRuntime := nil;
+  FRuntimeGen := ExtRuntimeGeneration;
   if Context <> nil then
     FRuntime := JS_GetRuntime(Context);
   if cbfunc <> nil then
@@ -302,7 +304,7 @@ begin
   if not FPairHeld then
     Exit;
   FPairHeld := False;
-  if (FRuntime = nil) or not ExtRuntimeAlive then
+  if (FRuntime = nil) or (FRuntimeGen = 0) or (FRuntimeGen <> ExtRuntimeGeneration) then
     Exit;
   Gone := (FGeneration <> 0) and Assigned(ExtContextGeneration) and
     (ExtContextGeneration(FContext) <> FGeneration);

@@ -122,6 +122,9 @@ JSValueVal = record
     { The runtime of a JD_OBJ that holds a reference of its own, which
       FreeJSParameters gives back; nil for a borrowed one. }
     ObjectRt: Pointer;
+    { ExtRuntimeGeneration when the reference was taken: given back only
+      while that runtime is the live one. }
+    ObjectGen: QWord;
     Parsed: string;
     ArrayVal: TJSValList;
     end;
@@ -300,10 +303,17 @@ procedure ExtError(const msg, error: string); overload;
 procedure ExtError(const error: string); overload;
 
 var
-  {** Whether the extensions' runtime is there; the engine clears it before
-      it frees the runtime, after which a late promise task or parameter
-      list leaves its values alone. }
-  ExtRuntimeAlive: boolean = False;
+  {** The number of the extensions' live runtime, 0 while there is none:
+      the engine sets a new one for each runtime it makes
+      (`ExtRuntimeStarted`) and clears it before it frees the runtime, so a
+      late promise task or parameter list leaves the values of a runtime
+      gone alone, even when another one has started since (a pointer to
+      it alone could be the new one's, at the same address). }
+  ExtRuntimeGeneration: QWord = 0;
+
+{** Gives the runtime just made a number of its own in
+  ExtRuntimeGeneration. }
+procedure ExtRuntimeStarted;
 
   {** Adds ALine to the console lines console.pop shows, cut to a length and
     keeping the newest only. }
@@ -325,6 +335,15 @@ const
   MaxConsoleLines = 1000;
   { The longest line kept, in bytes; a longer one ends in an ellipsis. }
   MaxConsoleLineBytes = 2000;
+
+var
+  ExtRuntimesMade: QWord = 0;
+
+procedure ExtRuntimeStarted;
+begin
+  Inc(ExtRuntimesMade);
+  ExtRuntimeGeneration := ExtRuntimesMade;
+end;
 
 procedure AddConsoleLine(const ALine: string);
 var
@@ -701,7 +720,8 @@ begin
       FreeJSParameters(Inner);
     end
     else if (AParams[i]^.Data.match = JD_OBJ) and (AParams[i]^.Data.ObjectRt <> nil) and
-      ExtRuntimeAlive then
+      (AParams[i]^.Data.ObjectGen <> 0) and
+      (AParams[i]^.Data.ObjectGen = ExtRuntimeGeneration) then
       JS_FreeValueRT(JSRuntime(AParams[i]^.Data.ObjectRt),
         JSValueFromPtr(JS_TAG_OBJECT, AParams[i]^.Data.ObjectVal));
     Dispose(AParams[i]);
@@ -833,6 +853,7 @@ begin
       Result.Data.ObjectVal := val.Ptr;
       JS_DupValue(ctx, val);
       Result.Data.ObjectRt := JS_GetRuntime(ctx);
+      Result.Data.ObjectGen := ExtRuntimeGeneration;
     end;
     Exit;
   end;
@@ -896,6 +917,7 @@ begin
     Result.Data.match := JD_OBJ;
     Result.Data.ObjectVal := val.Ptr;
     Result.Data.ObjectRt := nil;
+    Result.Data.ObjectGen := 0;
   end
   else
   if JS_IsFunction(ctx, val.Raw) then

@@ -225,15 +225,38 @@ procedure TExtQuickJSTest.TestParseValueLimits;
 var
   P, Inner: JSParameters;
   Depth: integer;
-  WasAlive: boolean;
+  WasGen: QWord;
   Text: string;
   Obj: JSValue;
+
+  { The object's reference count, the first field of QuickJS's header. }
+  function Refs(APtr: Pointer): integer;
+  begin
+    Result := PInteger(APtr)^;
+  end;
+
 begin
   { The objects parsed hold a reference, which FreeJSParameters gives back
     through this runtime. }
-  WasAlive := ExtRuntimeAlive;
-  ExtRuntimeAlive := True;
+  WasGen := ExtRuntimeGeneration;
+  ExtRuntimeStarted;
   try
+  { Given back while its runtime is the live one; left alone once
+    another has started, as the one it was taken in is gone. }
+  Obj := JS_Eval(FContext, '({a: 1})', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    P := JSParseParameters(FContext, 1, PJSValueConst(@Obj));
+    AssertEquals('a reference of its own', 2, Refs(P[0]^.Data.ObjectVal));
+    FreeJSParameters(P);
+    AssertEquals('given back', 1, Refs(Obj.Ptr));
+    P := JSParseParameters(FContext, 1, PJSValueConst(@Obj));
+    ExtRuntimeStarted;
+    FreeJSParameters(P);
+    AssertEquals('kept for another runtime', 2, Refs(Obj.Ptr));
+    JS_FreeValue(FContext, Obj);
+  finally
+    JS_FreeValue(FContext, Obj);
+  end;
   P := Parsed('({length: 2e9})');
   try
     AssertTrue('a made-up length is an object''s', P[0]^.Data.match = JD_OBJ);
@@ -305,7 +328,7 @@ begin
     FreeJSParameters(P);
   end;
   finally
-    ExtRuntimeAlive := WasAlive;
+    ExtRuntimeGeneration := WasGen;
   end;
 end;
 
