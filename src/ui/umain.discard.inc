@@ -570,8 +570,11 @@ end;
 procedure TRepoFrame.RebuildKeeps;
 var
   Before: TStringList;
-  i: integer;
+  LineMap: TIntegerDynArray;
+  i, CaretLine: integer;
 begin
+  { Read while the rows still go with the diff they were built from. }
+  CaretLine := CaretDiffLine;
   Before := TStringList.Create;
   try
     Before.Assign(FChangeLines);
@@ -581,19 +584,25 @@ begin
     { The deleted lines a keep took out or put back would move the caret
       and the gaps opened by as many lines: both go by the new file's
       lines, which stay. }
-    FKeepLineMap := KeepLineMap(Before, FChangeLines);
+    LineMap := KeepLineMap(Before, FChangeLines);
   finally
     Before.Free;
   end;
   for i := 0 to High(FExpanded) do
-    if (FExpanded[i] >= 0) and (FExpanded[i] <= High(FKeepLineMap)) then
-      FExpanded[i] := FKeepLineMap[FExpanded[i]];
+    if (FExpanded[i] >= 0) and (FExpanded[i] <= High(LineMap)) then
+      FExpanded[i] := LineMap[FExpanded[i]];
+  if (CaretLine >= 0) and (CaretLine <= High(LineMap)) then
+    CaretLine := LineMap[CaretLine]
+  else
+    CaretLine := -1;
+  FKeepCaret := True;
+  FKeepCaretLine := CaretLine;
   FHeadings := nil;
   SetChangeActions;
   try
     RebuildIfChanges;
   finally
-    FKeepLineMap := nil;
+    FKeepCaret := False;
   end;
 end;
 

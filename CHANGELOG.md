@@ -81,6 +81,7 @@
 - A remote with several URLs shows the first one in Remotes, the one fetch uses, so changing only its push URL no longer replaces the first URL with the last.
 - A commit message draft from a build before drafts were kept per repository no longer comes back after it was committed or cleared.
 - A branch switch or a commit right after the watcher of a slow repository began refreshing the index no longer fails because index.lock is taken.
+- Marking a block Reviewed no longer moves the caret to the end of the diff when it was on one of the last lines.
 
 ## 0.21 (build-146, 2026-11-17)
 
