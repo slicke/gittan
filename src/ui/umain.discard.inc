@@ -568,13 +568,33 @@ end;
   applied, and the view built again at the same place; the blocks are
   others now, so their headings are found again after the parse. }
 procedure TRepoFrame.RebuildKeeps;
+var
+  Before: TStringList;
+  i: integer;
 begin
-  FChangeLines.Assign(FRawChangeLines);
-  FKeeps.Apply(FCurrentPath, FChangeLines, FKeptOf, FKeptOldNum);
-  ApplyLeftOut;
+  Before := TStringList.Create;
+  try
+    Before.Assign(FChangeLines);
+    FChangeLines.Assign(FRawChangeLines);
+    FKeeps.Apply(FCurrentPath, FChangeLines, FKeptOf, FKeptOldNum);
+    ApplyLeftOut;
+    { The deleted lines a keep took out or put back would move the caret
+      and the gaps opened by as many lines: both go by the new file's
+      lines, which stay. }
+    FKeepLineMap := KeepLineMap(Before, FChangeLines);
+  finally
+    Before.Free;
+  end;
+  for i := 0 to High(FExpanded) do
+    if (FExpanded[i] >= 0) and (FExpanded[i] <= High(FKeepLineMap)) then
+      FExpanded[i] := FKeepLineMap[FExpanded[i]];
   FHeadings := nil;
   SetChangeActions;
-  RebuildIfChanges;
+  try
+    RebuildIfChanges;
+  finally
+    FKeepLineMap := nil;
+  end;
 end;
 
 { The header's pills in the change view: Edit for one of the

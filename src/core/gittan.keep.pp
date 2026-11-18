@@ -108,10 +108,65 @@ function ApplyKeeps(ALines: TStrings; const AKeeps: array of TGittanKeep;
 function ApplyKeeps(ALines: TStrings; const AKeeps: array of TGittanKeep;
   out AKeptOf, AOldNum: TIntegerDynArray): integer;
 
+{** For every line of AOld, a diff before keeps were added or taken
+  away, its line in ANew, the same diff after: the new file's lines are
+  in both, in order (a keep only takes a deleted line out or puts it
+  back, and makes an added line context), so a line goes by the new
+  file's line it is or comes before, and a deleted line by its place
+  among the deleted lines there, the nearest one left when fewer are. }
+function KeepLineMap(AOld, ANew: TStrings): TIntegerDynArray;
+
 implementation
 
 uses
-  gittan.discard;
+  Math, gittan.discard;
+
+function KeepLineMap(AOld, ANew: TStrings): TIntegerDynArray;
+var
+  Starts: TIntegerDynArray;
+  i, n, Dashes, Run, Start, Next: integer;
+begin
+  Result := nil;
+  SetLength(Result, AOld.Count);
+  { Starts[n]: where the deleted lines before the new file's n-th line
+    (0-based; one past the last for the end) start in ANew. }
+  SetLength(Starts, 1);
+  Starts[0] := 0;
+  for i := 0 to ANew.Count - 1 do
+    if (ANew[i] = '') or (ANew[i][1] <> '-') then
+    begin
+      SetLength(Starts, Length(Starts) + 1);
+      Starts[High(Starts)] := i + 1;
+    end;
+  n := 0;
+  Dashes := 0;
+  for i := 0 to AOld.Count - 1 do
+  begin
+    Start := Starts[Min(n, High(Starts))];
+    { The new file's line n in ANew, or the end. }
+    if n + 1 <= High(Starts) then
+      Next := Starts[n + 1] - 1
+    else
+      Next := ANew.Count;
+    Run := Next - Start;
+    if (AOld[i] <> '') and (AOld[i][1] = '-') then
+    begin
+      Inc(Dashes);
+      if Run > 0 then
+        Result[i] := Start + Min(Dashes, Run) - 1
+      else
+        Result[i] := Next;
+    end
+    else
+    begin
+      Result[i] := Next;
+      Inc(n);
+      Dashes := 0;
+    end;
+    if Result[i] > ANew.Count - 1 then
+      Result[i] := ANew.Count - 1;
+  end;
+end;
 
 function SameKeep(const A, B: TGittanKeep): boolean;
 begin

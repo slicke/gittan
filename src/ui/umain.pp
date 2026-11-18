@@ -1156,6 +1156,9 @@ type
     FChangeLines: TStringList;
     FCurrentPath: string;
     FExpanded: TIntegerDynArray;
+    { While RebuildKeeps rebuilds: each line of the diff before it, at
+      its place after (KeepLineMap), so the caret stays on its line. }
+    FKeepLineMap: TIntegerDynArray;
     FRows: TGittanRows;
     { The rows of the old side, and the number of each diff line in the
       old and the new file (see NumberLines). }

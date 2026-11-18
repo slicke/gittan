@@ -1105,6 +1105,9 @@ begin
   if (CaretLine < 0) and (CaretY >= 0) and (CaretY <= High(FRows)) and
     (FRows[CaretY].Line = rowGap) then
     CaretLine := FRows[CaretY].GapFrom;
+  { The diff's lines were others before (RebuildKeeps). }
+  if (CaretLine >= 0) and (CaretLine <= High(FKeepLineMap)) then
+    CaretLine := FKeepLineMap[CaretLine];
   KeepFolds;
   ApplyLayout;
   BuildChangeView;

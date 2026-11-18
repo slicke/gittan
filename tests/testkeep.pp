@@ -37,6 +37,7 @@ type
     procedure TestKeeps;
     procedure TestMatch;
     procedure TestLinear;
+    procedure TestLineMap;
   end;
 
 implementation
@@ -347,6 +348,52 @@ begin
     end;
   end;
   AssertTrue('took ' + IntToStr(GetTickCount64 - T) + ' ms', GetTickCount64 - T < 2000);
+end;
+
+{ A line of the diff before a keep finds itself after it, and back: the
+  new file's lines by their place, a deleted line among the deleted ones
+  before the same line. }
+procedure TKeepTest.TestLineMap;
+var
+  Before, After: TStringList;
+  Map: TIntegerDynArray;
+
+  function Mapped: string;
+  var
+    i: integer;
+  begin
+    Result := '';
+    for i := 0 to High(Map) do
+      Result := Result + IntToStr(Map[i]) + ' ';
+  end;
+
+begin
+  Before := TStringList.Create;
+  After := TStringList.Create;
+  try
+    Lines([' a', '-b', '-c', '-d', '+B', '+C', '+D', ' e', '-f', ' g']);
+    Before.Assign(FLines);
+    ApplyKeeps(FLines, [Keep('c', 'C', 3)], FKeptOf);
+    After.Assign(FLines);
+    AssertEquals(' a|-b|+B| C|-d|+D| e|-f| g|', Joined);
+    Map := KeepLineMap(Before, After);
+    AssertEquals('0 1 1 1 2 3 5 6 7 8 ', Mapped);
+    Map := KeepLineMap(After, Before);
+    AssertEquals('0 1 4 5 6 6 7 8 9 ', Mapped);
+    { All of a block kept: the line under it stays the line under it. }
+    Lines([' a', '-b', '-c', '-d', ' e']);
+    Before.Assign(FLines);
+    ApplyKeeps(FLines, [Keep('b', '', 2), Keep('c', '', 3), Keep('d', '', 4)], FKeptOf);
+    After.Assign(FLines);
+    AssertEquals(' a| e|', Joined);
+    Map := KeepLineMap(Before, After);
+    AssertEquals('0 1 1 1 1 ', Mapped);
+    Map := KeepLineMap(After, Before);
+    AssertEquals('0 4 ', Mapped);
+  finally
+    Before.Free;
+    After.Free;
+  end;
 end;
 
 initialization
