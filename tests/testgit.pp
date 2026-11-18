@@ -739,13 +739,15 @@ begin
   AssertEquals('old: time and size', 2, TabsOfLine(FRepo.Fingerprint, 'new.txt'));
   { A write of the same size at the same time as one hashed while fresh,
     seen only once the file has settled: it is hashed once more then. }
-  Stamp := Now - 1.5 / SecsPerDay;
+  { The stamp as the file system keeps it: Windows's file dates go by
+    two seconds, so Now less a little could already be past fresh. }
+  Stamp := FileDateToDateTime(DateTimeToFileDate(Now));
   WriteFile('new.txt', 'k'#10);
   AssertEquals(0, FileSetDate(FDir + PathDelim + 'new.txt', DateTimeToFileDate(Stamp)));
   A := LineOf(FRepo.Fingerprint, 'new.txt');
   WriteFile('new.txt', 'j'#10);
   AssertEquals(0, FileSetDate(FDir + PathDelim + 'new.txt', DateTimeToFileDate(Stamp)));
-  Sleep(1700);
+  Sleep(3200);
   B := LineOf(FRepo.Fingerprint, 'new.txt');
   AssertEquals('settled: hashed', 3, TabsOfLine(B + #10, 'new.txt'));
   AssertTrue('the write seen once settled', A <> B);
