@@ -495,6 +495,10 @@ begin
         a slash when one is there; a head of at least one character, so
         the loop ends. }
       Head := UTF8Copy(Line, 1, FittingChars(FC, Line, UTF8Length(Line), AWidth));
+      { None fits in a box narrower than its padding (a width below
+        zero): one character all the same, or the loop never ends. }
+      if Head = '' then
+        Head := UTF8Copy(Line, 1, 1);
       Best := LastDelimiter('/', Head);
       if Best = 0 then
         Best := Length(Head);
