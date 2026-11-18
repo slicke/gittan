@@ -31,7 +31,8 @@ type
     ViewForge: string;
     Status, Cleared: string;
     ConfirmAnswer, PermissionAnswer: boolean;
-    { How long Confirm takes, as the user would, in milliseconds. }
+    { How long Confirm and ShowLog take, as the user would, in
+      milliseconds. }
     ConfirmDelay: integer;
     PromptAnswer: string;
     SelectAnswer, Changed: integer;
@@ -197,6 +198,8 @@ end;
 procedure TFakeExtHost.ShowLog(const AName, ATitle, AText: string);
 begin
   Logs.Add(AName + ' · ' + ATitle + ': ' + AText);
+  if ConfirmDelay > 0 then
+    Sleep(ConfirmDelay);
 end;
 
 procedure TFakeExtHost.ReportError(const ATitle, ADetail: string);
@@ -575,6 +578,10 @@ begin
       'function busy(ms) { var e = Date.now() + ms; while (Date.now() < e); }' +
       'busy(300); Gittan.confirm("go on?"); busy(300); "done";');
     AssertEquals('the wait for the user is not counted', 'done', Res);
+    Res := LoadResult('logs',
+      'function busy(ms) { var e = Date.now() + ms; while (Date.now() < e); }' +
+      'busy(300); console.log("read me"); busy(300); "done";');
+    AssertEquals('nor the time the log is read', 'done', Res);
   finally
     FHost.ConfirmDelay := 0;
     ExtWatchdogMs := 10000;

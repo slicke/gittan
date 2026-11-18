@@ -1120,6 +1120,22 @@ begin
     Result := false;
 end;
 
+
+{ The host's log dialog, modal in the app: the time the user reads it is
+  a wait (JSWaitBegin), not the script's, so the watchdog does not stop
+  the script once it closes. }
+procedure ShowLogWaiting(const AName, ATitle, AText: string);
+var
+  Wait: TJSWait;
+begin
+  Wait := JSWaitBegin;
+  try
+    ExtHost.ShowLog(AName, ATitle, AText);
+  finally
+    JSWaitEnd(Wait);
+  end;
+end;
+
 { analyze() lived here: it called JS_GetException twice on a context whose
   exception had already been consumed, so it read properties off
   [uninitialized] - leaving a fresh TypeError pending and reporting that
@@ -1155,7 +1171,7 @@ begin
   extName := '';
   if Assigned(ConsoleExtNameLookup) then
     extName := ConsoleExtNameLookup(ctx);
-  ExtHost.ShowLog(extName, RS_LOG_TITLE, fullMsg);
+  ShowLogWaiting(extName, RS_LOG_TITLE, fullMsg);
 
   // Return undefined
   res^ := JS_UNDEFINED;
@@ -1290,9 +1306,9 @@ begin
     fullMsg := TrimRight(ConsoleBuffer.Text);
     ConsoleBuffer.Clear;
     if Assigned(ConsoleExtNameLookup) then
-      ExtHost.ShowLog(ConsoleExtNameLookup(ctx), RS_LOG_POP_TITLE, fullMsg)
+      ShowLogWaiting(ConsoleExtNameLookup(ctx), RS_LOG_POP_TITLE, fullMsg)
     else
-      ExtHost.ShowLog('', RS_LOG_POP_TITLE, fullMsg);
+      ShowLogWaiting('', RS_LOG_POP_TITLE, fullMsg);
   end;
 
   res^ := JS_NewInt32(ctx, Count);
