@@ -111,7 +111,7 @@ begin
     AssertTrue('the sidebar''s rows start shown', S.NavOpen);
     AssertFalse('all of the graph''s parents', S.GraphFirstParent);
     AssertFalse('the graph''s merges', S.GraphNoMerges);
-    AssertEquals('', S.CommitDraft);
+    AssertEquals('', S.CommitDraftFor('/a'));
     AssertEquals('no tab width picked', 0, S.TabSize);
     AssertEquals('', S.GitPath);
     AssertEquals('', S.ForgeCliPath('GitHub'));
@@ -159,8 +159,8 @@ begin
     S.GraphFirstParent := True;
     S.GraphNoMerges := True;
     S.CommitOpen := False;
-    S.CommitDraft := 'Subject = x'#10#10'C:\new\nope\\'#10;
-    S.CommitDraftRepo := '/tmp/a';
+    S.SetCommitDraft('/tmp/a', 'Subject = x'#10#10'C:\new\nope\\'#10);
+    S.SetCommitDraft('/tmp/b', 'another tab''s');
     S.FontName := 'Menlo';
     S.FontSize := 13;
     S.Zoom := 120;
@@ -221,8 +221,9 @@ begin
     AssertTrue(S.GraphFirstParent);
     AssertTrue(S.GraphNoMerges);
     AssertFalse(S.CommitOpen);
-    AssertEquals('Subject = x'#10#10'C:\new\nope\\'#10, S.CommitDraft);
-    AssertEquals('/tmp/a', S.CommitDraftRepo);
+    AssertEquals('Subject = x'#10#10'C:\new\nope\\'#10, S.CommitDraftFor('/tmp/a'));
+    AssertEquals('one per repository', 'another tab''s', S.CommitDraftFor('/tmp/b'));
+    AssertEquals('', S.CommitDraftFor('/tmp/c'));
     AssertEquals('Menlo', S.FontName);
     AssertEquals(13, S.FontSize);
     AssertEquals(120, S.Zoom);
@@ -284,8 +285,7 @@ begin
   try
     S.EditorCommand := '"C:\Program Files\Code\Code.exe"';
     S.TerminalCommand := '"wt.exe" -d';
-    S.CommitDraft := '"Quoted subject"'#13#10#13#10'body\n'#9'åäö 🙂'#10;
-    S.CommitDraftRepo := '  /tmp/a ';
+    S.SetCommitDraft('  /tmp/a ', '"Quoted subject"'#13#10#13#10'body\n'#9'åäö 🙂'#10);
     S.GitPath := '"';
     S.SetForgeCliPath('GitHub', '""');
     S.FontName := 'Menlo';
@@ -298,8 +298,8 @@ begin
     S.Load;
     AssertEquals('"C:\Program Files\Code\Code.exe"', S.EditorCommand);
     AssertEquals('"wt.exe" -d', S.TerminalCommand);
-    AssertEquals('"Quoted subject"'#13#10#13#10'body\n'#9'åäö 🙂'#10, S.CommitDraft);
-    AssertEquals('  /tmp/a ', S.CommitDraftRepo);
+    AssertEquals('"Quoted subject"'#13#10#13#10'body\n'#9'åäö 🙂'#10,
+      S.CommitDraftFor('  /tmp/a '));
     AssertEquals('"', S.GitPath);
     AssertEquals('""', S.ForgeCliPath('GitHub'));
     AssertEquals('Menlo', S.FontName);
@@ -359,7 +359,7 @@ begin
     Back := TGittanSettings.Create(FDir);
     try
       Back.Load;
-      Back.CommitDraft := 'newer';
+      Back.SetCommitDraft('/repo/a', 'newer');
       Back.Width := 1234;
       Back.Save;
     finally
@@ -376,7 +376,7 @@ begin
     AssertEquals(1, Back.Recent.Count);
     AssertEquals('/repo/a', Back.Recent[0]);
     AssertEquals('the rest untouched', '/usr/bin/editor', Back.EditorCommand);
-    AssertEquals('the other instance''s draft kept', 'newer', Back.CommitDraft);
+    AssertEquals('the other instance''s draft kept', 'newer', Back.CommitDraftFor('/repo/a'));
     AssertEquals('and its width', 1234, Back.Width);
   finally
     Back.Free;
@@ -644,7 +644,7 @@ begin
     AssertEquals('in place of a string', 'sonnet', S.ClaudeModel);
     AssertEquals(0, S.Width);
     AssertEquals(500, S.Height);
-    AssertEquals('', S.CommitDraft);
+    AssertEquals('', S.CommitDraftFor('/a'));
   finally
     S.Free;
   end;
@@ -657,8 +657,8 @@ begin
   end;
 end;
 
-{ With no draft, the draft's text and repository go, a member of a newer
-  build's stays. }
+{ The one draft of the earlier builds becomes its repository's: the old
+  text and repository go, a member of a newer build's stays. }
 procedure TSettingsTest.TestDraftUnknownKept;
 var
   S: TGittanSettings;
@@ -668,8 +668,8 @@ begin
   S := TGittanSettings.Create(FDir);
   try
     S.Load;
-    AssertEquals('wip', S.CommitDraft);
-    S.CommitDraft := '';
+    AssertEquals('wip', S.CommitDraftFor('/a'));
+    AssertEquals('', S.CommitDraftFor('/b'));
     S.Save;
   finally
     S.Free;
@@ -679,6 +679,7 @@ begin
     AssertNull('no text', Doc.FindPath('commitDraft.text'));
     AssertNull('no repo', Doc.FindPath('commitDraft.repo'));
     AssertEquals('kept', 1, Doc.FindPath('commitDraft.later').AsInteger);
+    AssertEquals('the repository''s now', 'wip', Doc.FindPath('commitDrafts./a').AsString);
   finally
     Doc.Free;
   end;

@@ -73,6 +73,7 @@
 - The welcome view no longer hangs Gittan when it shows why a repository did not open in a pane narrower than its padding.
 - Editing a remote's URL in the Remotes dialog no longer saves the old push address as a push URL of its own when git's pushInsteadOf rewrites it, which kept pushes going to the old repository.
 - The Name and Email dialog keeps the key it picked when none is set, so Save is no longer off for a name change with signing on and no key; and turning SSH signing on offers the key set in git, not the first one in ~/.ssh.
+- Every tab's unfinished commit message is kept when Gittan quits; before, only the shown tab's came back.
 
 ## 0.21 (build-146, 2026-11-17)
 

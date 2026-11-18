@@ -126,10 +126,6 @@ type
     GraphFirstParent, GraphNoMerges: boolean;
     {** Whether the Commit section under the tree is unfolded. }
     CommitOpen: boolean;
-    {** The commit message being written, kept until it is committed,
-      and the repository it is for (its root): another repository's
-      section starts empty. The message may have several lines. }
-    CommitDraft, CommitDraftRepo: string;
     {** The editor font; an empty name and a zero size keep the defaults
       (DefaultFontName, DefaultFontSize). }
     FontName: string;
@@ -305,6 +301,13 @@ type
     function IssueRegexTrusted(const ARoot, ARegex: string): boolean;
     {** Trusts ARegex for ARoot; another expression asks again. }
     procedure TrustIssueRegex(const ARoot, ARegex: string);
+    {** The commit message being written in the repository at ARoot,
+      kept until it is committed, one per repository (commitDrafts in
+      state.json, by root), so every tab's draft outlasts a quit; ''
+      for none. The message may have several lines. }
+    function CommitDraftFor(const ARoot: string): string;
+    {** Keeps AText as ARoot's draft; '' drops it. }
+    procedure SetCommitDraft(const ARoot, AText: string);
     {** The kinds of project picked for ARoot on the Project page ("rust,
       go", "none"); '' when none were picked and the files decide. }
     function ProjectKindsOf(const ARoot: string): string;
@@ -829,9 +832,11 @@ begin
   O := ObjOf(FStateDoc, 'tips');
   TickHintHidden := BoolOf(O, 'tickHintHidden', False);
   GraphTipHidden := BoolOf(O, 'graphTipHidden', False);
+  { The one draft of the builds before a draft per repository. }
   O := ObjOf(FStateDoc, 'commitDraft');
-  CommitDraft := StrOf(O, 'text');
-  CommitDraftRepo := StrOf(O, 'repo');
+  if (StrOf(O, 'text') <> '') and (StrOf(O, 'repo') <> '') and
+    (CommitDraftFor(StrOf(O, 'repo')) = '') then
+    SetCommitDraft(StrOf(O, 'repo'), StrOf(O, 'text'));
   UpdateSnoozedUntil := ReadDay(StrOf(ObjOf(FStateDoc, 'update'), 'snoozedUntil'));
   ListOf(FStateDoc, 'recent', FRecent, MaxRecent);
   ListOf(FStateDoc, 'paletteRecent', FPaletteRecent, MaxPaletteRecent);
@@ -927,21 +932,13 @@ begin
   O := ChildOf(FStateDoc, 'tips');
   O.Booleans['tickHintHidden'] := TickHintHidden;
   O.Booleans['graphTipHidden'] := GraphTipHidden;
-  if CommitDraft <> '' then
-  begin
-    O := ChildOf(FStateDoc, 'commitDraft');
-    O.Strings['text'] := CommitDraft;
-    O.Strings['repo'] := CommitDraftRepo;
-  end
-  else
-  begin
-    { No draft: its members go, a key of a newer build's stays. }
-    O := ObjOf(FStateDoc, 'commitDraft');
-    DropKey(O, 'text');
-    DropKey(O, 'repo');
-    if (O = nil) or (O.Count = 0) then
-      DropKey(FStateDoc, 'commitDraft');
-  end;
+  { The one draft of the earlier builds is in commitDrafts now: its
+    members go, a key of a newer build's stays. }
+  O := ObjOf(FStateDoc, 'commitDraft');
+  DropKey(O, 'text');
+  DropKey(O, 'repo');
+  if (O <> nil) and (O.Count = 0) then
+    DropKey(FStateDoc, 'commitDraft');
   if UpdateSnoozedUntil > 0 then
     ChildOf(FStateDoc, 'update').Strings['snoozedUntil'] :=
       FormatDateTime('yyyy"-"mm"-"dd', UpdateSnoozedUntil)
@@ -1315,6 +1312,21 @@ begin
   if ARegex = '' then
     Exit;
   ChildOf(FStateDoc, 'trustIssues').Strings[ARoot] := SHA256Print(SHA256String(ARegex));
+end;
+
+function TGittanSettings.CommitDraftFor(const ARoot: string): string;
+begin
+  Result := StrOf(ObjOf(FStateDoc, 'commitDrafts'), ARoot);
+end;
+
+procedure TGittanSettings.SetCommitDraft(const ARoot, AText: string);
+begin
+  if ARoot = '' then
+    Exit;
+  if AText <> '' then
+    ChildOf(FStateDoc, 'commitDrafts').Strings[ARoot] := AText
+  else
+    DropKey(ObjOf(FStateDoc, 'commitDrafts'), ARoot);
 end;
 
 function TGittanSettings.ProjectKindsOf(const ARoot: string): string;
