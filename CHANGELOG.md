@@ -60,6 +60,7 @@
 - Saving a repository file such as .gitignore checks again that it is not a link, so a pull that made it one after it was opened no longer has the save write where the link points.
 - A git command or extension program given input no longer waits for a process it left running in the background that holds the input open without reading it, such as a hook's job; it returns when the command ends.
 - Undo Discard after a discard that brought a deleted file back deletes the file again; before, it left an empty file, which a commit would take.
+- A click on an author in the commit graph's statistics or on the repository page shows that author's commits alone: before, a click on Ann listed Anna's and Joanne's too, and on Linux and Windows an author whose name git kept in two forms of the same letters was split again.
 
 ## 0.21 (build-146, 2026-11-17)
 

@@ -228,6 +228,13 @@ begin
     LocalTimeToUniversal(EncodeDate(2024, 6, 16))));
   F := ParseGraphFilter('author:ann author:bob');
   AssertTrue('any author', MatchesGraphFilter(F, '', 'bob', D));
+  AssertTrue('a part of the name', MatchesGraphFilter(F, '', 'joanne', D));
+  { = asks for the whole name, as a click on an author does. }
+  F := ParseGraphFilter('author:="ann b"');
+  AssertEquals('=ann b', F.Authors[0]);
+  AssertTrue('the name', MatchesGraphFilter(F, '', 'ann b', D));
+  AssertFalse('a longer name', MatchesGraphFilter(F, '', 'ann ba', D));
+  AssertFalse('a name around it', MatchesGraphFilter(F, '', 'joann b', D));
   AssertTrue('nothing asked', MatchesGraphFilter(ParseGraphFilter(''), '', '', 0));
 end;
 

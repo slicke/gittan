@@ -829,9 +829,11 @@ begin
       FMetaFull[r] := FMetaFull[r] + ' · ';
     FMetaFull[r] := FMetaFull[r] + FMetaAge[r];
     FSubjectRoom[r] := -1;
-    FAuthorKeys[r] := UTF8LowerCase(Composed(FCommits[r].Author));
+    { As the statistics count authors (NameKey): case, accents and the
+      two forms of an ö alike, on every system. }
+    FAuthorKeys[r] := NameKey(FCommits[r].Author);
     FSearch[r] := UTF8LowerCase(Composed(FCommits[r].Subject + #10 + FCommits[r].Body + #10 +
-      FCommits[r].Note)) + #10 + FAuthorKeys[r] + #10 + FCommits[r].Hash;
+      FCommits[r].Note + #10 + FCommits[r].Author)) + #10 + FCommits[r].Hash;
     FShown[r] := r;
   end;
   FCurrent := -1;
@@ -1001,7 +1003,10 @@ begin
   for i := 0 to High(FFilter.Words) do
     FFilter.Words[i] := UTF8LowerCase(Composed(FFilter.Words[i]));
   for i := 0 to High(FFilter.Authors) do
-    FFilter.Authors[i] := UTF8LowerCase(Composed(FFilter.Authors[i]));
+    if Copy(FFilter.Authors[i], 1, 1) = '=' then
+      FFilter.Authors[i] := '=' + NameKey(Copy(FFilter.Authors[i], 2, MaxInt))
+    else
+      FFilter.Authors[i] := NameKey(FFilter.Authors[i]);
   FFiltered := not GraphFilterEmpty(FFilter);
   if FFiltered and FMore and not FAskedMore and Assigned(FOnMore) then
   begin
@@ -2111,7 +2116,7 @@ begin
     Search := Search + Quoted('path:', FFilter.Paths[i]) + ' ';
   for i := 0 to High(FFilter.Changes) do
     Search := Search + Quoted('change:', FFilter.Changes[i]) + ' ';
-  FEdit.Text := Search + Quoted('author:', FStats.Authors[FStatsAuthor].Name);
+  FEdit.Text := Search + Quoted('author:=', FStats.Authors[FStatsAuthor].Name);
   FEdit.SelStart := Length(FEdit.Text);
   SetStatsOn(False);
   ApplyFilter;

@@ -124,10 +124,11 @@ begin
         FSubListPopup.Popup(AScreenRect);
       end;
     rtAuthor:
+      { The whole name, as the list counted it. }
       if Pos(' ', AName) > 0 then
-        ShowCommitGraph('author:"' + AName + '"')
+        ShowCommitGraph('author:="' + AName + '"')
       else
-        ShowCommitGraph('author:' + AName);
+        ShowCommitGraph('author:=' + AName);
   end;
 end;
 

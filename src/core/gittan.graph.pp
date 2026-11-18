@@ -70,7 +70,8 @@ type
     (git log -S, or -G for a /regex/; see gittan.pickaxe). The words
     and the authors are kept as typed: a caller that wants no case
     folds them and the texts it matches with MatchesGraphFilter the
-    same way. }
+    same way. An author that starts with = (author:=Ann, what a click
+    on an author gives) is the whole name, not a part of it. }
   TGittanGraphFilter = record
     Words, Authors, Paths, Changes: TStringArray;
     Since, Before: TDateTime;
@@ -468,6 +469,16 @@ begin
     (AFilter.Since = 0) and (AFilter.Before = 0);
 end;
 
+{ AAuthor is the commit's author, AWanted the filter's: the whole name
+  after =, else a part of it. }
+function AuthorMatches(const AWanted, AAuthor: string): boolean;
+begin
+  if (AWanted <> '') and (AWanted[1] = '=') then
+    Result := Copy(AWanted, 2, MaxInt) = AAuthor
+  else
+    Result := Pos(AWanted, AAuthor) > 0;
+end;
+
 function MatchesGraphFilter(const AFilter: TGittanGraphFilter;
   const AText, AAuthor: string; ADate: TDateTime): boolean;
 var
@@ -481,7 +492,7 @@ begin
   if Length(AFilter.Authors) > 0 then
   begin
     i := 0;
-    while (i <= High(AFilter.Authors)) and (Pos(AFilter.Authors[i], AAuthor) = 0) do
+    while (i <= High(AFilter.Authors)) and not AuthorMatches(AFilter.Authors[i], AAuthor) do
       Inc(i);
     if i > High(AFilter.Authors) then
       Exit;
