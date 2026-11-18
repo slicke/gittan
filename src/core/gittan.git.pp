@@ -907,7 +907,8 @@ type
       APullRef (the forge's PullRef: refs/pull/N/head on GitHub), into
       refs/gittan/pr/N, the name given in AHeadRef, and ABaseRef along
       with it, so the remote-tracking branch of the base is current too.
-      Nothing in the work tree or the branches changes. }
+      Nothing in the work tree or the branches changes. With no ARemote
+      or APullRef nothing runs and Error says which was missing. }
     function FetchPullRequest(const ARemote: string; ANumber: integer;
       const APullRef, ABaseRef: string; out AHeadRef: string): boolean;
     {** Records the work tree as it is now, untracked files included, in
@@ -3616,8 +3617,17 @@ function TGittanRepo.FetchPullRequest(const ARemote: string; ANumber: integer;
   const APullRef, ABaseRef: string; out AHeadRef: string): boolean;
 begin
   AHeadRef := 'refs/gittan/pr/' + IntToStr(ANumber);
-  Result := (FRoot <> '') and (ARemote <> '') and (APullRef <> '') and
-    RunRemote(['fetch', '--no-tags', '-q', ARemote, ABaseRef, '+' + APullRef + ':' +
+  if ARemote = '' then
+  begin
+    FError := 'No remote to fetch the pull request from';
+    Exit(False);
+  end;
+  if APullRef = '' then
+  begin
+    FError := 'The forge gave no ref for the pull request';
+    Exit(False);
+  end;
+  Result := (FRoot <> '') and RunRemote(['fetch', '--no-tags', '-q', ARemote, ABaseRef, '+' + APullRef + ':' +
     AHeadRef]);
 end;
 

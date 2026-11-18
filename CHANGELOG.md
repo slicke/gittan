@@ -43,6 +43,7 @@
 - A BMP whose header gives a negative (top-down) height is held to the same size limit as any other image in the image comparison, so a small crafted file can no longer make Gittan allocate gigabytes on the main thread.
 - Add to .gitignore on a file whose name holds a carriage return, such as macOS's folder icon file `Icon\r`, writes a pattern that hides it, and a name with a line break no longer splits into two patterns.
 - Compare With > Other refuses a range one of whose sides is not a commit or starts with a dash. Before, a range went to git unchecked, so `--output=<file>..x` made `git diff` write to that file.
+- Fetching a pull request with no remote to fetch it from, or with no ref from the forge, says so, instead of failing with an empty message.
 
 ## 0.21 (build-146, 2026-11-17)
 

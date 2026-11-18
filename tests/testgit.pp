@@ -1364,6 +1364,10 @@ begin
     AssertEquals(Head, Trim(Git(['rev-parse', HeadRef])));
     AssertTrue(FRepo.HasCommit('origin/' + Branch));
     AssertFalse(FRepo.FetchPullRequest('origin', 8, 'refs/pull/8/head', Branch, HeadRef));
+    AssertFalse(FRepo.FetchPullRequest('', 7, 'refs/pull/7/head', Branch, HeadRef));
+    AssertEquals('No remote to fetch the pull request from', FRepo.Error);
+    AssertFalse(FRepo.FetchPullRequest('origin', 7, '', Branch, HeadRef));
+    AssertEquals('The forge gave no ref for the pull request', FRepo.Error);
     FRepo.Base := 'origin/' + Branch + '...' + HeadRef;
     AssertTrue(FRepo.IsRange);
   finally
