@@ -563,6 +563,12 @@ begin
     'c@x ssh-ed25519 AAAA' + LineEnding, FileText(FDir + PathDelim + 'deep' + PathDelim + 'allowed'));
   AssertTrue(SignerLineHas('a@x,c@x namespaces="git" ssh-ed25519 AAAA', 'c@x', 'ssh-ed25519 AAAA'));
   AssertFalse(SignerLineHas('a@x ssh-ed25519 AAAA', 'c@x', 'ssh-ed25519 AAAA'));
+  { A file that ends without a newline gets one first, and what was
+    there stays byte for byte. }
+  WriteFile('kept', '# mine'#13#10'z@x ssh-ed25519 ZZZZ');
+  AssertTrue(Error, AddAllowedSigner(FDir + PathDelim + 'kept', 'a@x', 'ssh-ed25519 AAAA', Error));
+  AssertEquals('# mine'#13#10'z@x ssh-ed25519 ZZZZ' + LineEnding + 'a@x ssh-ed25519 AAAA' +
+    LineEnding, FileText(FDir + PathDelim + 'kept'));
   AssertFalse(AddAllowedSigner(FDir + PathDelim + 'allowed2', 'a@x', 'nonsense', Error));
   AssertTrue(Pos('nonsense', Error) > 0);
 end;

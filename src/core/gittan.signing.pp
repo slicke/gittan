@@ -1379,10 +1379,33 @@ begin
         Exit(False);
 end;
 
+{ AText added at the end of AFileName, made when missing; what is there
+  is never rewritten. }
+procedure AppendToFile(const AFileName: string; const AText: RawByteString);
+var
+  Stream: TFileStream;
+begin
+  if FileExists(AFileName) then
+    Stream := TFileStream.Create(AFileName, fmOpenWrite or fmShareDenyWrite)
+  else
+    Stream := TFileStream.Create(AFileName, fmCreate);
+  try
+    Stream.Seek(0, soEnd);
+    if AText <> '' then
+      Stream.WriteBuffer(AText[1], Length(AText));
+  finally
+    Stream.Free;
+  end;
+end;
+
+{ The line goes at the end of the file, which is not written over: a
+  full disk or a crash meanwhile leaves the signers there as they were,
+  where a rewrite could leave the file empty. }
 function AddAllowedSigner(const AFile, AEmail, AKey: string; out AError: string): boolean;
 var
   Lines: TStringList;
   Key: string;
+  Text, Added: RawByteString;
   i: integer;
 begin
   AError := '';
@@ -1402,16 +1425,21 @@ begin
   try
     try
       if FileExists(AFile) then
-        Lines.LoadFromFile(AFile);
+        Text := ReadFileBytes(AFile)
+      else
+        Text := '';
+      Lines.Text := Text;
       { The key under another e-mail is no line for this one: a commit
         made under this e-mail would show as another signer's
         (CheckCommitters). }
       for i := 0 to Lines.Count - 1 do
         if SignerLineHas(Lines[i], AEmail, Key) then
           Exit(True);
-      Lines.Add(AEmail + ' ' + Key);
+      Added := AEmail + ' ' + Key + LineEnding;
+      if (Text <> '') and not (Text[Length(Text)] in [#10, #13]) then
+        Added := LineEnding + Added;
       ForceDirectories(ExtractFileDir(AFile));
-      Lines.SaveToFile(AFile);
+      AppendToFile(AFile, Added);
       Result := True;
     except
       on E: Exception do
