@@ -229,10 +229,20 @@ var
   Text: string;
   Obj: JSValue;
 
-  { The object's reference count, the first field of QuickJS's header. }
-  function Refs(APtr: Pointer): integer;
+  { Whether the object the script put in w is still alive: a WeakRef
+    lets go once the last reference has, so the count is seen without
+    reading QuickJS's memory (its layout differs on the Windows build). }
+  function Alive: boolean;
+  var
+    v: JSValue;
   begin
-    Result := PInteger(APtr)^;
+    JS_RunGC(FRuntime);
+    v := JS_Eval(FContext, 'w.deref() !== undefined', 'test.js', JS_EVAL_TYPE_GLOBAL);
+    try
+      Result := JS_ToBool(FContext, v) = 1;
+    finally
+      JS_FreeValue(FContext, v);
+    end;
   end;
 
 begin
@@ -243,20 +253,25 @@ begin
   try
   { Given back while its runtime is the live one; left alone once
     another has started, as the one it was taken in is gone. }
-  Obj := JS_Eval(FContext, '({a: 1})', 'test.js', JS_EVAL_TYPE_GLOBAL);
-  try
-    P := JSParseParameters(FContext, 1, PJSValueConst(@Obj));
-    AssertEquals('a reference of its own', 2, Refs(P[0]^.Data.ObjectVal));
-    FreeJSParameters(P);
-    AssertEquals('given back', 1, Refs(Obj.Ptr));
-    P := JSParseParameters(FContext, 1, PJSValueConst(@Obj));
-    ExtRuntimeStarted;
-    FreeJSParameters(P);
-    AssertEquals('kept for another runtime', 2, Refs(Obj.Ptr));
-    JS_FreeValue(FContext, Obj);
-  finally
-    JS_FreeValue(FContext, Obj);
-  end;
+  Obj := JS_Eval(FContext,
+    '(() => { const o = {a: 1}; globalThis.w = new WeakRef(o); return o; })()',
+    'test.js', JS_EVAL_TYPE_GLOBAL);
+  P := JSParseParameters(FContext, 1, PJSValueConst(@Obj));
+  JS_FreeValue(FContext, Obj);
+  AssertTrue('a reference of its own', Alive);
+  FreeJSParameters(P);
+  AssertFalse('given back', Alive);
+  Obj := JS_Eval(FContext,
+    '(() => { const o = {a: 1}; globalThis.w = new WeakRef(o); return o; })()',
+    'test.js', JS_EVAL_TYPE_GLOBAL);
+  P := JSParseParameters(FContext, 1, PJSValueConst(@Obj));
+  ExtRuntimeStarted;
+  FreeJSParameters(P);
+  JS_FreeValue(FContext, Obj);
+  AssertTrue('kept for another runtime', Alive);
+  { The reference the list kept, so the runtime is freed clean. }
+  JS_FreeValue(FContext, Obj);
+  AssertFalse('the kept one given back here', Alive);
   P := Parsed('({length: 2e9})');
   try
     AssertTrue('a made-up length is an object''s', P[0]^.Data.match = JD_OBJ);
