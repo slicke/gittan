@@ -64,6 +64,10 @@ type
       before the name. }
     FExts: array of boolean;
     FActive: integer;
+    { More tabs than fit at MinTabWidth: the first one shown; the shown
+      tabs are a run that holds the active one, and "+N" after them
+      counts the others (OverflowRect). }
+    FFirst: integer;
     { The tabs are a view's own (the forge view's): no cross, no plus. }
     FFixed: boolean;
     { The tab under the mouse (-1 for none), whether the mouse is on its
@@ -94,6 +98,11 @@ type
     function NavRect(ANav: integer; const ABounds: NSRect): NSRect;
     function NavEnabled(ANav: integer): boolean;
     procedure DrawNav(ANav: integer; const ABounds: NSRect);
+    function TabRoom(AWidth: double): double;
+    function ShownCount(AWidth: double): integer;
+    function TabShown(AIndex: integer; AWidth: double): boolean;
+    function OverflowRect(const ABounds: NSRect): NSRect;
+    function NextHidden(AWidth: double): integer;
     function TabWidth(AWidth: double): double;
     function TabRect(AIndex: integer; const ABounds: NSRect): NSRect;
     function CloseRect(const ATab: NSRect): NSRect;
@@ -233,6 +242,8 @@ const
   MinTabWidth = 64;
   { The gap between tabs, the room the plus takes after the last. }
   TabGap = 3;
+  { The room of "+N" when not every tab fits. }
+  OverflowWidth = 34;
   PlusWidth = 30;
   CrossSize = 16;
   { The banner: its width, how far it stays from the window's right
@@ -903,23 +914,94 @@ begin
     Result := 0;
 end;
 
+{ The width the tabs share. }
+function TGittanToolbar.TabRoom(AWidth: double): double;
+begin
+  Result := AWidth - NavRoom - GlobeRoom;
+  if not FFixed then
+    Result := Result - PlusWidth;
+end;
+
+{ How many tabs are shown: all while they fit at MinTabWidth, else as
+  many as fit beside "+N". FFirst is moved so the active tab is among
+  them. }
+function TGittanToolbar.ShownCount(AWidth: double): integer;
+var
+  Room: double;
+begin
+  Room := TabRoom(AWidth);
+  if Length(FCaptions) * MinTabWidth <= Room then
+  begin
+    FFirst := 0;
+    Exit(Length(FCaptions));
+  end;
+  Result := Max(1, Trunc((Room - OverflowWidth) / MinTabWidth));
+  if Result > Length(FCaptions) then
+    Result := Length(FCaptions);
+  if (FActive >= 0) and (FActive < FFirst) then
+    FFirst := FActive
+  else if (FActive >= 0) and (FActive >= FFirst + Result) then
+    FFirst := FActive - Result + 1;
+  FFirst := Max(0, Min(FFirst, Length(FCaptions) - Result));
+end;
+
+function TGittanToolbar.TabShown(AIndex: integer; AWidth: double): boolean;
+var
+  n: integer;
+begin
+  n := ShownCount(AWidth);
+  Result := (AIndex >= FFirst) and (AIndex < FFirst + n);
+end;
+
+{ "+N" right after the last tab shown; empty while every tab is. }
+function TGittanToolbar.OverflowRect(const ABounds: NSRect): NSRect;
+var
+  n: integer;
+begin
+  n := ShownCount(ABounds.size.width);
+  if n >= Length(FCaptions) then
+    Exit(NSMakeRect(0, 0, 0, 0));
+  Result := NSMakeRect(NavRoom + n * TabWidth(ABounds.size.width), 3, OverflowWidth - TabGap,
+    ABounds.size.height - 6);
+end;
+
+{ The tab a click on "+N" shows: the first hidden one after those shown,
+  else the first one, so clicks go round them all. }
+function TGittanToolbar.NextHidden(AWidth: double): integer;
+var
+  n: integer;
+begin
+  n := ShownCount(AWidth);
+  if FFirst + n < Length(FCaptions) then
+    Result := FFirst + n
+  else
+    Result := 0;
+end;
+
 function TGittanToolbar.TabWidth(AWidth: double): double;
+var
+  n: integer;
+  Room: double;
 begin
   if Length(FCaptions) = 0 then
     Exit(MaxTabWidth);
-  if FFixed then
-    Result := (AWidth - NavRoom - GlobeRoom) / Length(FCaptions)
-  else
-    Result := (AWidth - NavRoom - PlusWidth - GlobeRoom) / Length(FCaptions);
-  Result := Max(MinTabWidth, Min(MaxTabWidth, Result));
+  n := ShownCount(AWidth);
+  Room := TabRoom(AWidth);
+  if n < Length(FCaptions) then
+    Room := Room - OverflowWidth;
+  Result := Max(MinTabWidth, Min(MaxTabWidth, Room / n));
 end;
 
+{ A tab not shown has an empty rectangle, so it is neither drawn nor
+  hit. }
 function TGittanToolbar.TabRect(AIndex: integer; const ABounds: NSRect): NSRect;
 var
   W: double;
 begin
+  if not TabShown(AIndex, ABounds.size.width) then
+    Exit(NSMakeRect(0, 0, 0, 0));
   W := TabWidth(ABounds.size.width);
-  Result := NSMakeRect(NavRoom + AIndex * W, 3, W - TabGap, ABounds.size.height - 6);
+  Result := NSMakeRect(NavRoom + (AIndex - FFirst) * W, 3, W - TabGap, ABounds.size.height - 6);
 end;
 
 function TGittanToolbar.CloseRect(const ATab: NSRect): NSRect;
@@ -931,8 +1013,12 @@ end;
 function TGittanToolbar.PlusRect(const ABounds: NSRect): NSRect;
 var
   X: double;
+  n: integer;
 begin
-  X := NavRoom + Length(FCaptions) * TabWidth(ABounds.size.width);
+  n := ShownCount(ABounds.size.width);
+  X := NavRoom + n * TabWidth(ABounds.size.width);
+  if n < Length(FCaptions) then
+    X := X + OverflowWidth;
   Result := NSMakeRect(X + 2, (ABounds.size.height - 22) / 2, 22, 22);
 end;
 
@@ -955,6 +1041,12 @@ begin
   APlus := not FFixed and PointIn(APoint, PlusRect(ABounds));
   if APlus then
     Exit;
+  { "+N" is pressed as the tab it brings in. }
+  if PointIn(APoint, OverflowRect(ABounds)) then
+  begin
+    AIndex := NextHidden(ABounds.size.width);
+    Exit;
+  end;
   for i := 0 to High(FCaptions) do
   begin
     R := TabRect(i, ABounds);
@@ -992,6 +1084,8 @@ begin
     DrawNav(NavForward, ABounds);
     for i := 0 to High(FCaptions) do
     begin
+      if not TabShown(i, ABounds.size.width) then
+        Continue;
       R := TabRect(i, ABounds);
       Shown := i = FActive;
       Hover := (i = FHot) and not Shown;
@@ -1059,6 +1153,18 @@ begin
         StrokeLine(C.origin.x + C.size.width - 5, C.origin.y + 5, C.origin.x + 5,
           C.origin.y + C.size.height - 5, Cross, 1.3);
       end;
+    end;
+    C := OverflowRect(ABounds);
+    if C.size.width > 0 then
+    begin
+      Attrs := NSDictionary.dictionaryWithObjectsAndKeys(Font, NSFontAttributeName,
+        NSColor.secondaryLabelColor, NSForegroundColorAttributeName, nil);
+      T.size := NSStr('+' + IntToStr(Length(FCaptions) - ShownCount(ABounds.size.width))).
+        sizeWithAttributes(Attrs);
+      T.origin.x := C.origin.x + (C.size.width - T.size.width) / 2;
+      T.origin.y := C.origin.y + (C.size.height - T.size.height) / 2;
+      NSStr('+' + IntToStr(Length(FCaptions) - ShownCount(ABounds.size.width))).
+        drawInRect_withAttributes(T, Attrs);
     end;
     if FFixed then
       Exit;
@@ -1169,6 +1275,9 @@ begin
   if (AEvent.buttonNumber <> 2) or FFixed then
     Exit;
   P := FStrip.convertPoint_fromView(AEvent.locationInWindow, nil);
+  { "+N" is the hidden tab it brings in, which is not under the mouse. }
+  if PointIn(P, OverflowRect(FStrip.bounds)) then
+    Exit;
   HitTest(P, FStrip.bounds, Index, InCross, InPlus, Nav);
   if (Index >= 0) and Assigned(FOnClose) then
     FOnClose(Self, Index);

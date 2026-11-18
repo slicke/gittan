@@ -31,7 +31,10 @@ PJSDoubleVal = ^JSDoubleVal;
 TJSAsyncTask = class(TThread)
 private
   FContext: JSContext;      /// QuickJS context for this task
+  FRuntime: JSRuntime;      /// Its runtime, which outlives a context unloaded
+  FRuntimeGen: QWord;       /// ExtRuntimeGeneration then: FRuntime's while it lives
   funcs: JSDoubleVal;       /// Promise resolve/reject function handles
+  FPairHeld: boolean;       /// funcs not yet released
   FPromise: TJSCallback;
     /// Registered callback descriptor (name, handler, params)
   FResult: JSVAlueVal;
@@ -60,6 +63,15 @@ protected
       {** Resolve or reject the JS promise from FSuccess/FResult and release the
           QuickJS values and parsed parameters. Must run on the main thread. }
   procedure FinishPromise;
+
+      {** Release the resolve/reject pair through the runtime, once. They hold
+          their context's realm, so until they go a context freed by an unload
+          keeps its whole heap. Main thread only. }
+  procedure ReleasePair;
+
+      {** FinishPromise's way when the callback is not run: the parameters and
+          the pair are released, the promise left pending. }
+  procedure Abandon;
 public
       {** Create and start an async task bound to a JS Promise.
           @param(Context) QuickJS context
@@ -88,6 +100,15 @@ function IsExtShuttingDown: boolean;
     reload paths wait until this drops to zero instead of a fixed delay. }
 function ActiveAsyncTaskCount: integer;
 
+const
+  {** The most tasks one context may have under way at once: a call past it
+      is rejected, so an extension cannot make threads until none can be
+      made, for itself and every other one. }
+  MaxAsyncTasksPerContext = 64;
+
+{** The tasks of ctx under way. }
+function AsyncTasksOf(ctx: JSContext): integer;
+
 {** Drain the runtime's pending Promise job queue, bounded by a small budget.
     Returns False when the budget stopped the drain with jobs still queued, so
     the caller knows the queue is not empty; True when it emptied (or a job
@@ -109,6 +130,59 @@ implementation
 var
 gExtShuttingDown: boolean = false;
 gActiveAsyncTasks: longint = 0;
+  { The contexts with tasks under way and how many each, under gTaskLock:
+    a task counts itself in on the main thread and out on its own. }
+gTaskLock: TRTLCriticalSection;
+gTaskContexts: array of JSContext;
+gTaskCounts: array of integer;
+
+procedure CountTask(ctx: JSContext; ADelta: integer);
+var
+  i, n: integer;
+begin
+  EnterCriticalSection(gTaskLock);
+  try
+    for i := 0 to High(gTaskContexts) do
+      if gTaskContexts[i] = ctx then
+      begin
+        Inc(gTaskCounts[i], ADelta);
+        if gTaskCounts[i] <= 0 then
+        begin
+          n := High(gTaskContexts);
+          gTaskContexts[i] := gTaskContexts[n];
+          gTaskCounts[i] := gTaskCounts[n];
+          SetLength(gTaskContexts, n);
+          SetLength(gTaskCounts, n);
+        end;
+        Exit;
+      end;
+    if ADelta > 0 then
+    begin
+      n := Length(gTaskContexts);
+      SetLength(gTaskContexts, n + 1);
+      SetLength(gTaskCounts, n + 1);
+      gTaskContexts[n] := ctx;
+      gTaskCounts[n] := ADelta;
+    end;
+  finally
+    LeaveCriticalSection(gTaskLock);
+  end;
+end;
+
+function AsyncTasksOf(ctx: JSContext): integer;
+var
+  i: integer;
+begin
+  Result := 0;
+  EnterCriticalSection(gTaskLock);
+  try
+    for i := 0 to High(gTaskContexts) do
+      if gTaskContexts[i] = ctx then
+        Exit(gTaskCounts[i]);
+  finally
+    LeaveCriticalSection(gTaskLock);
+  end;
+end;
 
 procedure SetExtShuttingDown(const Value: boolean);
 begin
@@ -137,14 +211,30 @@ begin
   if Assigned(ExtContextGeneration) and (Context <> nil) then
     FGeneration := ExtContextGeneration(Context);
   // Copy resolve/reject function refs locally
+  FRuntime := nil;
+  FRuntimeGen := ExtRuntimeGeneration;
+  if Context <> nil then
+    FRuntime := JS_GetRuntime(Context);
   if cbfunc <> nil then
+  begin
     funcs := cbfunc^;
+    FPairHeld := True;
+  end;
   FreeOnTerminate := true;
   // Count from creation (on the main thread) so shutdown waiters never observe
   // a started-but-not-yet-counted task; Execute decrements when done.
   InterLockedIncrement(gActiveAsyncTasks);
-  inherited Create(false);
-  // This will start the thread
+  CountTask(FContext, 1);
+  try
+    inherited Create(false);
+  except
+    { No thread: nothing will count it out, and the caller (AsyncTask)
+      rejects the promise and releases its values. }
+    CountTask(FContext, -1);
+    InterLockedDecrement(gActiveAsyncTasks);
+    FPairHeld := False;
+    raise;
+  end;
 end;
 
 {** Thread execution:
@@ -156,49 +246,80 @@ end;
 procedure TJSAsyncTask.Execute;
 begin
   try
-    // Skip if application is terminating
-    if ExtHost.Terminated or IsExtShuttingDown then
+    // The application on its way out: its main thread may never answer a
+    // Synchronize again, and the process takes every value with it.
+    if ExtHost.Terminated then
       Exit;
 
-    if Assigned(FPromise.callback) then // Run the main function, if it's actually set
+    // An unload under way (IsExtShuttingDown) or a missing function: nothing
+    // runs, but the parameters and the resolve/reject pair are still let go
+    // on the main thread, or the unloaded context could never be freed.
+    if IsExtShuttingDown or not Assigned(FPromise.callback) then
     begin
-      if FPromise.threaded then
-      begin
-        // Threaded callback: do the (potentially slow) native work right here on
-        // the worker thread so the UI stays responsive; only the JS resolve/reject
-        // is synchronized to the main thread, since QuickJS is single-threaded.
-        RunCallback(true);
-        if not (ExtHost.Terminated or IsExtShuttingDown) then
-        try
-          Synchronize(@FinishPromise);
-        except
-          FSuccess := false;
-          Exit;
-        end;
-      end
-      // Check again before synchronizing, as shutdown might have occurred
-      else if not (ExtHost.Terminated or IsExtShuttingDown) then
+      if not IsExtShuttingDown then
+        ExtError('Error: Missing Function');
+      FSuccess := false;
       try
-        Synchronize(@ProcessResult);
+        Synchronize(@Abandon);
       except
-          // If synchronize fails (e.g., main thread shutting down), just exit
+      end;
+      Exit;
+    end;
+
+    if FPromise.threaded then
+    begin
+      // Threaded callback: do the (potentially slow) native work right here on
+      // the worker thread so the UI stays responsive; only the JS resolve/reject
+      // is synchronized to the main thread, since QuickJS is single-threaded.
+      // FinishPromise settles the promise, or only releases its values when an
+      // unload began meanwhile.
+      RunCallback(true);
+      if not ExtHost.Terminated then
+      try
+        Synchronize(@FinishPromise);
+      except
         FSuccess := false;
         Exit;
-      end// Additional safety check: Ensure the main thread is still processing messages
-      ;
+      end;
     end
     else
-    begin
-      // Complain that it wasn't set
-      if not (ExtHost.Terminated or IsExtShuttingDown) then
-        ExtError('Error: Missing Function');
+    try
+      Synchronize(@ProcessResult);
+    except
+      // If synchronize fails (e.g., main thread shutting down), just exit
       FSuccess := false;
       Exit;
     end;
     self.Terminate;
   finally
+    CountTask(FContext, -1);
     InterLockedDecrement(gActiveAsyncTasks);
   end;
+end;
+
+procedure TJSAsyncTask.ReleasePair;
+var
+  Gone: boolean;
+begin
+  if not FPairHeld then
+    Exit;
+  FPairHeld := False;
+  if (FRuntime = nil) or (FRuntimeGen = 0) or (FRuntimeGen <> ExtRuntimeGeneration) then
+    Exit;
+  Gone := (FGeneration <> 0) and Assigned(ExtContextGeneration) and
+    (ExtContextGeneration(FContext) <> FGeneration);
+  JS_FreeValueRT(FRuntime, funcs[JprResolve]);
+  JS_FreeValueRT(FRuntime, funcs[JprReject]);
+  // The last hold on a context unloaded meanwhile: what its objects keep of
+  // each other goes with a collection.
+  if Gone then
+    JS_RunGC(FRuntime);
+end;
+
+procedure TJSAsyncTask.Abandon;
+begin
+  FreeJSParameters(FPromise.params.values.Data);
+  ReleasePair;
 end;
 
 {** Execute the registered native callback and capture status/result.
@@ -207,6 +328,11 @@ end;
     Runs entirely on the main thread (legacy, non-threaded path). }
 procedure TJSAsyncTask.ProcessResult;
 begin
+  if IsExtShuttingDown then
+  begin
+    Abandon;
+    Exit;
+  end;
   RunCallback(false);
   FinishPromise;
 end;
@@ -282,22 +408,22 @@ var
   xres: JSValue;
   callRes: JSValueRaw;
 begin
-  // The parsed parameters go on every path, the early exits too.
+  // The parsed parameters go on every path, the early exits too, and so
+  // does the resolve/reject pair (ReleasePair).
   FreeJSParameters(FPromise.params.values.Data);
 
-  // Final check before making JS calls
-  if ExtHost.Terminated or IsExtShuttingDown then
+  { No JS is called while an unload is under way, nor once the context
+    was freed after the task began (the wait in UnloadExtensions is
+    capped, and the shutdown flag is cleared once it is done): resolve
+    and reject are not called then, only released through the runtime,
+    which lets the freed context's heap go with them. }
+  if ExtHost.Terminated or IsExtShuttingDown or (FContext = nil) or
+    ((FGeneration <> 0) and Assigned(ExtContextGeneration) and
+    (ExtContextGeneration(FContext) <> FGeneration)) then
+  begin
+    ReleasePair;
     Exit;
-
-  if (FContext = nil) then
-    Exit;
-
-  { The context was freed after the task began (the wait in
-    UnloadExtensions is capped, and the shutdown flag is cleared once it
-    is done): its resolve and reject cannot be called, nor released. }
-  if (FGeneration <> 0) and Assigned(ExtContextGeneration) and
-    (ExtContextGeneration(FContext) <> FGeneration) then
-    Exit;
+  end;
 
   try
     // Convert and resolve/reject the promise
@@ -310,8 +436,7 @@ begin
     // pair captured by JS_NewPromiseCapability — all leaked before this fix.
     FContext^.FreeInlined(PJSValue(@callRes));
     FContext^.Free(xres);
-    FContext^.FreeInlined(PJSValue(@funcs[JprResolve]));
-    FContext^.FreeInlined(PJSValue(@funcs[JprReject]));
+    ReleasePair;
 
     // Settling the promise only queued its .then/.catch reactions; drain the
     // job queue here (main thread) so the extension's continuation runs now
@@ -321,6 +446,13 @@ begin
     // Silently ignore JS calls that fail during shutdown
     // This prevents crashes when the runtime is being destroyed
   end;
+  ReleasePair;
 end;
+
+initialization
+  InitCriticalSection(gTaskLock);
+
+finalization
+  DoneCriticalSection(gTaskLock);
 
 end.

@@ -26,8 +26,10 @@ const
   prefix (' ', '+' or '-'). A deleted line is never part of a conflict,
   since the conflict is in the work tree. A conflict runs from a
   "<<<<<<<" line through "|||||||" (the base, when there is one) and
-  "=======" to ">>>>>>>"; one left open at the end keeps its roles. }
-function ConflictRoles(ALines: TStrings): TIntegerDynArray;
+  "=======" to ">>>>>>>"; one left open at the end keeps its roles.
+  AMarkerSize is how long a marker is, 7 unless the file's
+  conflict-marker-size attribute says otherwise. }
+function ConflictRoles(ALines: TStrings; AMarkerSize: integer = 7): TIntegerDynArray;
 {** How many conflicts ConflictRoles found: the "<<<<<<<" lines. }
 function ConflictCount(const ARoles: TIntegerDynArray; ALines: TStrings): integer;
 {** The diff line of every conflict's "<<<<<<<". }
@@ -61,15 +63,23 @@ function ResolveBlock(ALines: TStrings; const ARoles: TIntegerDynArray; AStart: 
 
 implementation
 
-{ A marker is seven of its character at the start of the line, then the
+{ A marker is ASize of its character at the start of the line, then the
   end of the line or a space (git adds the side's name). }
-function IsMarker(const AText: string; AChar: char): boolean;
+function IsMarker(const AText: string; AChar: char; ASize: integer): boolean;
 begin
-  Result := (Length(AText) >= 7) and (AText = StringOfChar(AChar, 7) + Copy(AText, 8, MaxInt)) and
-    ((Length(AText) = 7) or (AText[8] = ' '));
+  Result := (ASize > 0) and (Length(AText) >= ASize) and
+    (Copy(AText, 1, ASize) = StringOfChar(AChar, ASize)) and
+    ((Length(AText) = ASize) or (AText[ASize + 1] = ' '));
 end;
 
-function ConflictRoles(ALines: TStrings): TIntegerDynArray;
+{ Whether diff line AIndex, a marker by its role, is one of AChar: the
+  role says it is a marker, of whatever size. }
+function MarkerIs(ALines: TStrings; AIndex: integer; AChar: char): boolean;
+begin
+  Result := (Length(ALines[AIndex]) >= 2) and (ALines[AIndex][2] = AChar);
+end;
+
+function ConflictRoles(ALines: TStrings; AMarkerSize: integer): TIntegerDynArray;
 var
   i, State: integer;
   Text: string;
@@ -83,22 +93,22 @@ begin
     if (ALines[i] = '') or (ALines[i][1] = '-') then
       Continue;
     Text := Copy(ALines[i], 2, MaxInt);
-    if IsMarker(Text, '<') and (State = crNone) then
+    if IsMarker(Text, '<', AMarkerSize) and (State = crNone) then
     begin
       Result[i] := crMarker;
       State := crOurs;
     end
-    else if IsMarker(Text, '|') and (State = crOurs) then
+    else if IsMarker(Text, '|', AMarkerSize) and (State = crOurs) then
     begin
       Result[i] := crMarker;
       State := crBase;
     end
-    else if IsMarker(Text, '=') and (State in [crOurs, crBase]) then
+    else if IsMarker(Text, '=', AMarkerSize) and (State in [crOurs, crBase]) then
     begin
       Result[i] := crMarker;
       State := crTheirs;
     end
-    else if IsMarker(Text, '>') and (State = crTheirs) then
+    else if IsMarker(Text, '>', AMarkerSize) and (State = crTheirs) then
     begin
       Result[i] := crMarker;
       State := crNone;
@@ -120,7 +130,7 @@ begin
   Result := nil;
   n := 0;
   for i := 0 to Min(High(ARoles), ALines.Count - 1) do
-    if (ARoles[i] = crMarker) and IsMarker(Copy(ALines[i], 2, MaxInt), '<') then
+    if (ARoles[i] = crMarker) and MarkerIs(ALines, i, '<') then
     begin
       SetLength(Result, n + 1);
       Result[n] := i;
@@ -129,8 +139,14 @@ begin
 end;
 
 function MarkerName(const ALine: string): string;
+var
+  i: integer;
 begin
-  Result := Trim(Copy(ALine, 9, MaxInt));
+  { After the run of the marker's character, however long. }
+  i := 2;
+  while (i <= Length(ALine)) and (ALine[i] = ALine[2]) do
+    Inc(i);
+  Result := Trim(Copy(ALine, i, MaxInt));
 end;
 
 { Whether diff line AIndex is a deleted one, which is not in the file. }
@@ -145,7 +161,7 @@ var
 begin
   Result := AStart;
   if (AStart < 0) or (AStart > High(ARoles)) or (AStart >= ALines.Count) or
-    (ARoles[AStart] <> crMarker) or not IsMarker(Copy(ALines[AStart], 2, MaxInt), '<') then
+    (ARoles[AStart] <> crMarker) or not MarkerIs(ALines, AStart, '<') then
     Exit;
   for i := AStart + 1 to Min(High(ARoles), ALines.Count - 1) do
   begin
@@ -154,7 +170,7 @@ begin
     if ARoles[i] = crNone then
       Exit;
     Result := i;
-    if (ARoles[i] = crMarker) and IsMarker(Copy(ALines[i], 2, MaxInt), '>') then
+    if (ARoles[i] = crMarker) and MarkerIs(ALines, i, '>') then
       Exit;
   end;
 end;
@@ -167,7 +183,7 @@ begin
   AOurs := '';
   ATheirs := '';
   if (AStart < 0) or (AStart > High(ARoles)) or (AStart >= ALines.Count) or
-    (ARoles[AStart] <> crMarker) or not IsMarker(Copy(ALines[AStart], 2, MaxInt), '<') then
+    (ARoles[AStart] <> crMarker) or not MarkerIs(ALines, AStart, '<') then
     Exit;
   AOurs := MarkerName(ALines[AStart]);
   for i := AStart + 1 to Min(High(ARoles), ALines.Count - 1) do
@@ -176,7 +192,7 @@ begin
       Continue;
     if ARoles[i] = crNone then
       Exit;
-    if (ARoles[i] = crMarker) and IsMarker(Copy(ALines[i], 2, MaxInt), '>') then
+    if (ARoles[i] = crMarker) and MarkerIs(ALines, i, '>') then
     begin
       ATheirs := MarkerName(ALines[i]);
       Exit;
@@ -200,6 +216,7 @@ var
   Ours, Theirs: TStringArray;
   Text: string;
 begin
+  Result := Default(TGittanDiscard);
   Result.FileName := AFileName;
   Result.Resolved := False;
   Result.OldLines := nil;
@@ -238,7 +255,7 @@ begin
       crOurs: Append(Ours, Text);
       crTheirs: Append(Theirs, Text);
     end;
-    if (ARoles[i] = crMarker) and IsMarker(Text, '>') then
+    if (ARoles[i] = crMarker) and MarkerIs(ALines, i, '>') then
       Break;
   end;
   while (After < ALines.Count) and Deleted(ALines, After) do

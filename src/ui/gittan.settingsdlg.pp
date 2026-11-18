@@ -546,11 +546,11 @@ begin
   FNavPanel.BevelOuter := bvNone;
   FNavPanel.Align := alLeft;
   FNavPanel.Left := 0;
-  FNavPanel.Width := Scale96ToScreen(NavWidth);
+  FNavPanel.Width := Scale96ToForm(NavWidth);
   FNavPanel.Parent := Self;
   FNav := TGittanSideNav.Create(Self);
   FNav.Align := alTop;
-  FNav.BorderSpacing.Top := Scale96ToScreen(8);
+  FNav.BorderSpacing.Top := Scale96ToForm(8);
   FNav.OnPick := @NavPick;
   FNav.Parent := FNavPanel;
   FContent := TPanel.Create(Self);
@@ -558,9 +558,9 @@ begin
   FContent.AutoSize := True;
   FContent.Align := alLeft;
   FContent.Left := 1000;
-  FContent.Constraints.MinWidth := Scale96ToScreen(ContentWidth);
-  FContent.ChildSizing.LeftRightSpacing := Scale96ToScreen(ContentMargin);
-  FContent.ChildSizing.TopBottomSpacing := Scale96ToScreen(ContentMargin);
+  FContent.Constraints.MinWidth := Scale96ToForm(ContentWidth);
+  FContent.ChildSizing.LeftRightSpacing := Scale96ToForm(ContentMargin);
+  FContent.ChildSizing.TopBottomSpacing := Scale96ToForm(ContentMargin);
   FContent.Parent := Self;
   FEditorBox := AddPage(rsEditorPage, niEditor);
   FToolsBox := AddPage(rsToolsPage, niTools);
@@ -579,13 +579,13 @@ begin
   Btn.AutoSize := True;
   Btn.Align := alRight;
   Btn.Left := 1000;
-  Btn.BorderSpacing.Left := Scale96ToScreen(8);
+  Btn.BorderSpacing.Left := Scale96ToForm(8);
   Btn.OnClick := @ChangeFontClick;
   Btn.Parent := Row;
   FSizeEdit := TSpinEdit.Create(Self);
   FSizeEdit.MinValue := MinFontSize;
   FSizeEdit.MaxValue := MaxFontSize;
-  FSizeEdit.Width := Scale96ToScreen(64);
+  FSizeEdit.Width := Scale96ToForm(64);
   FSizeEdit.Align := alRight;
   FSizeEdit.Left := 0;
   FSizeEdit.OnChange := @SizeChange;
@@ -605,10 +605,10 @@ begin
   FTabEdit := TSpinEdit.Create(Self);
   FTabEdit.MinValue := MinTabSize;
   FTabEdit.MaxValue := MaxTabSize;
-  FTabEdit.Width := Scale96ToScreen(64);
+  FTabEdit.Width := Scale96ToForm(64);
   FTabEdit.Align := alLeft;
   FTabEdit.Left := 1000;
-  FTabEdit.BorderSpacing.Left := Scale96ToScreen(8);
+  FTabEdit.BorderSpacing.Left := Scale96ToForm(8);
   FTabEdit.OnChange := @TabChange;
   FTabEdit.Parent := Row;
 
@@ -632,12 +632,12 @@ begin
     FSampleButtons[i].AutoSize := True;
     FSampleButtons[i].Align := alLeft;
     FSampleButtons[i].Left := i * 1000;
-    FSampleButtons[i].BorderSpacing.Right := Scale96ToScreen(4);
+    FSampleButtons[i].BorderSpacing.Right := Scale96ToForm(4);
     FSampleButtons[i].OnClick := @SampleClick;
     FSampleButtons[i].Parent := Row;
   end;
   FSampleEdit := TATSynEdit.Create(Self);
-  FSampleEdit.Height := Scale96ToScreen(SampleHeight);
+  FSampleEdit.Height := Scale96ToForm(SampleHeight);
   FSampleEdit.ModeReadOnly := True;
   FSampleEdit.OptCaretVirtual := False;
   FSampleEdit.OptRulerVisible := False;
@@ -682,17 +682,17 @@ begin
   FAutoFetchEdit := TSpinEdit.Create(Self);
   FAutoFetchEdit.MinValue := MinAutoFetchMinutes;
   FAutoFetchEdit.MaxValue := MaxAutoFetchMinutes;
-  FAutoFetchEdit.Width := Scale96ToScreen(64);
+  FAutoFetchEdit.Width := Scale96ToForm(64);
   FAutoFetchEdit.Align := alLeft;
   FAutoFetchEdit.Left := 1000;
-  FAutoFetchEdit.BorderSpacing.Left := Scale96ToScreen(6);
+  FAutoFetchEdit.BorderSpacing.Left := Scale96ToForm(6);
   FAutoFetchEdit.Parent := Row;
   Lbl := TLabel.Create(Self);
   Lbl.Caption := rsAutoFetchMinutes;
   Lbl.Align := alLeft;
   Lbl.Left := 2000;
   Lbl.Layout := tlCenter;
-  Lbl.BorderSpacing.Left := Scale96ToScreen(6);
+  Lbl.BorderSpacing.Left := Scale96ToForm(6);
   Lbl.Parent := Row;
   Lbl := AddLabel(rsAutoFetchNote, 4);
   Lbl.Font.Color := clGrayText;
@@ -746,7 +746,7 @@ begin
   Lbl.Font.Color := clGrayText;
   Lbl.WordWrap := True;
   FExtList := TCheckListBox.Create(Self);
-  FExtList.Height := Scale96ToScreen(110);
+  FExtList.Height := Scale96ToForm(110);
   FExtList.OnSelectionChange := @ExtListSelect;
   Place(FExtList, 8);
   FExtInfo := AddLabel('', 8);
@@ -764,7 +764,7 @@ begin
   FExtReloadBtn.AutoSize := True;
   FExtReloadBtn.Align := alLeft;
   FExtReloadBtn.Left := 500;
-  FExtReloadBtn.BorderSpacing.Left := Scale96ToScreen(8);
+  FExtReloadBtn.BorderSpacing.Left := Scale96ToForm(8);
   FExtReloadBtn.OnClick := @ExtReloadClick;
   FExtReloadBtn.Parent := Row;
   FExtResetBtn := TButton.Create(Self);
@@ -772,7 +772,7 @@ begin
   FExtResetBtn.AutoSize := True;
   FExtResetBtn.Align := alLeft;
   FExtResetBtn.Left := 1000;
-  FExtResetBtn.BorderSpacing.Left := Scale96ToScreen(8);
+  FExtResetBtn.BorderSpacing.Left := Scale96ToForm(8);
   FExtResetBtn.OnClick := @ExtResetClick;
   FExtResetBtn.Parent := Row;
   FExtSettingsBox := TPanel.Create(Self);
@@ -825,10 +825,10 @@ begin
   Row := AddRow(0);
   FAppIcon := LoadAppIcon;
   Box := TPaintBox.Create(Self);
-  Box.Width := Scale96ToScreen(AboutIconSize);
-  Box.Height := Scale96ToScreen(AboutIconSize);
+  Box.Width := Scale96ToForm(AboutIconSize);
+  Box.Height := Scale96ToForm(AboutIconSize);
   Box.Align := alLeft;
-  Box.BorderSpacing.Right := Scale96ToScreen(14);
+  Box.BorderSpacing.Right := Scale96ToForm(14);
   Box.OnPaint := @AppIconPaint;
   Box.Visible := FAppIcon <> nil;
   Box.Parent := Row;
@@ -862,7 +862,7 @@ begin
   Btn.Parent := Row;
   FUpdateLink := AddLink(Row, '', '');
   FUpdateLink.Layout := tlCenter;
-  FUpdateLink.BorderSpacing.Left := Scale96ToScreen(10);
+  FUpdateLink.BorderSpacing.Left := Scale96ToForm(10);
 
   AddLabel(rsRunsOn, 16);
   { Room for the versions until they are read; the last line holds a space,
@@ -875,7 +875,7 @@ begin
   Btn.Caption := rsCopyVersions;
   Btn.AutoSize := True;
   Btn.Align := alLeft;
-  Btn.BorderSpacing.Right := Scale96ToScreen(14);
+  Btn.BorderSpacing.Right := Scale96ToForm(14);
   Btn.OnClick := @CopyVersionsClick;
   Btn.Parent := Row;
   AddLink(Row, rsWebsite, GittanSite).Layout := tlCenter;
@@ -900,8 +900,8 @@ begin
   OK.Left := 0;
   Cancel.Left := 1000;
   {$ENDIF}
-  Cancel.BorderSpacing.Left := Scale96ToScreen(8);
-  OK.BorderSpacing.Left := Scale96ToScreen(8);
+  Cancel.BorderSpacing.Left := Scale96ToForm(8);
+  OK.BorderSpacing.Left := Scale96ToForm(8);
 end;
 
 { Update jobs dropped by a dialog that closed while they ran, freed once
@@ -1005,7 +1005,7 @@ end;
 procedure TSettingsForm.Place(AControl: TControl; ASpaceAbove: integer);
 begin
   AControl.Align := alTop;
-  AControl.BorderSpacing.Top := Scale96ToScreen(ASpaceAbove);
+  AControl.BorderSpacing.Top := Scale96ToForm(ASpaceAbove);
   Inc(FNextTop, 1000);
   AControl.Top := FNextTop;
   AControl.Parent := FBox;
@@ -1249,7 +1249,7 @@ begin
         Spin.MinValue := -MaxInt;
         Spin.MaxValue := MaxInt;
         Spin.Value := StrToIntDef(ExtValueOf(Def), 0);
-        Spin.Width := Scale96ToScreen(100);
+        Spin.Width := Scale96ToForm(100);
         Spin.Tag := i;
         Spin.OnChange := @ExtSettingChange;
         Place(Spin, 4);
@@ -1378,7 +1378,7 @@ begin
   Result.Caption := ACaption;
   Result.ModalResult := AResult;
   Result.AutoSize := True;
-  Result.Constraints.MinWidth := Scale96ToScreen(84);
+  Result.Constraints.MinWidth := Scale96ToForm(84);
   Result.Align := alRight;
   Result.Parent := ARow;
 end;
@@ -1772,7 +1772,7 @@ begin
   Result.OnClick := @LinkClick;
   Result.Align := alLeft;
   Result.Left := ARow.ControlCount * 1000;
-  Result.BorderSpacing.Right := Scale96ToScreen(14);
+  Result.BorderSpacing.Right := Scale96ToForm(14);
   Result.Parent := ARow;
   SetLength(FLinks, Length(FLinks) + 1);
   FLinks[High(FLinks)] := Result;

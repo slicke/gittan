@@ -4,6 +4,94 @@
 
 ### Fixed
 
+- Reload Extensions clicked again while extensions are still being loaded or unloaded is ignored, instead of unloading them a second time while the first reload is under way.
+- An extension can have at most 64 calls such as `git.run` or `fetch` under way at once; more are rejected. Before, thousands at once could use up the threads, after which every reload waited a second and quitting two seconds for tasks that did not exist.
+- An extension file removed or changed while Gittan loads it no longer stops the extensions after it from loading with an error dialog, and the code that runs is the code whose permissions you approved, not the file read again.
+- A program an extension runs (`git.run`, `exec.run`, the forge's tool) is stopped when the extensions are reloaded, after ten minutes, or once it has written 32 MB, instead of keeping a thread for the whole session and making every reload and quit wait for it.
+- An extension can no longer register a Batch operation or a forge tab around `Gittan.batch` and `Gittan.forgeTabs`, which left a run on "Running on 1 of N…" or a tab on Loading for good.
+- An extension whose promise continuation was stopped, or whose promise was rejected with a value that cannot be shown, no longer makes the next call of another extension fail with that error, which could let a commit go ahead past the other extension's `commit.before` check.
+- An error thrown by an extension's command, event listener (such as a `commit.before` check), timer or unload hook is now shown in a banner under the extension's name; it went nowhere. `Gittan.log` now writes to the extension console, where it went nowhere either and slowed down the more was logged.
+- Reloading extensions while one of them waits on git, a program, the forge or a fetch no longer keeps that extension's memory; after a few such reloads every extension failed with "out of memory" until Gittan was restarted.
+- An extension stuck in a loop that splits a long text or parses JSON over and over is stopped after 10 seconds, instead of freezing Gittan for good (at every start, when the loop runs as the extension loads); a dialog the extension shows does not count toward the 10 seconds.
+- Quitting or leaving a repository no longer waits for a background fetch, or a fetch you started, from a server that does not answer; the fetch is given up. Fetch, pull and push over ssh give up a server that stays silent for a minute or takes over 30 seconds to connect, and over HTTP a transfer that has stalled for a minute, unless your own ssh command or `http.lowSpeedLimit`/`lowSpeedTime` settings say otherwise. A pull request fetch now uses the same ssh settings as the other fetches.
+- The commit graph with No Merges no longer takes seconds and hundreds of megabytes on a long history (20,000 commits took 44 s); it lays out at once.
+- A large changed or untracked file no longer slows down every poll of the repository and every commit, stash or switch: its content is hashed only while it is being written (a 512 MB file cost 1.7 s a poll, now 40 ms), and those commands no longer wait for a poll under way.
+- Showing a large diff or file no longer slows down with its size: git's output is read without copying all of it for every piece (a 130 MB diff took 7.5 s, now a fraction of a second).
+- The Project page of a Lazarus repository no longer follows symbolic links when it looks for packages; a few committed links to the repository itself made it hang for minutes.
+- Showing a file with many changed blocks no longer takes time that grows with the square of its length (a 50,000-line diff took 2.4 s on every show and refresh, now a few milliseconds).
+- Two Gittan windows started as separate processes no longer undo each other's settings when they save: an extension turned off or its permissions reset, a trusted key or commands file and other changes made in one are kept when the other saves, and the settings dialog saves as it closes.
+- A signed commit shows as verified only when the key stands for the committer's e-mail; a commit signed with someone's trusted key but made out to another committer now says "Signed by X, not by the committer Y" with an outlined shield. A key trusted from GitHub before this asks to be trusted again, so its verified e-mails are kept, and the card names the GitHub user rather than the key's own user id.
+- A `.gittan/repo.toml` or commands file with a dotted key or table header tens of thousands of parts long is refused instead of ending Gittan when the repository opens.
+- A Lazarus `.lpi` or `.lpk` nested thousands of levels deep is not read, instead of ending Gittan when the repository opens.
+- JSON an extension passes nested thousands of levels deep is refused instead of ending Gittan.
+- The issue expression of a cloned `.gittan/repo.toml` links issues only after you choose Use It in the banner that offers it, since an expression such as `(a+)+b` could make Gittan hang on a commit's message.
+- Add to .gitignore, Track with Git LFS and the editor no longer write through a `.gitignore`, `.gitattributes` or other repository file that is a committed symbolic link, which could point at `.git/config` or outside the clone; the Config section leaves such links out.
+- The Project page opens only web links, so a Cargo.toml whose repository is a `file:`, `smb:` or similar URL can no longer start a program with a click.
+- An interactive rebase, a rebase onto another branch or a reset no longer goes ahead when the branch moved or was switched while you were asked, where a commit made meanwhile was dropped; a tag made at HEAD goes on the commit the question named.
+- Undo of a mixed reset (Reset to Here › Mixed, or `git reset HEAD~1`) works, where git always refused it as "not uptodate" or over an untracked file. It refuses a file you have staged since with other content, rather than replace what you staged.
+- A tag without a message is made when signing is on, instead of failing with "Terminal is dumb" or waiting for an editor, and no git command Gittan runs starts an editor any more.
+- On Windows and Linux above 100 % scaling, the dialogs (Settings, Interactive Rebase, Remotes, Patches, Identity, Clone, Clean and the others) have their intended size instead of growing by the scale twice, and the merge view's headers and splitters are no longer twice as large.
+- A tab closed while it loads a large file or waits for a parse closes once that is done, instead of going on in freed memory.
+- Typing in the file filter or a refresh while a hover or Go to Symbol in Repository reads the changed files no longer reaches a file row the tree has let go of.
+- Quitting with several tabs open no longer lets a tab still closing read the names of tabs already gone, and a tab closed during a save question at quit is passed over rather than skipping another.
+- Closing a tab or quitting while a pull request lookup, a blame or a fetch is under way no longer lets that finish on the tab being closed.
+- An argument with a NUL character is refused, so an extension can no longer slip a flag or command past the checks on what it may run with the forge's tool, git or a program.
+- Switching to a remote branch from the branch list makes the local branch from the remote you picked, even when another remote has a branch of the same name or `checkout.defaultRemote` names another. Before, git refused, or quietly tracked the other remote's commit. A remote with a slash in its name now gives the right branch name.
+- Batch's maintenance task that points a remote's HEAD at its new default branch now works when that branch was force-pushed since the last fetch. Before, git rejected the fetch and the HEAD was never set.
+- A repository in a folder whose name ends in a space opens. Before, Gittan dropped the space from its path and git's calls failed or ran in the wrong folder.
+- A Bun project with only `bun.lockb`, Bun's binary lock file before 1.2, no longer gets the "No lock file" warning on its project page.
+- A BMP whose header gives a negative (top-down) height is held to the same size limit as any other image in the image comparison, so a small crafted file can no longer make Gittan allocate gigabytes on the main thread.
+- Add to .gitignore on a file whose name holds a carriage return, such as macOS's folder icon file `Icon\r`, writes a pattern that hides it, and a name with a line break no longer splits into two patterns.
+- Compare With > Other refuses a range one of whose sides is not a commit or starts with a dash. Before, a range went to git unchecked, so `--output=<file>..x` made `git diff` write to that file.
+- Fetching a pull request with no remote to fetch it from, or with no ref from the forge, says so, instead of failing with an empty message.
+- Trusting a signing key adds its line at the end of the allowed signers file instead of rewriting the file, so a full disk or a crash meanwhile can no longer leave it empty, and what was there keeps its line ends.
+- A settings.json or state.json that begins with a UTF-8 byte order mark, as Notepad and PowerShell 5 write it, is read instead of reset to the defaults, and one that cannot be read (no permission, or locked by another program) is no longer written over with the defaults on the next save.
+- Show History and other filtered views of the commit graph read the log once instead of twice, which halves the wait on a large repository.
+- Moving the mouse from one link to the next on the commands page or the project page shows the new link's tooltip instead of keeping the last one's.
+- A file that cannot be read when it is opened (no permission, locked by another program on Windows, or gone since it was listed) is said in a banner, and the view is no longer left editable with no syntax colors.
+- On Haiku, Reveal opens the folder in Tracker and Open in Terminal opens Haiku's Terminal; before, both did nothing.
+- Delete Gone Branches leaves out a branch checked out in another worktree, which git will not delete, and a branch it could not delete for another reason is named in a banner with git's reason. Before, the status bar told only of the ones deleted, with no word of the rest, and the row kept coming back.
+- A file whose `.gitattributes` sets `conflict-marker-size` has its conflicts found: the change view's pick buttons, the merge editor's blocks and Mark Resolved's check for markers left all go by that size. Before, none were found, and Mark Resolved staged the file with its markers in it.
+- A file replaced with a symbolic link shows its old lines deleted and the link added, instead of the second diff's header (`--- /dev/null`, `+++ b/x`) as changed lines; the line history reads such a commit the same way.
+- Undo Revert brings a file back with the permissions it had, so a new executable script, or a change that only made a file executable, is executable again.
+- A settings save whose write failed no longer counts what it took in from another Gittan as its own change, which the next save would write over a newer one.
+- Undo of a mixed reset is no longer refused because a file whose name differs only in case, such as foo beside Foo, has staged changes; and when it has to move HEAD back after a failed step, it no longer drops a commit another git made in the meantime.
+- Switching to a remote branch works when a tag has the same name as it, such as a tag origin/feature; git took the tag and refused to track it.
+- Saving a repository file such as .gitignore checks again that it is not a link, so a pull that made it one after it was opened no longer has the save write where the link points.
+- A git command or extension program given input no longer waits for a process it left running in the background that holds the input open without reading it, such as a hook's job; it returns when the command ends.
+- Undo Discard after a discard that brought a deleted file back deletes the file again; before, it left an empty file, which a commit would take.
+- A click on an author in the commit graph's statistics or on the repository page shows that author's commits alone: before, a click on Ann listed Anna's and Joanne's too, and on Linux and Windows an author whose name git kept in two forms of the same letters was split again.
+- Absorb folds its fixups into their commits when a prepare-commit-msg hook changes their subjects, such as by putting a ticket number first; before, they stayed as commits of their own while Absorb said the changes were absorbed.
+- A repository command that keeps running, such as a dev server, or an editor Gittan starts, no longer makes a background job that feeds git its input (checking signatures, Absorb, the batch actions) hang for as long as it runs.
+- An image or binary file in Git LFS that is in conflict and not downloaded keeps Use Mine, Use Theirs and Mark Resolved beside Download; before, Download took their place, and a click on it asked whether to resolve with Mine.
+- A clone that finishes while another tab is in front opens in the tab it was started in, which stays behind; before, it opened a new tab that took the front, and the clone's tab stayed empty.
+- Keep and Unkeep in the change view leave the caret, the scroll and the hidden lines you opened where they were; before, they moved by as many lines as the keep took out or put back.
+- A repository whose files were touched without being changed (by a code generator, unzip, rsync or a sync client) no longer keeps Gittan's background check slow: once two checks in a row are slow, Gittan refreshes git's index, so later checks no longer read every such file again.
+- On macOS, tabs that no longer fit in the window no longer slide under the GitHub globe: the strip shows as many as fit, always with the shown one among them, and "+N" after them, which brings in the next hidden tab when clicked.
+- Changing the syntax while resolving a conflict in the merge editor no longer marks the result as edited by hand, which dimmed the panes, stopped the picks and asked to save on leaving.
+- A long subject or body line that wraps in the summary or a review thread keeps its quotes: Revert "Add the feature" lost them, and a line with a lone quote, such as 12" screen, had the rest of its paragraph broken letter by letter.
+- The welcome view no longer hangs Gittan when it shows why a repository did not open in a pane narrower than its padding.
+- Editing a remote's URL in the Remotes dialog no longer saves the old push address as a push URL of its own when git's pushInsteadOf rewrites it, which kept pushes going to the old repository.
+- The Name and Email dialog keeps the key it picked when none is set, so Save is no longer off for a name change with signing on and no key; and turning SSH signing on offers the key set in git, not the first one in ~/.ssh.
+- Every tab's unfinished commit message is kept when Gittan quits; before, only the shown tab's came back.
+- The Files page of a folder with thousands of entries no longer grows past the height a control can have, and the mouse moving over it repaints only the rows it leaves and reaches.
+- On Windows and Linux, a command picked in the menu button's menu or the Alt menu bar while a refresh rebuilt Compare With, Open Recent or Pull no longer clicks a freed menu item.
+- The welcome view no longer hangs when its error is wrapped in a box narrower than its padding.
+- A middle click on the tab bar's "+N" on macOS no longer closes a tab that is not shown.
+- A remote with several URLs shows the first one in Remotes, the one fetch uses, so changing only its push URL no longer replaces the first URL with the last.
+- A commit message draft from a build before drafts were kept per repository no longer comes back after it was committed or cleared.
+- A branch switch or a commit right after the watcher of a slow repository began refreshing the index no longer fails because index.lock is taken.
+- Marking a block Reviewed no longer moves the caret to the end of the diff when it was on one of the last lines.
+- An extension's console.log dialog left open for a while no longer gets the script stopped by the 10-second limit once it is closed.
+- A module extension whose loading was queued behind other extensions' work runs the text that was granted, not its file read again.
+- A remote URL with a line break in it (a local path) is read whole in Remotes.
+- A repository removed from Recent and then opened again in the same session stays in Recent.
+- An extension whose promise reactions queue each other without end is stopped after the script time limit, also when it has many timers running, and unhandled rejections of other extensions are reported again.
+
+## 0.21 (build-146, 2026-11-17)
+
+### Fixed
+
 - A branch's first push goes to the remote `branch.<name>.pushRemote` or `remote.pushDefault` names, as git would, where it went to the first remote.
 - On Windows, an extension's commands get the repository's environment when PATH and the like are spelled in another case.
 - An extension allowed to run commands or reach the forge is given the repository in its commands' context.

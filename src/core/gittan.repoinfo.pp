@@ -81,7 +81,12 @@ type
 function ParseRemotes(const AOutput: string): TGittanRemotes;
 
 {** The remotes of the repository at ARoot, read by ParseRemotes; false,
-  with git's message in AError, when git failed. }
+  with git's message in AError, when git failed. Url and PushUrl are as
+  the config has them (remote.<name>.url, the first pushurl, else the
+  url), not as `remote -v` shows them after url.<base>.insteadOf and
+  pushInsteadOf: an edit writes them back, and the rewritten push URL
+  would be saved as a pushurl of its own. Web is from the rewritten URL,
+  the address git reaches. }
 function ReadRemotes(const ARoot: string; out ARemotes: TGittanRemotes;
   out AError: string): boolean;
 
@@ -233,15 +238,43 @@ begin
   end;
 end;
 
+{ The first value of git config -z --get-all's output. }
+function FirstValue(const AOutput: string): string;
+var
+  p: SizeInt;
+begin
+  p := Pos(#0, AOutput);
+  if p > 0 then
+    Result := Copy(AOutput, 1, p - 1)
+  else
+    Result := AOutput;
+end;
+
 function ReadRemotes(const ARoot: string; out ARemotes: TGittanRemotes;
   out AError: string): boolean;
 var
-  Output: string;
+  Output, Err: string;
+  i: integer;
 begin
   ARemotes := nil;
   Result := RunGitIn(ARoot, ['remote', '-v'], Output, AError);
-  if Result then
-    ARemotes := ParseRemotes(Output);
+  if not Result then
+    Exit;
+  ARemotes := ParseRemotes(Output);
+  for i := 0 to High(ARemotes) do
+  begin
+    { The first url, as remote -v and git fetch take it: --get gives the
+      last of several. Ended by NULs (-z), as a value may hold a line
+      break (a local path). }
+    if RunGitIn(ARoot, ['config', '-z', '--get-all', 'remote.' + ARemotes[i].Name + '.url'],
+      Output, Err) and (FirstValue(Output) <> '') then
+      ARemotes[i].Url := FirstValue(Output);
+    if RunGitIn(ARoot, ['config', '-z', '--get-all', 'remote.' + ARemotes[i].Name + '.pushurl'],
+      Output, Err) and (FirstValue(Output) <> '') then
+      ARemotes[i].PushUrl := FirstValue(Output)
+    else
+      ARemotes[i].PushUrl := ARemotes[i].Url;
+  end;
 end;
 
 function RemoteWebUrl(const AUrl: string): string;

@@ -119,6 +119,12 @@ JSValueVal = record
     BoolVal: boolean;
     Func: Pointer;
     ObjectVal: Pointer;
+    { The runtime of a JD_OBJ that holds a reference of its own, which
+      FreeJSParameters gives back; nil for a borrowed one. }
+    ObjectRt: Pointer;
+    { ExtRuntimeGeneration when the reference was taken: given back only
+      while that runtime is the live one. }
+    ObjectGen: QWord;
     Parsed: string;
     ArrayVal: TJSValList;
     end;
@@ -296,6 +302,25 @@ procedure ExtError(const msg, error: string); overload;
   }
 procedure ExtError(const error: string); overload;
 
+var
+  {** The number of the extensions' live runtime, 0 while there is none:
+      the engine sets a new one for each runtime it makes
+      (`ExtRuntimeStarted`) and clears it before it frees the runtime, so a
+      late promise task or parameter list leaves the values of a runtime
+      gone alone, even when another one has started since (a pointer to
+      it alone could be the new one's, at the same address). }
+  ExtRuntimeGeneration: QWord = 0;
+
+{** Gives the runtime just made a number of its own in
+  ExtRuntimeGeneration. }
+procedure ExtRuntimeStarted;
+
+  {** Adds ALine to the console lines console.pop shows, cut to a length and
+    keeping the newest only. }
+procedure AddConsoleLine(const ALine: string);
+  {** "[name] " of the extension of ctx, '' when none is known. }
+function ConsoleAttribution(ctx: JSContext): string;
+
 const
 JS_TAG_UNKNOWN = -10;
 JS_PARAM_MISSMATCH = 150;
@@ -310,6 +335,15 @@ const
   MaxConsoleLines = 1000;
   { The longest line kept, in bytes; a longer one ends in an ellipsis. }
   MaxConsoleLineBytes = 2000;
+
+var
+  ExtRuntimesMade: QWord = 0;
+
+procedure ExtRuntimeStarted;
+begin
+  Inc(ExtRuntimesMade);
+  ExtRuntimeGeneration := ExtRuntimesMade;
+end;
 
 procedure AddConsoleLine(const ALine: string);
 var
@@ -684,7 +718,12 @@ begin
     begin
       Inner := JSParameters(AParams[i]^.Data.ArrayVal);
       FreeJSParameters(Inner);
-    end;
+    end
+    else if (AParams[i]^.Data.match = JD_OBJ) and (AParams[i]^.Data.ObjectRt <> nil) and
+      (AParams[i]^.Data.ObjectGen <> 0) and
+      (AParams[i]^.Data.ObjectGen = ExtRuntimeGeneration) then
+      JS_FreeValueRT(JSRuntime(AParams[i]^.Data.ObjectRt),
+        JSValueFromPtr(JS_TAG_OBJECT, AParams[i]^.Data.ObjectVal));
     Dispose(AParams[i]);
   end;
   FreeAndNil(AParams);
@@ -712,7 +751,11 @@ end;
 
 function JSTryToString(ctx: JSContext; Data: JSValue; out str: string): boolean;
 begin
-  // Attempt to parse the JSValue as a string
+  str := '';
+  // Only a string is parsed: an object or array would take references
+  // (and memory) that nothing here gives back.
+  if not JS_IsString(Data) then
+    Exit(false);
   with JSParseValue(ctx, Data) do
     if Data.match <> JD_STR then
       Result := false
@@ -754,13 +797,28 @@ var
   pVal: PJSValueVal;
   isArr: boolean;
 begin
-  // If val is an object or recognized as an array
+  Result := Default(JSValueVal);
+  // An array is an array (JS_IsArray), not any object with a length: one
+  // without a length was taken for an empty array (ToInt32 of undefined
+  // is 0), and a function for an array as long as its parameters.
   // quickjs-ng's JS_IsArray takes no context and returns a plain boolean.
   if val.IsObject or JS_IsArray(val) then
   begin
-    arrVal := JS_GetPropertyStr(ctx, val.Raw, 'length');
-    isArr := (not val.IsUndefined) and (JS_ToInt32(ctx, @len, arrVal) = 0);
-    JS_FreeValue(ctx, arrVal);
+    isArr := JS_IsArray(val);
+    len := 0;
+    if isArr then
+    begin
+      arrVal := JS_GetPropertyStr(ctx, val.Raw, 'length');
+      isArr := JS_ToInt32(ctx, @len, arrVal) = 0;
+      JS_FreeValue(ctx, arrVal);
+      // What a length getter (a Proxy's) threw is not left pending.
+      if JS_HasException(ctx) then
+      begin
+        elem := JS_GetException(ctx);
+        JS_FreeValue(ctx, elem);
+        isArr := false;
+      end;
+    end;
     if isArr and ((ADepth >= MaxParseDepth) or (len < 0) or (len > MaxParseLength) or
       (len > ABudget)) then
     begin
@@ -788,9 +846,14 @@ begin
     end
     else
     begin
-      // Not an array => treat as an object
+      // Not an array => an object, with a reference of its own, so a
+      // threaded native may still use it once the call has returned;
+      // FreeJSParameters gives it back.
       Result.Data.match := JD_OBJ;
       Result.Data.ObjectVal := val.Ptr;
+      JS_DupValue(ctx, val);
+      Result.Data.ObjectRt := JS_GetRuntime(ctx);
+      Result.Data.ObjectGen := ExtRuntimeGeneration;
     end;
     Exit;
   end;
@@ -853,6 +916,8 @@ begin
   begin
     Result.Data.match := JD_OBJ;
     Result.Data.ObjectVal := val.Ptr;
+    Result.Data.ObjectRt := nil;
+    Result.Data.ObjectGen := 0;
   end
   else
   if JS_IsFunction(ctx, val.Raw) then
@@ -1055,6 +1120,22 @@ begin
     Result := false;
 end;
 
+
+{ The host's log dialog, modal in the app: the time the user reads it is
+  a wait (JSWaitBegin), not the script's, so the watchdog does not stop
+  the script once it closes. }
+procedure ShowLogWaiting(const AName, ATitle, AText: string);
+var
+  Wait: TJSWait;
+begin
+  Wait := JSWaitBegin;
+  try
+    ExtHost.ShowLog(AName, ATitle, AText);
+  finally
+    JSWaitEnd(Wait);
+  end;
+end;
+
 { analyze() lived here: it called JS_GetException twice on a context whose
   exception had already been consumed, so it read properties off
   [uninitialized] - leaving a fresh TypeError pending and reporting that
@@ -1090,7 +1171,7 @@ begin
   extName := '';
   if Assigned(ConsoleExtNameLookup) then
     extName := ConsoleExtNameLookup(ctx);
-  ExtHost.ShowLog(extName, RS_LOG_TITLE, fullMsg);
+  ShowLogWaiting(extName, RS_LOG_TITLE, fullMsg);
 
   // Return undefined
   res^ := JS_UNDEFINED;
@@ -1225,9 +1306,9 @@ begin
     fullMsg := TrimRight(ConsoleBuffer.Text);
     ConsoleBuffer.Clear;
     if Assigned(ConsoleExtNameLookup) then
-      ExtHost.ShowLog(ConsoleExtNameLookup(ctx), RS_LOG_POP_TITLE, fullMsg)
+      ShowLogWaiting(ConsoleExtNameLookup(ctx), RS_LOG_POP_TITLE, fullMsg)
     else
-      ExtHost.ShowLog('', RS_LOG_POP_TITLE, fullMsg);
+      ShowLogWaiting('', RS_LOG_POP_TITLE, fullMsg);
   end;
 
   res^ := JS_NewInt32(ctx, Count);

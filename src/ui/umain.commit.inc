@@ -1404,33 +1404,24 @@ procedure TRepoFrame.ForgetCommitted(AJob: TGittanCommitJob);
 begin
   if not AJob.Ok then
     Exit;
-  if (App.Settings.CommitDraftRepo = AJob.Root) and Same(App.Settings.CommitDraft) then
-  begin
-    App.Settings.CommitDraft := '';
-    App.Settings.CommitDraftRepo := '';
-  end;
+  if Same(App.Settings.CommitDraftFor(AJob.Root)) then
+    App.Settings.SetCommitDraft(AJob.Root, '');
   if (FCommitMemo <> nil) and (FCommitDraftFor = AJob.Root) and
     Same(FCommitMemo.Text) then
     FCommitMemo.Text := FCommitTemplate;
 end;
 
-{ The message goes to the settings' one slot for the repository it was
-  written in; an empty field clears the slot only when it is that
-  repository's, so opening another one keeps the draft. }
+{ The message is kept as the draft of the repository it was written in,
+  one per repository, so every tab's outlasts a quit; an empty field
+  drops that repository's alone. }
 procedure TRepoFrame.SaveCommitDraft;
 begin
   if (FCommitMemo = nil) or (FCommitDraftFor = '') then
     Exit;
   if not MessageBlank then
-  begin
-    App.Settings.CommitDraft := FCommitMemo.Text;
-    App.Settings.CommitDraftRepo := FCommitDraftFor;
-  end
-  else if App.Settings.CommitDraftRepo = FCommitDraftFor then
-  begin
-    App.Settings.CommitDraft := '';
-    App.Settings.CommitDraftRepo := '';
-  end;
+    App.Settings.SetCommitDraft(FCommitDraftFor, FCommitMemo.Text)
+  else
+    App.Settings.SetCommitDraft(FCommitDraftFor, '');
 end;
 
 { After a repository is opened: its draft, if the slot holds one, and
@@ -1450,8 +1441,8 @@ begin
   { commit.template (or repo.toml's) fills a field with no draft, as
     git's editor would. }
   FCommitTemplate := FRepo.CommitTemplate(FRepoConfig.Template);
-  if (FRepo.Root <> '') and (App.Settings.CommitDraftRepo = FRepo.Root) then
-    FCommitMemo.Text := App.Settings.CommitDraft
+  if (FRepo.Root <> '') and (App.Settings.CommitDraftFor(FRepo.Root) <> '') then
+    FCommitMemo.Text := App.Settings.CommitDraftFor(FRepo.Root)
   else
     FCommitMemo.Text := FCommitTemplate;
   UpdateCommitState;

@@ -32,6 +32,7 @@ type
     procedure TestStopped;
     procedure TestFreeRunning;
     procedure TestRemoteJob;
+    procedure TestAbortFetch;
     procedure TestRemoteJobProgress;
     procedure TestTerminalText;
   end;
@@ -352,6 +353,46 @@ begin
     raise;
   end;
   RemoveTree(Remote);
+end;
+
+{ A fetch given up ends its git at once: the remote's ssh, which stands
+  in for a server that does not answer, marks that it started and then
+  takes its time; the job's thread is done long before it would end.
+  A push is not Abortable. }
+procedure TCommitJobTest.TestAbortFetch;
+var
+  Job: TGittanRemoteJob;
+  Started: string;
+  T: QWord;
+begin
+  {$ifdef unix}
+  Started := IncludeTrailingPathDelimiter(FDir) + 'started';
+  Git(['config', 'core.sshCommand', 'touch ''' + Started + '''; sleep 5; false']);
+  Git(['remote', 'add', 'origin', 'ssh://example.invalid/repo.git']);
+  Job := TGittanRemoteJob.Create(FDir, rkFetch);
+  try
+    AssertTrue(Job.Abortable);
+    Job.OnDone := @JobDone;
+    Job.Start;
+    WaitForFile(Started);
+    AssertTrue('ssh started', FileExists(Started));
+    T := GetTickCount64;
+    Job.Abort;
+    Job.WaitFor;
+    AssertTrue('ended at once', GetTickCount64 - T < 2500);
+    CheckSynchronize(0);
+    AssertEquals('nothing told after Abort', 0, FDone);
+    AssertFalse(Job.Ok);
+  finally
+    Job.Free;
+  end;
+  {$endif}
+  Job := TGittanRemoteJob.Create(FDir, rkPush);
+  try
+    AssertFalse(Job.Abortable);
+  finally
+    Job.Free;
+  end;
 end;
 
 initialization

@@ -135,6 +135,8 @@ Gittan.net.fetch("https://example.com/hook", {method: "POST", body: JSON.stringi
   .then(function (res) { return res.text(); });
 ```
 
+A program that runs longer than ten minutes, or writes more than 32 MB, is stopped, and so is one still running when the extensions are reloaded: the result then has `ok` false, `status` -1 and the reason in `stderr`.
+
 These run off the main thread and come back as promises. A script that runs for 10 seconds without returning is stopped; waiting for a promise does not count.
 
 ## The forge

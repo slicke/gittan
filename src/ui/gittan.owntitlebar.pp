@@ -873,10 +873,62 @@ procedure TGittanOwnTitleBar.CaptionButtonClick(APart: TGittanTitlePart);
 begin
 end;
 
+type
+  { A menu item copied from another, which it knows for as long as that
+    one lives: menus the app rebuilds (Compare With, Open Recent, Pull)
+    free their items with Clear, also while a copy is open (the
+    watcher's Synchronize runs in the modal loop of a Windows popup,
+    and a GTK popup is not modal), and a click then reaches nothing
+    instead of a freed item. }
+  TCopiedMenuItem = class(TMenuItem)
+  private
+    FSource: TMenuItem;
+    procedure SetSource(AValue: TMenuItem);
+  protected
+    procedure Notification(AComponent: TComponent; Operation: TOperation); override;
+  public
+    destructor Destroy; override;
+    property Source: TMenuItem read FSource write SetSource;
+  end;
+
+procedure TCopiedMenuItem.SetSource(AValue: TMenuItem);
+begin
+  if FSource = AValue then
+    Exit;
+  if FSource <> nil then
+    FSource.RemoveFreeNotification(Self);
+  FSource := AValue;
+  if FSource <> nil then
+    FSource.FreeNotification(Self);
+end;
+
+procedure TCopiedMenuItem.Notification(AComponent: TComponent;
+  Operation: TOperation);
+begin
+  inherited Notification(AComponent, Operation);
+  if (Operation = opRemove) and (AComponent = FSource) then
+    FSource := nil;
+end;
+
+destructor TCopiedMenuItem.Destroy;
+begin
+  Source := nil;
+  inherited Destroy;
+end;
+
+{ The item a copy stands for, nil when it is gone or Sender is not one. }
+function CopiedSource(Sender: TObject): TMenuItem;
+begin
+  if Sender is TCopiedMenuItem then
+    Result := TCopiedMenuItem(Sender).Source
+  else
+    Result := nil;
+end;
+
 { ASource's items as items of ATarget, owned by AOwner, that run AClick:
   captions, keys, checks and enabled states as they are now, and
-  submenus copied in turn. A separator stays one. Each item's Tag is
-  the item it copies. }
+  submenus copied in turn. A separator stays one. Each item is a
+  TCopiedMenuItem whose Source is the item it copies. }
 procedure CopyMenuItems(ASource, ATarget: TMenuItem; AOwner: TComponent;
   AClick: TNotifyEvent);
 var
@@ -888,7 +940,7 @@ begin
     Src := ASource.Items[i];
     if not Src.Visible then
       Continue;
-    Item := TMenuItem.Create(AOwner);
+    Item := TCopiedMenuItem.Create(AOwner);
     Item.Caption := Src.Caption;
     if not Src.IsLine then
     begin
@@ -897,7 +949,7 @@ begin
       Item.Checked := Src.Checked;
       Item.RadioItem := Src.RadioItem;
       Item.GroupIndex := Src.GroupIndex;
-      Item.Tag := PtrInt(Src);
+      TCopiedMenuItem(Item).Source := Src;
       if Src.Count > 0 then
         CopyMenuItems(Src, Item, AOwner, AClick)
       else
@@ -908,8 +960,12 @@ begin
 end;
 
 procedure TGittanOwnTitleBar.PopupItemClick(Sender: TObject);
+var
+  Item: TMenuItem;
 begin
-  TMenuItem(TMenuItem(Sender).Tag).Click;
+  Item := CopiedSource(Sender);
+  if Item <> nil then
+    Item.Click;
 end;
 
 procedure TGittanOwnTitleBar.PopupClose(Sender: TObject);
@@ -1673,9 +1729,10 @@ procedure TGittanMenuStrip.PopupItemClick(Sender: TObject);
 var
   Item: TMenuItem;
 begin
-  Item := TMenuItem(TMenuItem(Sender).Tag);
+  Item := CopiedSource(Sender);
   Dismiss(True);
-  Item.Click;
+  if Item <> nil then
+    Item.Click;
 end;
 
 { Closed for another menu (Left, Right, the mouse on another name): that

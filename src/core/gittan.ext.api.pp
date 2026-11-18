@@ -42,12 +42,21 @@ function ListJson(AList: TStrings): TJSONArray;
 {** A commit as the lists give it. }
 function CommitJson(const ACommit: TGittanCommitLine): TJSONObject;
 
+var
+  {** How long a program git.run, exec.run or forge.cli runs may take, in
+    milliseconds, and how much it may write on both streams, in bytes:
+    past either it is ended, so a hung one does not keep its thread for
+    the session, nor a talkative one fill the memory before the JS heap's
+    cap refuses its string. The tests make them smaller. }
+  ExtToolTimeLimitMs: QWord = 10 * 60 * 1000;
+  ExtToolOutputLimit: Int64 = 32 shl 20;
+
 implementation
 
 uses
   {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}BaseUnix,{$ENDIF}
   { DateUtils for LocalTimeToUniversal: FPC 3.2.2 has it only there. }
-  DateUtils, gittan.ext.functions, gittan.ext.perm, gittan.ext.host, gittan.ext.registry,
+  DateUtils, StrUtils, gittan.ext.functions, gittan.ext.perm, gittan.ext.host, gittan.ext.registry,
   gittan.ext.promise, gittan.ext.modules, gittan.http, gittan.textfile, gittan.reviews,
   gittan.forge;
 
@@ -593,7 +602,7 @@ begin
   if (Eng = nil) or (argc < 1) then
     Exit;
   try
-    Data := GetJSON(Arg(ctx, argc, argv, 0));
+    Data := GetJSONLimited(Arg(ctx, argc, argv, 0));
   except
     res^ := JS_ThrowError(ctx, 'Gittan.settings.define: a list of {key, type, label, default} is expected');
     Exit;
@@ -875,7 +884,7 @@ begin
   if (Eng = nil) or (argc < 1) then
     Exit;
   try
-    Data := GetJSON(Arg(ctx, argc, argv, 0));
+    Data := GetJSONLimited(Arg(ctx, argc, argv, 0));
   except
     res^ := JS_ThrowError(ctx, 'Gittan.ui.addCard: {path, line, text} is expected');
     Exit;
@@ -930,6 +939,7 @@ const
 procedure JSMessage(res: PJSValue; ctx: JSContext; this_val: PJSValue;
   argc: integer; argv: PJSValues; magic: integer);
 var
+  Wait: TJSWait;
   Eng: TGittanExtEngine;
   Data: TJSONData;
   O: TJSONObject;
@@ -976,7 +986,7 @@ begin
   if Eng = nil then
     Exit;
   try
-    Data := GetJSON(Arg(ctx, argc, argv, 0));
+    Data := GetJSONLimited(Arg(ctx, argc, argv, 0));
   except
     Fail('{text, title?, kind?, buttons?} is expected');
     Exit;
@@ -1052,8 +1062,13 @@ begin
     end;
     if not IndexOf('default', 0, 0, Default) or not IndexOf('cancel', -1, -1, Cancel) then
       Exit;
-    res^ := JS_NewInt32(ctx, ExtHost.Message(Eng.ExtensionNameForContext(ctx),
-      Title, Text, Kind, Buttons, Default, Cancel));
+    Wait := JSWaitBegin;
+    try
+      res^ := JS_NewInt32(ctx, ExtHost.Message(Eng.ExtensionNameForContext(ctx),
+        Title, Text, Kind, Buttons, Default, Cancel));
+    finally
+      JSWaitEnd(Wait);
+    end;
   finally
     Data.Free;
   end;
@@ -1080,7 +1095,29 @@ begin
     Result := '';
 end;
 
-{ A JSON array of strings as arguments; False for anything else. }
+{ Whether AJson holds the escape of a NUL, \u0000 after an even number of
+  backslashes: FPC 3.2.2's fpjson drops the character as it parses, so it
+  is looked for in the text, before. }
+function JsonHasNul(const AJson: string): boolean;
+var
+  At, Back: integer;
+begin
+  At := Pos('\u0000', AJson);
+  while At > 0 do
+  begin
+    Back := 0;
+    while (At - Back > 1) and (AJson[At - Back - 1] = '\') do
+      Inc(Back);
+    if not Odd(Back) then
+      Exit(True);
+    At := PosEx('\u0000', AJson, At + 1);
+  end;
+  Result := False;
+end;
+
+{ A JSON array of strings as arguments; False for anything else, and for
+  a string with a NUL (\u0000), which the C string an argument is passed
+  as would end at, so the program would get less than was checked. }
 function ArgsOf(const AJson: string; out AArgs: TStringArray): boolean;
 var
   Data: TJSONData;
@@ -1090,8 +1127,10 @@ begin
   AArgs := nil;
   if AJson = '' then
     Exit(True);
+  if JsonHasNul(AJson) then
+    Exit;
   try
-    Data := GetJSON(AJson);
+    Data := GetJSONLimited(AJson);
   except
     Exit;
   end;
@@ -1100,7 +1139,14 @@ begin
       Exit;
     SetLength(AArgs, Data.Count);
     for i := 0 to Data.Count - 1 do
+    begin
       AArgs[i] := Data.Items[i].AsString;
+      if Pos(#0, AArgs[i]) > 0 then
+      begin
+        AArgs := nil;
+        Exit;
+      end;
+    end;
     Result := True;
   finally
     Data.Free;
@@ -1123,16 +1169,88 @@ begin
   end;
 end;
 
+type
+  { Ends a program an extension runs (RunTool's cancel, asked on every
+    pass of its reading loop): on Reload Extensions or quitting, so the
+    wait for the promise tasks is short, past ExtToolTimeLimitMs, and once
+    it has written more than ExtToolOutputLimit. Why says which. }
+  TToolGuard = class
+  private
+    FDeadline: QWord;
+    FWritten: Int64;
+  public
+    Why: string;
+    constructor Create;
+    procedure Wrote(const AText: string);
+    function Stop: boolean;
+    { After the run: past the output cap with what was read once the
+      program ended, which Stop no longer saw. }
+    function WroteTooMuch: boolean;
+  end;
+
+resourcestring
+  rsToolReload = 'The program was stopped, as the extensions are reloaded.';
+  rsToolTime = 'The program was stopped after %d minutes.';
+  rsToolTimeSeconds = 'The program was stopped after %d seconds.';
+  rsToolOutput = 'The program was stopped, as it wrote more than %d MB.';
+
+constructor TToolGuard.Create;
+begin
+  inherited Create;
+  FDeadline := GetTickCount64 + ExtToolTimeLimitMs;
+end;
+
+procedure TToolGuard.Wrote(const AText: string);
+begin
+  Inc(FWritten, Length(AText));
+end;
+
+function TToolGuard.Stop: boolean;
+begin
+  if Why = '' then
+    if IsExtShuttingDown or ExtHost.Terminated then
+      Why := rsToolReload
+    else if GetTickCount64 > FDeadline then
+    begin
+      if ExtToolTimeLimitMs >= 60000 then
+        Why := Format(rsToolTime, [ExtToolTimeLimitMs div 60000])
+      else
+        Why := Format(rsToolTimeSeconds, [ExtToolTimeLimitMs div 1000]);
+    end
+    else if FWritten > ExtToolOutputLimit then
+      Why := Format(rsToolOutput, [ExtToolOutputLimit shr 20]);
+  Result := Why <> '';
+end;
+
+function TToolGuard.WroteTooMuch: boolean;
+begin
+  if (Why = '') and (FWritten > ExtToolOutputLimit) then
+    Why := Format(rsToolOutput, [ExtToolOutputLimit shr 20]);
+  Result := Why <> '';
+end;
+
 { Runs a tool and gives git.run's and exec.run's result: its exit code,
   128 and the signal when one ended it (as a shell says), -1 when it did
-  not start. RunTool gives the raw wait status on Unix. }
+  not start or the guard ended it (its reason in stderr, and no stdout).
+  RunTool gives the raw wait status on Unix. }
 function ToolJson(const AExe, ADir: string; const AArgs, ASkip, AEnv: array of string;
   const AInput: string): string;
 var
   Output, Error: string;
   Status: integer;
+  Guard: TToolGuard;
+  Ran: boolean;
 begin
-  if not RunTool(AExe, ADir, AArgs, ASkip, AEnv, Output, Error, Status, nil, AInput) then
+  Guard := TToolGuard.Create;
+  try
+    Ran := RunTool(AExe, ADir, AArgs, ASkip, AEnv, Output, Error, Status, @Guard.Wrote,
+      AInput, @Guard.Stop);
+    if Guard.WroteTooMuch then
+      Exit(RunJson(False, -1, '', Guard.Why));
+  finally
+    Guard.Free;
+  end;
+  if not Ran then
   begin
     Status := -1;
     if Error = '' then
@@ -1283,7 +1401,7 @@ var
 begin
   Result := False;
   try
-    State := GetJSON(ParamStr(params, 0));
+    State := GetJSONLimited(ParamStr(params, 0));
   except
     State := nil;
   end;
@@ -1373,7 +1491,7 @@ begin
   Headers := nil;
   if (HeadersJson <> '') and (HeadersJson <> '{}') then
   try
-    Data := GetJSON(HeadersJson);
+    Data := GetJSONLimited(HeadersJson);
     try
       if Data is TJSONObject then
       begin

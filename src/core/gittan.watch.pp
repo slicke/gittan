@@ -31,6 +31,11 @@ type
     FInterval: integer;
     FLast: string;
     FFailed: boolean;
+    { Polls in a row that took SlowPollMs or more and found nothing new. }
+    FSlowPolls: integer;
+    { Held while the thread refreshes the index, which takes index.lock;
+      Detach waits on it. }
+    FIndexLock: TRTLCriticalSection;
     FSnapshot: TGittanRepoSnapshot;
     FOnChange: TNotifyEvent;
     procedure Notify;
@@ -43,6 +48,14 @@ type
     destructor Destroy; override;
     {** Drops the handler, ends the thread and waits for it. }
     procedure Stop;
+    {** Drops the handler and asks the thread to end, without waiting:
+      the caller hands it to a TGittanJobReaper, so a stop does not
+      hold the main thread for the rest of a poll. The thread's git runs
+      with GIT_OPTIONAL_LOCKS=0, so it takes no lock the caller's next
+      command would trip over, but for the index refresh of a slow
+      repository, which writes the index: a refresh under way is waited
+      for, and none starts after. }
+    procedure Detach;
     {** Polls at once instead of when the current interval runs out. }
     procedure Poll;
     {** Called in the main thread after the repository changed. }
@@ -122,6 +135,7 @@ begin
   FInterval := AInterval;
   FRepo := TGittanRepo.Create;
   FWake := RTLEventCreate;
+  InitCriticalSection(FIndexLock);
   { The thread's repository is opened in Execute; the base must be set
     after Open, which clears it. }
   FBase := ABase;
@@ -135,6 +149,7 @@ begin
   { Removes any Notify still waiting in the thread queue. }
   inherited Destroy;
   RTLEventDestroy(FWake);
+  DoneCriticalSection(FIndexLock);
   FRepo.Free;
 end;
 
@@ -152,9 +167,16 @@ end;
   snapshot that fails: its fingerprint is not kept, and the form hears
   of the failure once, not on every tick it goes on failing. }
 procedure TGittanWatcher.Execute;
+const
+  { A poll this slow with nothing new, twice in a row, has git status
+    reading files whose times changed but not their content (a code
+    generator, unzip, rsync, a sync client): 20 000 such files took
+    half a second a poll, 27 ms once the index knew their times. }
+  SlowPollMs = 300;
 var
   Fingerprint: string;
   Ok: boolean;
+  Started: QWord;
 begin
   if not FRepo.Open(FRoot) then
     Exit;
@@ -168,7 +190,27 @@ begin
     if Terminated then
       Break;
     try
+      Started := GetTickCount64;
       Fingerprint := FRepo.Fingerprint;
+      if Terminated then
+        Break;
+      if (Fingerprint = FLast) and (GetTickCount64 - Started >= SlowPollMs) then
+        Inc(FSlowPolls)
+      else
+        FSlowPolls := 0;
+      { Once, until the polls are quick again. }
+      if FSlowPolls = 2 then
+      begin
+        { Terminated asked under the lock, so a Detach that has passed
+          it sees no refresh begin. }
+        EnterCriticalSection(FIndexLock);
+        try
+          if not Terminated then
+            FRepo.RefreshIndex;
+        finally
+          LeaveCriticalSection(FIndexLock);
+        end;
+      end;
       if Fingerprint <> FLast then
       begin
         Ok := FRepo.Snapshot(FSnapshot);
@@ -209,6 +251,14 @@ begin
   FOnChange := nil;
   Terminate;
   WaitFor;
+end;
+
+procedure TGittanWatcher.Detach;
+begin
+  FOnChange := nil;
+  Terminate;
+  EnterCriticalSection(FIndexLock);
+  LeaveCriticalSection(FIndexLock);
 end;
 
 { TGittanOpenJob }

@@ -19,10 +19,14 @@ var
   Steps: TGittanRebaseSteps;
   Merges, Ok, Conflicts, Stopped: boolean;
   Pushed, i: integer;
-  Title, Note, StoppedAt, Err: string;
+  Title, Note, StoppedAt, Err, Head, Branch: string;
 begin
   if not RepoReady or (FBranch = '') then
     Exit;
+  { The list replaces git's: a commit that comes to the branch while
+    the dialog is open would be in neither and lost. }
+  Head := FRepo.CommitId('HEAD');
+  Branch := FRepo.Branch;
   if not FRepo.RebaseSteps(AOnto, Steps, Merges) then
   begin
     BannerError(rsCaFailed, FRepo.Error);
@@ -55,7 +59,7 @@ begin
     Title := Format(rsRiTitleFrom, [FBranch, AName])
   else
     Title := Format(rsBmRebase, [FBranch, AName]);
-  if not EditRebase(Steps, Title, Note) then
+  if not EditRebase(Steps, Title, Note) or MovedWhileAsked(Head, Branch, rsRiMoved) then
     Exit;
   StopWatcher;
   try

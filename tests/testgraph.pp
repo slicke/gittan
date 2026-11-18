@@ -20,6 +20,7 @@ type
     procedure TestBranchAndMerge;
     procedure TestTwoTips;
     procedure TestMissingParent;
+    procedure TestDropMissingParents;
     procedure TestRefs;
     procedure TestFilter;
   end;
@@ -123,6 +124,36 @@ begin
   AssertTrue('still open below the last row', HasEdge(FCommits[2].BottomEdges, 1, 1));
 end;
 
+{ Without the merges every merged branch's first commit names a parent
+  the list lacks; cut, no lane stays open for it, and 20,000 such
+  commits (44 s and 900 MB before) lay out at once. }
+procedure TGraphTest.TestDropMissingParents;
+var
+  i: integer;
+  T: QWord;
+begin
+  FCommits := nil;
+  Add('c', 'b x');
+  Add('b', 'a y');
+  Add('a', '');
+  DropMissingParents(FCommits);
+  AssertEquals(1, Length(FCommits[0].Parents));
+  AssertEquals('b', FCommits[0].Parents[0]);
+  AssertEquals('a', FCommits[1].Parents[0]);
+  AssertEquals(0, Length(FCommits[2].Parents));
+  FCommits := nil;
+  for i := 0 to 19999 do
+    if i mod 5 = 4 then
+      Add('c' + IntToStr(i), 'merge' + IntToStr(i))
+    else
+      Add('c' + IntToStr(i), 'c' + IntToStr(i + 1));
+  T := GetTickCount64;
+  DropMissingParents(FCommits);
+  LayoutGraph(FCommits);
+  AssertTrue('took ' + IntToStr(GetTickCount64 - T) + ' ms', GetTickCount64 - T < 2000);
+  AssertEquals(1, GraphWidth(FCommits));
+end;
+
 procedure TGraphTest.TestRefs;
 var
   Refs: TGittanGraphRefs;
@@ -197,6 +228,13 @@ begin
     LocalTimeToUniversal(EncodeDate(2024, 6, 16))));
   F := ParseGraphFilter('author:ann author:bob');
   AssertTrue('any author', MatchesGraphFilter(F, '', 'bob', D));
+  AssertTrue('a part of the name', MatchesGraphFilter(F, '', 'joanne', D));
+  { = asks for the whole name, as a click on an author does. }
+  F := ParseGraphFilter('author:="ann b"');
+  AssertEquals('=ann b', F.Authors[0]);
+  AssertTrue('the name', MatchesGraphFilter(F, '', 'ann b', D));
+  AssertFalse('a longer name', MatchesGraphFilter(F, '', 'ann ba', D));
+  AssertFalse('a name around it', MatchesGraphFilter(F, '', 'joann b', D));
   AssertTrue('nothing asked', MatchesGraphFilter(ParseGraphFilter(''), '', '', 0));
 end;
 

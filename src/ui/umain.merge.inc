@@ -150,7 +150,8 @@ begin
       FMergeKeep := nil;
       if not FManualLexer then
         FMergeView.Lexer := App.Lexers.ForFile(APath, FRepo.Root);
-      FMergeView.Load(TGittanMerge.Create(Lines, FOperation = 'rebasing'));
+      FMergeView.Load(TGittanMerge.Create(Lines, FOperation = 'rebasing',
+        FRepo.ConflictMarkerSize(APath)));
     end;
   finally
     Lines.Free;

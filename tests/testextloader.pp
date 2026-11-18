@@ -10,7 +10,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, gittan.ext.engine, gittan.ext.host,
-  gittan.ext.loader, gittan.ext.perm, gittan.settings, testextengine;
+  gittan.ext.loader, gittan.ext.perm, gittan.ext.quickjs, gittan.ext.functions,
+  gittan.settings, testextengine;
 
 type
   TExtLoaderTest = class(TTestCase)
@@ -19,8 +20,14 @@ type
     FDir: string;
     FSettings: TGittanSettings;
     FLoader: TGittanExtLoader;
+    FAskedAgain: boolean;
     procedure Put(const AName, AScript: string);
     procedure EditModule;
+    procedure SwapFiles(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
+    procedure AddSlowTask(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
+    procedure ReloadAgain;
+    function SlowTask(const ctx: PJSContext; const func: string;
+      const params: JSParameters; out res: JSValueVal): boolean;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -37,6 +44,9 @@ type
     procedure TestCaseTwinRefused;
     procedure TestCaseTwinWithEqualsRefused;
     procedure TestNameRefused;
+    procedure TestRunsWhatWasRead;
+    procedure TestQueuedImportRunsWhatWasRead;
+    procedure TestNoReloadDuringUnload;
   end;
 
 implementation
@@ -76,6 +86,97 @@ begin
   finally
     Lines.Free;
   end;
+end;
+
+{ Between the read and the run: a.js replaced, b.js (a module) too,
+  c.js gone. }
+procedure TExtLoaderTest.SwapFiles(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
+begin
+  if ExtractFileName(AExt^.FileName) = 'a.js' then
+    Put('a.js', '/* @name Ay */ Gittan.alert("swapped a");')
+  else if ExtractFileName(AExt^.FileName) = 'b.js' then
+    Put('b.js', '/* @name Bee */ export {}; Gittan.alert("swapped b");')
+  else
+    DeleteFile(AExt^.FileName);
+end;
+
+{ What runs is the text that was read and hashed for the grant, not the
+  file read again: one changed or removed between the two runs as read,
+  and the extensions after it still load. }
+procedure TExtLoaderTest.TestRunsWhatWasRead;
+begin
+  Put('a.js', '/* @name Ay */ Gittan.alert("a");');
+  Put('b.js', '/* @name Bee */ export {}; Gittan.alert("b");');
+  Put('c.js', '/* @name Cee */ Gittan.alert("c");');
+  Put('d.js', '/* @name Dee */ Gittan.alert("d");');
+  FLoader.OnProvision := @SwapFiles;
+  FLoader.Load;
+  AssertEquals('what was read ran', 'a,b,c,d', FHost.Alerts.CommaText);
+  AssertTrue('the removed one loaded', FLoader.Info(2).Loaded);
+end;
+
+{ A module's import() is a job: with more jobs of another extension
+  queued before it than one pump runs, it comes after its load has
+  returned, and still runs the text that was read, not the file. }
+procedure TExtLoaderTest.TestQueuedImportRunsWhatWasRead;
+var
+  GiveUpAt: QWord;
+begin
+  { Jobs of a millisecond each: a pump stops after 50 ms of them. }
+  Put('a.js', '/* @name Ay */ globalThis.n = 0; for (var i = 0; i < 2000; i++)' +
+    ' Promise.resolve().then(function () { var e = Date.now() + 1; while (Date.now() < e);' +
+    ' if (++globalThis.n == 2000) Gittan.alert("a done"); });');
+  Put('b.js', '/* @name Bee */ export {}; Gittan.alert("b");');
+  FLoader.OnProvision := @SwapFiles;
+  FLoader.Load;
+  AssertEquals('the import is still queued', '', FHost.Alerts.CommaText);
+  GiveUpAt := GetTickCount64 + 20000;
+  while (FHost.Alerts.Count < 2) and (GetTickCount64 < GiveUpAt) do
+    TGittanExtEngine.Instance.PumpJobs;
+  AssertEquals('both ran', 2, FHost.Alerts.Count);
+  AssertEquals('what was read ran', 'b', FHost.Alerts[1]);
+end;
+
+procedure TExtLoaderTest.AddSlowTask(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
+begin
+  AEngine.AddPromise('slowTask', @SlowTask, 0, 0, True);
+end;
+
+function TExtLoaderTest.SlowTask(const ctx: PJSContext; const func: string;
+  const params: JSParameters; out res: JSValueVal): boolean;
+begin
+  Sleep(300);
+  res := StringToValueVal('done');
+  Result := True;
+end;
+
+procedure TExtLoaderTest.ReloadAgain;
+begin
+  FAskedAgain := True;
+  FHost.OnPump := nil;
+  FLoader.Reload;
+end;
+
+{ The unload waits for the promise tasks with the message loop running,
+  where a second Reload could come: it is refused, or it would load the
+  extensions beside those still going and the first then free them. }
+procedure TExtLoaderTest.TestNoReloadDuringUnload;
+var
+  Changed: integer;
+begin
+  Put('a.js', '/* @name Ay */ Gittan.alert("loaded"); slowTask();');
+  FLoader.OnProvision := @AddSlowTask;
+  FLoader.Load;
+  Changed := FHost.Changed;
+  FHost.OnPump := @ReloadAgain;
+  FLoader.Reload;
+  FHost.OnPump := nil;
+  AssertTrue('the second Reload came during the unload', FAskedAgain);
+  { The menus follow once for the unload and once for the load: a second
+    Reload that ran would have unloaded and loaded (to nothing) again. }
+  AssertEquals('one Reload ran', 2, FHost.Changed - Changed);
+  AssertEquals('loaded twice', 'loaded,loaded', FHost.Alerts.CommaText);
+  AssertEquals('one context', 1, TGittanExtEngine.Instance.ExtensionCount);
 end;
 
 procedure TExtLoaderTest.TestLoadsInNameOrder;

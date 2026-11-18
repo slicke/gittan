@@ -482,6 +482,7 @@ end;
 procedure TRepoFrame.DiscardThis(const ABlock: TGittanDiscard);
 var
   Path, Err: string;
+  Noted: TGittanDiscard;
 begin
   Path := FCurrentPath;
   if AskDlg(rsAppName, Format(rsDiscardAsk, [ExtractFileName(Path),
@@ -489,12 +490,14 @@ begin
     [mrYes, rsDiscardAction, 'IsDefault', mrCancel, rsCancelButton, 'IsCancel'], 0) <> mrYes then
     Exit;
   SetHotDiscard(Edit, -1, -1, -1);
+  Noted := ABlock;
+  Noted.Created := not FileExists(ABlock.FileName);
   if not DiscardBlock(ABlock, Err) then
   begin
     StatusNote(Format(rsDiscardFailed, [Err]), True);
     Exit;
   end;
-  NoteDiscard(ABlock);
+  NoteDiscard(Noted);
   RefreshRepository;
   StatusNote(Format(rsDiscarded, [ABlock.Line, Path]));
   UpdateDiscardItems;
@@ -565,13 +568,42 @@ end;
   applied, and the view built again at the same place; the blocks are
   others now, so their headings are found again after the parse. }
 procedure TRepoFrame.RebuildKeeps;
+var
+  Before: TStringList;
+  LineMap: TIntegerDynArray;
+  i, CaretLine: integer;
 begin
-  FChangeLines.Assign(FRawChangeLines);
-  FKeeps.Apply(FCurrentPath, FChangeLines, FKeptOf, FKeptOldNum);
-  ApplyLeftOut;
+  { Read while the rows still go with the diff they were built from. }
+  CaretLine := CaretDiffLine;
+  Before := TStringList.Create;
+  try
+    Before.Assign(FChangeLines);
+    FChangeLines.Assign(FRawChangeLines);
+    FKeeps.Apply(FCurrentPath, FChangeLines, FKeptOf, FKeptOldNum);
+    ApplyLeftOut;
+    { The deleted lines a keep took out or put back would move the caret
+      and the gaps opened by as many lines: both go by the new file's
+      lines, which stay. }
+    LineMap := KeepLineMap(Before, FChangeLines);
+  finally
+    Before.Free;
+  end;
+  for i := 0 to High(FExpanded) do
+    if (FExpanded[i] >= 0) and (FExpanded[i] <= High(LineMap)) then
+      FExpanded[i] := LineMap[FExpanded[i]];
+  if (CaretLine >= 0) and (CaretLine <= High(LineMap)) then
+    CaretLine := LineMap[CaretLine]
+  else
+    CaretLine := -1;
+  FKeepCaret := True;
+  FKeepCaretLine := CaretLine;
   FHeadings := nil;
   SetChangeActions;
-  RebuildIfChanges;
+  try
+    RebuildIfChanges;
+  finally
+    FKeepCaret := False;
+  end;
 end;
 
 { The header's pills in the change view: Edit for one of the
@@ -590,7 +622,7 @@ begin
   if FConflictRoles <> nil then
     Exit;
   Captions := nil;
-  if IsRepoFile(FCurrentPath) then
+  if IsRepoFile(FCurrentPath) and ReachedWithoutLink(FRepo.Root, FCurrentPath) then
     Captions := [rsEditAction];
   if CanLeaveOut and ShownFileChosen and (FLeftOut.Count(FCurrentPath) > 0) then
   begin

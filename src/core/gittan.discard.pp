@@ -34,7 +34,10 @@ type
     EndsKnown is set by DiffBlock alone: then OldEndsBare and NewEndsBare
     tell whether the last of OldLines, NewLines ends its side of the
     diff without a newline, which a block at the end of the file writes
-    (else the file's own last newline is kept). }
+    (else the file's own last newline is kept). Created is the caller's
+    too: the discard brought a deleted file back (it was not there), so
+    the undo, whose block has RemoveEmpty (from Swapped), deletes the
+    file again rather than leave it empty. }
   TGittanDiscard = record
     FileName: string;
     Line: integer;
@@ -42,6 +45,7 @@ type
     Resolved: boolean;
     Before, After: string;
     EndsKnown, OldEndsBare, NewEndsBare: boolean;
+    Created, RemoveEmpty: boolean;
   end;
 
 const
@@ -79,6 +83,7 @@ function DiffBlock(ALines: TStrings; AStart: integer; const AFileName: string): 
 var
   i, Old, New: integer;
 begin
+  Result := Default(TGittanDiscard);
   Result.FileName := AFileName;
   Result.OldLines := nil;
   Result.NewLines := nil;
@@ -135,6 +140,8 @@ begin
   Result.EndsKnown := ABlock.EndsKnown;
   Result.OldEndsBare := ABlock.NewEndsBare;
   Result.NewEndsBare := ABlock.OldEndsBare;
+  Result.Created := False;
+  Result.RemoveEmpty := ABlock.Created;
 end;
 
 function DiscardCount(const ABlock: TGittanDiscard): integer;
@@ -259,6 +266,12 @@ begin
           SetLength(Text, Length(Text) - 2)
         else
           SetLength(Text, Length(Text) - 1);
+      end;
+      if (Text = '') and ABlock.RemoveEmpty then
+      begin
+        if not DeleteFile(ABlock.FileName) then
+          raise Exception.Create(SysErrorMessage(GetLastOSError));
+        Exit(True);
       end;
       F := TFileStream.Create(ABlock.FileName, fmCreate or fmShareDenyWrite);
       try

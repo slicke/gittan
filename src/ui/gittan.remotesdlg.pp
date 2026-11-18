@@ -123,7 +123,7 @@ begin
   Result := TButton.Create(AOwner);
   Result.Caption := ACaption;
   Result.AutoSize := True;
-  Result.Constraints.MinWidth := AParent.Scale96ToScreen(84);
+  Result.Constraints.MinWidth := AParent.Scale96ToForm(84);
   Result.Align := AAlign;
   Result.OnClick := AClick;
   Result.Parent := AParent;
@@ -148,13 +148,13 @@ begin
   BorderStyle := bsDialog;
   Position := poMainFormCenter;
   { The height follows the content; the width stays. }
-  Constraints.MinWidth := Scale96ToScreen(EditWidth);
-  Constraints.MaxWidth := Scale96ToScreen(EditWidth);
+  Constraints.MinWidth := Scale96ToForm(EditWidth);
+  Constraints.MaxWidth := Scale96ToForm(EditWidth);
   AutoSize := True;
 
   FName := TEdit.Create(Self);
   Row(rsRemotesName, FName);
-  FName.Parent.BorderSpacing.Top := Scale96ToScreen(Margin);
+  FName.Parent.BorderSpacing.Top := Scale96ToForm(Margin);
   FUrl := TEdit.Create(Self);
   Row(rsRemotesUrl, FUrl);
   FPushUrl := TEdit.Create(Self);
@@ -185,8 +185,8 @@ begin
   Buttons.Align := alTop;
   Inc(FNextTop, 1000);
   Buttons.Top := FNextTop;
-  Buttons.BorderSpacing.Around := Scale96ToScreen(Margin);
-  Buttons.BorderSpacing.Top := Scale96ToScreen(16);
+  Buttons.BorderSpacing.Around := Scale96ToForm(Margin);
+  Buttons.BorderSpacing.Top := Scale96ToForm(16);
   Buttons.Parent := Self;
   if AAdd then
     Ok := MakeButton(Self, rsRemoteAddButton, Buttons, alRight, @OkClick)
@@ -203,8 +203,8 @@ begin
   Ok.Left := 0;
   Cancel.Left := 1000;
   {$ENDIF}
-  Cancel.BorderSpacing.Left := Scale96ToScreen(8);
-  Ok.BorderSpacing.Left := Scale96ToScreen(8);
+  Cancel.BorderSpacing.Left := Scale96ToForm(8);
+  Ok.BorderSpacing.Left := Scale96ToForm(8);
 
   FOld := ARemote.Name;
   FOldUrl := ARemote.Url;
@@ -228,14 +228,14 @@ begin
   Panel.Align := alTop;
   Inc(FNextTop, 1000);
   Panel.Top := FNextTop;
-  Panel.BorderSpacing.Left := Scale96ToScreen(Margin);
-  Panel.BorderSpacing.Right := Scale96ToScreen(Margin);
-  Panel.BorderSpacing.Bottom := Scale96ToScreen(6);
+  Panel.BorderSpacing.Left := Scale96ToForm(Margin);
+  Panel.BorderSpacing.Right := Scale96ToForm(Margin);
+  Panel.BorderSpacing.Bottom := Scale96ToForm(6);
   Panel.Parent := Self;
   Lbl := TLabel.Create(Self);
   Lbl.Caption := ACaption;
   Lbl.AutoSize := False;
-  Lbl.Width := Scale96ToScreen(LabelWidth);
+  Lbl.Width := Scale96ToForm(LabelWidth);
   Lbl.Align := alLeft;
   Lbl.Layout := tlCenter;
   Lbl.Parent := Panel;
@@ -249,9 +249,9 @@ begin
   AControl.Align := alTop;
   Inc(FNextTop, 1000);
   AControl.Top := FNextTop;
-  AControl.BorderSpacing.Left := Scale96ToScreen(Margin + LabelWidth);
-  AControl.BorderSpacing.Right := Scale96ToScreen(Margin);
-  AControl.BorderSpacing.Top := Scale96ToScreen(ASpaceAbove);
+  AControl.BorderSpacing.Left := Scale96ToForm(Margin + LabelWidth);
+  AControl.BorderSpacing.Right := Scale96ToForm(Margin);
+  AControl.BorderSpacing.Top := Scale96ToForm(ASpaceAbove);
   AControl.Parent := Self;
 end;
 
@@ -346,16 +346,16 @@ begin
   Caption := rsRemotesTitle;
   BorderStyle := bsSizeable;
   Position := poMainFormCenter;
-  Width := Scale96ToScreen(DialogWidth);
-  Height := Scale96ToScreen(DialogHeight);
-  Constraints.MinWidth := Scale96ToScreen(420);
-  Constraints.MinHeight := Scale96ToScreen(260);
+  Width := Scale96ToForm(DialogWidth);
+  Height := Scale96ToForm(DialogHeight);
+  Constraints.MinWidth := Scale96ToForm(420);
+  Constraints.MinHeight := Scale96ToForm(260);
 
   HintLabel := TLabel.Create(Self);
   HintLabel.Caption := rsRemotesHint;
   HintLabel.WordWrap := True;
   HintLabel.Align := alTop;
-  HintLabel.BorderSpacing.Around := Scale96ToScreen(Margin);
+  HintLabel.BorderSpacing.Around := Scale96ToForm(Margin);
   HintLabel.Parent := Self;
 
   { Under the list: the error, then Add, Edit and Remove on the left and
@@ -364,16 +364,16 @@ begin
   Bottom.BevelOuter := bvNone;
   Bottom.AutoSize := True;
   Bottom.Align := alBottom;
-  Bottom.BorderSpacing.Around := Scale96ToScreen(Margin);
+  Bottom.BorderSpacing.Around := Scale96ToForm(Margin);
   Bottom.Parent := Self;
   AddButton := MakeButton(Self, rsRemotesAdd, Bottom, alLeft, @AddClick);
   AddButton.Left := 0;
   FEditButton := MakeButton(Self, rsRemotesEdit, Bottom, alLeft, @EditClick);
   FEditButton.Left := 1000;
-  FEditButton.BorderSpacing.Left := Scale96ToScreen(8);
+  FEditButton.BorderSpacing.Left := Scale96ToForm(8);
   FRemoveButton := MakeButton(Self, rsRemotesRemove, Bottom, alLeft, @RemoveClick);
   FRemoveButton.Left := 2000;
-  FRemoveButton.BorderSpacing.Left := Scale96ToScreen(8);
+  FRemoveButton.BorderSpacing.Left := Scale96ToForm(8);
   CloseButton := MakeButton(Self, rsRemotesClose, Bottom, alRight, nil);
   CloseButton.ModalResult := mrOK;
   CloseButton.Cancel := True;
@@ -385,9 +385,9 @@ begin
   FError.ShowAccelChar := False;
   FError.Visible := False;
   FError.Align := alBottom;
-  FError.BorderSpacing.Left := Scale96ToScreen(Margin);
-  FError.BorderSpacing.Right := Scale96ToScreen(Margin);
-  FError.BorderSpacing.Top := Scale96ToScreen(8);
+  FError.BorderSpacing.Left := Scale96ToForm(Margin);
+  FError.BorderSpacing.Right := Scale96ToForm(Margin);
+  FError.BorderSpacing.Top := Scale96ToForm(8);
   FError.Parent := Self;
 
   FList := TListView.Create(Self);
@@ -398,12 +398,12 @@ begin
   FList.ScrollBars := ssAutoVertical;
   Col := FList.Columns.Add;
   Col.Caption := rsRemotesName;
-  Col.Width := Scale96ToScreen(120);
+  Col.Width := Scale96ToForm(120);
   Col := FList.Columns.Add;
   Col.Caption := rsRemotesUrl;
   FList.Align := alClient;
-  FList.BorderSpacing.Left := Scale96ToScreen(Margin);
-  FList.BorderSpacing.Right := Scale96ToScreen(Margin);
+  FList.BorderSpacing.Left := Scale96ToForm(Margin);
+  FList.BorderSpacing.Right := Scale96ToForm(Margin);
   FList.OnSelectItem := @ListSelectItem;
   FList.OnDblClick := @ListDblClick;
   FList.OnKeyDown := @ListKeyDown;
@@ -441,8 +441,8 @@ end;
   follows the columns. }
 procedure TRemotesForm.ListResize(Sender: TObject);
 begin
-  FList.Columns[1].Width := Max(Scale96ToScreen(120), FList.Width -
-    FList.Columns[0].Width - Scale96ToScreen(28));
+  FList.Columns[1].Width := Max(Scale96ToForm(120), FList.Width -
+    FList.Columns[0].Width - Scale96ToForm(28));
 end;
 
 { The remotes as git lists them, ASelect selected, else the first. }

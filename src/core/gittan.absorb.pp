@@ -536,6 +536,7 @@ var
   t, h, Found: integer;
   Id, Err, Output, LastFixup: string;
   Text: RawByteString;
+  FixupIds, TargetIds: array of string;
 
   { Whether the hunk is chosen and has a target. }
   function Chosen(AHunk: integer): boolean;
@@ -684,6 +685,10 @@ begin
         end;
         Committed.AddStrings(Paths);
         LastFixup := Id;
+        SetLength(FixupIds, Length(FixupIds) + 1);
+        FixupIds[High(FixupIds)] := Id;
+        SetLength(TargetIds, Length(TargetIds) + 1);
+        TargetIds[High(TargetIds)] := Steps[t].Hash;
         Inc(ACommits);
       end;
     finally
@@ -705,6 +710,9 @@ begin
       Exit;
     end;
     AutosquashSteps(Steps);
+    { The subjects led the fixups there; the ids make sure, as a hook
+      may have changed a subject. }
+    PlaceFixups(Steps, FixupIds, TargetIds);
     if not CheckRebaseSteps(Steps, AError) then
       Exit;
     Rebasing := True;

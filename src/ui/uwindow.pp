@@ -149,7 +149,8 @@ type
     function AccountsKey: string;
     procedure AccountTimerTimer(Sender: TObject);
   public
-    procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
+    procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil;
+      AInto: TRepoFrame = nil);
       override;
     function HasOpen(const ARoot: string): boolean; override;
     function IsActive(AFrame: TRepoFrame): boolean; override;
@@ -306,7 +307,7 @@ end;
 
 procedure TGittanWindow.FormDestroy(Sender: TObject);
 var
-  i: integer;
+  Frame: TRepoFrame;
 begin
   Application.RemoveOnModalBeginHandler(@ModalBegin);
   Application.RemoveAsyncCalls(Self);
@@ -315,8 +316,15 @@ begin
   App.OnUpdateChecked := nil;
   App.Lexers.OnLoaded := nil;
   FActive := nil;
-  for i := FFrames.Count - 1 downto 0 do
-    TRepoFrame(FFrames[i]).Free;
+  { Each leaves the list before it is freed: its Destroy waits for its
+    jobs, while the other frames' handlers run and walk the list
+    (FrameNames, through their UpdateCaption). }
+  while FFrames.Count > 0 do
+  begin
+    Frame := Frames[FFrames.Count - 1];
+    FFrames.Delete(FFrames.Count - 1);
+    Frame.Free;
+  end;
   FreeAndNil(FForgeView);
   FreeAndNil(FFrames);
   FreeAndNil(FClosing);
@@ -646,7 +654,8 @@ begin
   Result := False;
 end;
 
-procedure TGittanWindow.OpenRepository(const ADir: string; AOnOpened: TNotifyEvent);
+procedure TGittanWindow.OpenRepository(const ADir: string; AOnOpened: TNotifyEvent;
+  AInto: TRepoFrame);
 var
   Root: string;
   Target: TRepoFrame;
@@ -671,7 +680,12 @@ begin
         Frames[i].WhenOpened(AOnOpened);
         Exit;
       end;
-  if (FActive <> nil) and FActive.IsBlank then
+  { The frame asked for while it is blank (a clone's, which finished
+    there), not brought to the front when it is behind another: what
+    the user turned to meanwhile stays in front. }
+  if (AInto <> nil) and (FFrames.IndexOf(AInto) >= 0) and AInto.IsBlank then
+    Target := AInto
+  else if (FActive <> nil) and FActive.IsBlank then
   begin
     Target := FActive;
     { Opened from the forge view: the frame takes the window back. }
@@ -841,14 +855,25 @@ end;
   the settings are its. Each writes the settings. }
 procedure TGittanWindow.FormClose(Sender: TObject; var CloseAction: TCloseAction);
 var
+  Walk: TList;
   i: integer;
 begin
   SavePlace;
   SaveTabs;
-  for i := 0 to FFrames.Count - 1 do
-    if Frames[i] <> FActive then
-      Frames[i].FormClose(Sender, CloseAction);
-  FActive.FormClose(Sender, CloseAction);
+  { A copy: a frame's close may run the message loop, where a queued
+    CloseFrameAsync takes a frame out of FFrames. One gone meanwhile is
+    passed over. }
+  Walk := TList.Create;
+  try
+    Walk.Assign(FFrames);
+    for i := 0 to Walk.Count - 1 do
+      if (Walk[i] <> Pointer(FActive)) and (FFrames.IndexOf(Walk[i]) >= 0) then
+        TRepoFrame(Walk[i]).FormClose(Sender, CloseAction);
+  finally
+    Walk.Free;
+  end;
+  if FActive <> nil then
+    FActive.FormClose(Sender, CloseAction);
 end;
 
 { A frame with unsaved changes is shown before it asks. Once all may
@@ -856,21 +881,33 @@ end;
   with it active and its view options are the ones kept. }
 procedure TGittanWindow.FormCloseQuery(Sender: TObject; var CanClose: boolean);
 var
+  Walk: TList;
+  Frame: TRepoFrame;
   i: integer;
   Shown: TRepoFrame;
 begin
   Shown := FActive;
   FActive.FormCloseQuery(Sender, CanClose);
-  for i := 0 to FFrames.Count - 1 do
-  begin
-    if not CanClose then
-      Exit;
-    if Frames[i] <> Shown then
+  { A copy: a save question runs the message loop, where a queued
+    CloseFrameAsync takes a frame out of FFrames. One gone meanwhile is
+    passed over. }
+  Walk := TList.Create;
+  try
+    Walk.Assign(FFrames);
+    for i := 0 to Walk.Count - 1 do
     begin
-      if Frames[i].NeedsSave then
-        ActivateFrame(Frames[i]);
-      Frames[i].FormCloseQuery(Sender, CanClose);
+      if not CanClose then
+        Exit;
+      Frame := TRepoFrame(Walk[i]);
+      if (Frame <> Shown) and (FFrames.IndexOf(Frame) >= 0) then
+      begin
+        if Frame.NeedsSave then
+          ActivateFrame(Frame);
+        Frame.FormCloseQuery(Sender, CanClose);
+      end;
     end;
+  finally
+    Walk.Free;
   end;
   if CanClose and (FActive <> Shown) and (FFrames.IndexOf(Shown) >= 0) then
     ActivateFrame(Shown);
@@ -1207,6 +1244,15 @@ begin
   Index := FFrames.IndexOf(Frame);
   if (Index < 0) or (FClosing.IndexOf(Frame) >= 0) then
     Exit;
+  { Asked from inside a wait of the frame's that runs the message loop
+    (a file loading, a parse): freed now, it would go on in freed
+    memory once the wait returns. Asked again from the queue until the
+    wait is over. }
+  if Frame.InNestedLoop then
+  begin
+    Application.QueueAsyncCall(@CloseFrameAsync, Data);
+    Exit;
+  end;
   if Frame.NeedsSave then
     ActivateFrame(Frame);
   CanClose := True;

@@ -70,7 +70,8 @@ type
     (git log -S, or -G for a /regex/; see gittan.pickaxe). The words
     and the authors are kept as typed: a caller that wants no case
     folds them and the texts it matches with MatchesGraphFilter the
-    same way. }
+    same way. An author that starts with = (author:=Ann, what a click
+    on an author gives) is the whole name, not a part of it. }
   TGittanGraphFilter = record
     Words, Authors, Paths, Changes: TStringArray;
     Since, Before: TDateTime;
@@ -81,6 +82,10 @@ type
   not in the list keeps its lane open to the end. Colors count up from
   0 as lanes start; the caller takes them modulo its palette. }
 procedure LayoutGraph(var ACommits: TGittanGraphCommits);
+
+{** Cuts from each commit of ACommits the parents the list does not
+  hold, so LayoutGraph keeps no lane open for them. }
+procedure DropMissingParents(var ACommits: TGittanGraphCommits);
 
 {** The number of lanes the widest row uses. }
 function GraphWidth(const ACommits: TGittanGraphCommits): integer;
@@ -150,16 +155,21 @@ var
     Result := -1;
   end;
 
-  procedure AddEdge(var AEdges: TGittanGraphEdges; AFrom, ATo, AColor: integer);
+  { Into AEdges, sized once for the row (not grown by one per edge),
+    at ACount, which counts on. }
+  procedure AddEdge(var AEdges: TGittanGraphEdges; var ACount: integer;
+    AFrom, ATo, AColor: integer);
   begin
-    SetLength(AEdges, Length(AEdges) + 1);
-    AEdges[High(AEdges)].FromLane := AFrom;
-    AEdges[High(AEdges)].ToLane := ATo;
-    AEdges[High(AEdges)].Color := AColor;
+    if ACount >= Length(AEdges) then
+      SetLength(AEdges, 2 * ACount + 4);
+    AEdges[ACount].FromLane := AFrom;
+    AEdges[ACount].ToLane := ATo;
+    AEdges[ACount].Color := AColor;
+    Inc(ACount);
   end;
 
 var
-  r, i, j, N, K, Before: integer;
+  r, i, j, N, K, Before, NTop, NBottom: integer;
   Hash: string;
   Through: array of boolean;
 begin
@@ -171,6 +181,10 @@ begin
     begin
       TopEdges := nil;
       BottomEdges := nil;
+      NTop := 0;
+      NBottom := 0;
+      SetLength(TopEdges, Length(Lanes));
+      SetLength(BottomEdges, Length(Lanes) + Length(Parents) + 1);
       Hash := ACommits[r].Hash;
       N := Waiting(Hash, -1);
       { The top half: the lanes that wait for this commit end in it,
@@ -179,9 +193,9 @@ begin
         if Lanes[i] <> '' then
         begin
           if Lanes[i] = Hash then
-            AddEdge(TopEdges, i, N, LaneColor[i])
+            AddEdge(TopEdges, NTop, i, N, LaneColor[i])
           else
-            AddEdge(TopEdges, i, i, LaneColor[i]);
+            AddEdge(TopEdges, NTop, i, i, LaneColor[i]);
         end;
       for i := 0 to High(Lanes) do
         if Lanes[i] = Hash then
@@ -208,27 +222,57 @@ begin
         if (K < 0) or (K > N) then
         begin
           Lanes[N] := Parents[0];
-          AddEdge(BottomEdges, N, N, Color);
+          AddEdge(BottomEdges, NBottom, N, N, Color);
         end
         else
-          AddEdge(BottomEdges, N, K, Color);
+          AddEdge(BottomEdges, NBottom, N, K, Color);
         for j := 1 to High(Parents) do
         begin
           K := Waiting(Parents[j], -1);
           if K < 0 then
             K := Alloc(Parents[j]);
-          AddEdge(BottomEdges, N, K, LaneColor[K]);
+          AddEdge(BottomEdges, NBottom, N, K, LaneColor[K]);
         end;
       end;
       for i := 0 to Before - 1 do
         if Through[i] then
-          AddEdge(BottomEdges, i, i, LaneColor[i]);
+          AddEdge(BottomEdges, NBottom, i, i, LaneColor[i]);
+      SetLength(TopEdges, NTop);
+      SetLength(BottomEdges, NBottom);
       while (Length(Lanes) > 0) and (Lanes[High(Lanes)] = '') do
       begin
         SetLength(Lanes, Length(Lanes) - 1);
         SetLength(LaneColor, Length(LaneColor) - 1);
       end;
     end;
+end;
+
+procedure DropMissingParents(var ACommits: TGittanGraphCommits);
+var
+  Held: TStringList;
+  i, j, n: integer;
+begin
+  Held := TStringList.Create;
+  try
+    Held.CaseSensitive := True;
+    Held.UseLocale := False;
+    for i := 0 to High(ACommits) do
+      Held.Add(ACommits[i].Hash);
+    Held.Sorted := True;
+    for i := 0 to High(ACommits) do
+    begin
+      n := 0;
+      for j := 0 to High(ACommits[i].Parents) do
+        if Held.IndexOf(ACommits[i].Parents[j]) >= 0 then
+        begin
+          ACommits[i].Parents[n] := ACommits[i].Parents[j];
+          Inc(n);
+        end;
+      SetLength(ACommits[i].Parents, n);
+    end;
+  finally
+    Held.Free;
+  end;
 end;
 
 function GraphWidth(const ACommits: TGittanGraphCommits): integer;
@@ -425,6 +469,16 @@ begin
     (AFilter.Since = 0) and (AFilter.Before = 0);
 end;
 
+{ AAuthor is the commit's author, AWanted the filter's: the whole name
+  after =, else a part of it. }
+function AuthorMatches(const AWanted, AAuthor: string): boolean;
+begin
+  if (AWanted <> '') and (AWanted[1] = '=') then
+    Result := Copy(AWanted, 2, MaxInt) = AAuthor
+  else
+    Result := Pos(AWanted, AAuthor) > 0;
+end;
+
 function MatchesGraphFilter(const AFilter: TGittanGraphFilter;
   const AText, AAuthor: string; ADate: TDateTime): boolean;
 var
@@ -438,7 +492,7 @@ begin
   if Length(AFilter.Authors) > 0 then
   begin
     i := 0;
-    while (i <= High(AFilter.Authors)) and (Pos(AFilter.Authors[i], AAuthor) = 0) do
+    while (i <= High(AFilter.Authors)) and not AuthorMatches(AFilter.Authors[i], AAuthor) do
       Inc(i);
     if i > High(AFilter.Authors) then
       Exit;

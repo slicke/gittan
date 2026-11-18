@@ -67,6 +67,7 @@ type
     procedure TestIdentityJob;
     procedure TestMaintSetHead;
     procedure TestMaintSetHeadUnfetched;
+    procedure TestMaintSetHeadForced;
     procedure TestMaintWorktrees;
     procedure TestMaintPack;
     procedure TestMaintRemoteError;
@@ -869,6 +870,30 @@ begin
   AssertTrue(Repo.Items[i].Done);
   AssertEquals('refs/remotes/origin/next', GitOut(FWork, ['symbolic-ref',
     'refs/remotes/origin/HEAD']));
+end;
+
+{ The remote's new default branch was force-pushed since the last
+  fetch, so its remote-tracking ref only moves with a forced fetch. }
+procedure TBatchTest.TestMaintSetHeadForced;
+var
+  Repo: TGittanMaintRepo;
+  i: integer;
+  Rewritten: string;
+begin
+  MakeClone;
+  Rewritten := GitOut(FRemote, ['-c', 'user.name=Gittan Test', '-c',
+    'user.email=test@example.invalid', 'commit-tree', '-m', 'rewritten', 'trunk^{tree}']);
+  Git(FRemote, ['update-ref', 'refs/heads/trunk', Rewritten]);
+  Git(FRemote, ['symbolic-ref', 'HEAD', 'refs/heads/trunk']);
+  Repo := ScanMaintenance(FWork, '');
+  i := FindTask(Repo, mtSetHead);
+  AssertTrue(i >= 0);
+  RunMaintTask(FWork, Repo.Items[i]);
+  AssertEquals('', Repo.Items[i].Error);
+  AssertTrue(Repo.Items[i].Done);
+  AssertEquals('refs/remotes/origin/trunk', GitOut(FWork, ['symbolic-ref',
+    'refs/remotes/origin/HEAD']));
+  AssertEquals(Rewritten, GitOut(FWork, ['rev-parse', 'origin/trunk']));
 end;
 
 procedure TBatchTest.TestMaintWorktrees;

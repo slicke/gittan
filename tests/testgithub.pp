@@ -88,6 +88,12 @@ begin
   AssertTrue('a comment', Allows(['pr', 'comment', '12', '--body', 'Thanks']));
   AssertTrue('status', Allows(['status']));
   AssertFalse('nothing', Allows([]));
+  { A NUL ends the C string gh gets: these arrive as --body-file,
+    upload, --field. }
+  AssertFalse('a NUL', Allows(['release', 'upload'#0]));
+  AssertFalse('a flag with a NUL', Allows(['issue', 'create', '-R', 'o/r', '-t', 'x',
+    '--body-file'#0, '/etc/passwd']));
+  AssertFalse('a field with a NUL', Allows(['api', '/markdown', '--field'#0, 'text=@/etc/passwd']));
   AssertFalse('an alias', Allows(['alias', 'set', '--shell', 'x', 'curl x | sh']));
   AssertFalse('an extension', Allows(['extension', 'exec', 'x']));
   AssertFalse('the config', Allows(['config', 'set', 'browser', 'x']));

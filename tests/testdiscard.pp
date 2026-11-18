@@ -319,6 +319,16 @@ begin
   B := Block(['-a', '-b'], 0);
   AssertTrue(Err, DiscardBlock(B, Err));
   AssertEquals('a'#10'b'#10, ReadRaw);
+  { Its undo deletes it again, rather than leave it empty, when the
+    discard made it; an undo that did not leaves an empty file. }
+  B.Created := True;
+  AssertTrue(Err, DiscardBlock(Swapped(B), Err));
+  AssertFalse('deleted again', FileExists(FFile));
+  AssertTrue(Err, DiscardBlock(B, Err));
+  B.Created := False;
+  AssertTrue(Err, DiscardBlock(Swapped(B), Err));
+  AssertTrue('emptied', FileExists(FFile));
+  AssertEquals('', ReadRaw);
   DeleteFile(FFile);
   B := Block([' a', '-b', '+B'], 1);
   AssertFalse(DiscardBlock(B, Err));

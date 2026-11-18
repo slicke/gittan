@@ -381,8 +381,7 @@ function JS_NewClass(rt: JSRuntime; classID: JSClassID; def: PJSClassDef): integ
 function JS_IsJobPending(rt: JSRuntime): ByteBool; cdecl; external QJSLIB;
 { pctx must point at a real JSContext variable: quickjs-ng writes the context
   that ran the job through it unconditionally, so passing nil crashes. }
-function JS_ExecutePendingJob(rt: JSRuntime; pctx: PJSContext): integer; cdecl;
-  external QJSLIB;
+function JS_ExecutePendingJob(rt: JSRuntime; pctx: PJSContext): integer;
 
 type
   {** Interrupt hook, polled from the interpreter loop every few thousand
@@ -447,6 +446,48 @@ JS_PUMP_CLOCK_EVERY = 64;
     caller's variable is left alone. }
 function JS_DrainPendingJobs(rt: JSRuntime; ctx: JSContext): boolean;
 
+var
+  {** Takes a job's exception off the context it ran in and reports it
+      (the engine's DumpJSError); without one it is dropped. quickjs-ng
+      keeps an exception for the whole runtime, so one left there would be
+      thrown by the next native any extension calls. }
+  JSJobFailed: procedure(ctx: JSContext) = nil;
+
+{** What JS_ExecutePendingJob gave for the job in ctx, with a failed job's
+    exception taken off (JSJobFailed). }
+procedure JS_JobDone(ctx: JSContext; AResult: integer);
+
+type
+  {** What JSWaitBegin put aside of the watchdog's clock. }
+  TJSWait = record
+    Depth, PumpDepth: integer;
+    Start, Began, Waited: QWord;
+  end;
+
+var
+  {** The watchdog's clock (EngineInterruptHandler in gittan.ext.engine):
+      the calls the host has made into JS on the main thread and not yet
+      returned from (JS_Eval, JS_Call, JS_ExecutePendingJob), a call a
+      native makes back into JS among them, and when the outermost began.
+      A script's budget runs from there, so a loop is timed as a whole
+      however long its body spends inside a native, between the polls. }
+  JSEntryDepth: integer = 0;
+  JSEntryStart: QWord = 0;
+  {** Milliseconds spent in waits for the user (JSWaitBegin to JSWaitEnd)
+      so far, for a budget that runs over several calls and leaves them
+      out. A wait is added when it ends, one inside another too, and the
+      outer one adds only what the inner ones did not. }
+  JSWaitedMs: QWord = 0;
+  {** The engine's job pumps running since the innermost wait began, so a
+      pump knows whether it runs inside another of the same wait. }
+  JSPumpDepth: integer = 0;
+
+{** For a native that waits for the user (a dialog): the time until
+    JSWaitEnd is not the script's. JS run meanwhile (a timer while a
+    modal dialog is up) is timed as a call of its own. }
+function JSWaitBegin: TJSWait;
+procedure JSWaitEnd(const AWait: TJSWait);
+
 {** Evaluate source text. The caller owns the returned value. }
 function JS_Eval(ctx: JSContext; const src, filename: RawUtf8; flags: integer): JSValue;
 {** Invoke a callable value. }
@@ -488,6 +529,9 @@ function JS_SetPropertyUint32(ctx: JSContext; const obj: JSValue; idx: cardinal;
 function JS_SetOpaque(const obj: JSValue; opaque: pointer): integer;
 
 procedure JS_FreeValue(ctx: JSContext; const v: JSValue);
+{** Release a value through its runtime, for when its context may be gone
+    (JS_FreeContext only drops a reference, which a function of it holds). }
+procedure JS_FreeValueRT(rt: JSRuntime; const v: JSValue);
 function JS_DupValue(ctx: JSContext; const v: JSValue): JSValue;
 
 function JS_ToCString(ctx: JSContext; const v: JSValue): pansichar;
@@ -582,6 +626,9 @@ function JS_NewFunctionData(ctx: JSContext; argCount, magic, dataLen: integer;
 
 implementation
 
+uses
+  Classes;
+
 { --- shim imports ------------------------------------------------- }
 
 procedure tq_undefined(res: PJSValue); cdecl; external TQLIB;
@@ -607,6 +654,7 @@ function tq_is_error(v: PJSValue): integer; cdecl; external TQLIB;
 function tq_is_function(ctx: JSContext; v: PJSValue): integer; cdecl; external TQLIB;
 
 procedure tq_free_value(ctx: JSContext; v: PJSValue); cdecl; external TQLIB;
+procedure tq_free_value_rt(rt: JSRuntime; v: PJSValue); cdecl; external TQLIB;
 procedure tq_dup_value(res: PJSValue; ctx: JSContext; v: PJSValue); cdecl; external TQLIB;
 
 procedure tq_get_property_str(res: PJSValue; ctx: JSContext; obj: PJSValue;
@@ -769,10 +817,80 @@ begin
       [tq_abi_version, TQ_EXPECTED_ABI]);
 end;
 
+function JS_ExecutePendingJobRaw(rt: JSRuntime; pctx: PJSContext): integer; cdecl;
+  external QJSLIB name 'JS_ExecutePendingJob';
+
+{ Whether the call is the main thread's, the one JS runs on, so it counts
+  for the watchdog's clock. }
+function EnterJS: boolean; inline;
+begin
+  Result := GetCurrentThreadId = MainThreadID;
+  if not Result then
+    Exit;
+  if JSEntryDepth <= 0 then
+  begin
+    JSEntryDepth := 0;
+    JSEntryStart := GetTickCount64;
+  end;
+  Inc(JSEntryDepth);
+end;
+
+function JSWaitBegin: TJSWait;
+begin
+  Result.Depth := JSEntryDepth;
+  Result.Start := JSEntryStart;
+  Result.Began := GetTickCount64;
+  Result.Waited := JSWaitedMs;
+  Result.PumpDepth := JSPumpDepth;
+  JSEntryDepth := 0;
+  JSPumpDepth := 0;
+end;
+
+procedure JSWaitEnd(const AWait: TJSWait);
+var
+  Elapsed, Inner: QWord;
+begin
+  Elapsed := GetTickCount64 - AWait.Began;
+  Inner := JSWaitedMs - AWait.Waited;
+  if Elapsed > Inner then
+    Inc(JSWaitedMs, Elapsed - Inner);
+  JSPumpDepth := AWait.PumpDepth;
+  JSEntryDepth := AWait.Depth;
+  JSEntryStart := AWait.Start + (GetTickCount64 - AWait.Began);
+end;
+
+function JS_ExecutePendingJob(rt: JSRuntime; pctx: PJSContext): integer;
+var
+  Counted: boolean;
+begin
+  Counted := EnterJS;
+  try
+    Result := JS_ExecutePendingJobRaw(rt, pctx);
+  finally
+    if Counted then
+      Dec(JSEntryDepth);
+  end;
+end;
+
+procedure JS_JobDone(ctx: JSContext; AResult: integer);
+var
+  e: JSValue;
+begin
+  if (AResult >= 0) or (ctx = nil) then
+    Exit;
+  if Assigned(JSJobFailed) then
+    JSJobFailed(ctx);
+  if JS_HasException(ctx) then
+  begin
+    e := JS_GetException(ctx);
+    JS_FreeValue(ctx, e);
+  end;
+end;
+
 function JS_DrainPendingJobs(rt: JSRuntime; ctx: JSContext): boolean;
 var
   runCtx: JSContext;
-  jobs: integer;
+  jobs, r: integer;
   startedAt: QWord;
 begin
   Result := true;
@@ -783,10 +901,13 @@ begin
   startedAt := GetTickCount64;
   while JS_IsJobPending(rt) do
   begin
-    // 0 means the queue turned out to be empty, <0 that the job threw; either
-    // way the drain is over, and both have always ended it here.
-    if JS_ExecutePendingJob(rt, @runCtx) <= 0 then
+    // 0 means the queue turned out to be empty; <0 that the job threw, whose
+    // exception is taken off and reported, and the other jobs still run.
+    r := JS_ExecutePendingJob(rt, @runCtx);
+    if r = 0 then
       Break;
+    JS_JobDone(runCtx, r);
+    runCtx := ctx;
     Inc(jobs);
     if (jobs >= JS_PUMP_MAX_JOBS) or
       ((jobs mod JS_PUMP_CLOCK_EVERY = 0) and
@@ -860,14 +981,30 @@ end;
 { ================================================================== }
 
 function JS_Eval(ctx: JSContext; const src, filename: RawUtf8; flags: integer): JSValue;
+var
+  Counted: boolean;
 begin
-  tq_eval(@Result, ctx, pansichar(src), Length(src), pansichar(filename), flags);
+  Counted := EnterJS;
+  try
+    tq_eval(@Result, ctx, pansichar(src), Length(src), pansichar(filename), flags);
+  finally
+    if Counted then
+      Dec(JSEntryDepth);
+  end;
 end;
 
 function JS_Call(ctx: JSContext; const func, this_obj: JSValue; argc: integer;
   argv: PJSValues): JSValue;
+var
+  Counted: boolean;
 begin
-  tq_call(@Result, ctx, @func, @this_obj, argc, argv);
+  Counted := EnterJS;
+  try
+    tq_call(@Result, ctx, @func, @this_obj, argc, argv);
+  finally
+    if Counted then
+      Dec(JSEntryDepth);
+  end;
 end;
 
 function JS_GetException(ctx: JSContext): JSValue;
@@ -937,6 +1074,11 @@ end;
 { ================================================================== }
 { Lifetime                                                            }
 { ================================================================== }
+
+procedure JS_FreeValueRT(rt: JSRuntime; const v: JSValue);
+begin
+  tq_free_value_rt(rt, @v);
+end;
 
 procedure JS_FreeValue(ctx: JSContext; const v: JSValue);
 begin

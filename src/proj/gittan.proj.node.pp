@@ -507,7 +507,9 @@ begin
   Result := nil;
   if AContext.TrackedUnder('node_modules/', Path) then
     AddProjectCheck(Result, ProjectCheck(rsNodeModulesTracked, Path, '/node_modules/'));
-  if (LockFile(AContext.Root) = '') and
+  { bun.lockb, Bun's binary lock before 1.2, is a lock too, though no
+    LockFile since it cannot be read. }
+  if (LockFile(AContext.Root) = '') and not HasFile(AContext.Root, 'bun.lockb') and
     (Length(Dependencies(TextOf(AContext.Root, 'package.json'))) > 0) then
     AddProjectCheck(Result, ProjectCheck(rsNoNodeLock, ''));
 end;

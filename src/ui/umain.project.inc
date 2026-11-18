@@ -100,9 +100,13 @@ begin
   UpdateStatus;
 end;
 
+{ A link of the page comes from the repository's files (Cargo.toml's
+  repository): only a web page is opened, since OpenURL starts whatever
+  a file:, smb: or search-ms: URL names. }
 procedure TRepoFrame.ProjectPageOpenUrl(Sender: TObject; const AText: string);
 begin
-  OpenURL(AText);
+  if IsWebUrl(AText) then
+    OpenURL(Trim(AText));
 end;
 
 { A button of a section: its command runs as a command of the Commands

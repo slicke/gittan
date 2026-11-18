@@ -225,10 +225,92 @@ procedure TExtQuickJSTest.TestParseValueLimits;
 var
   P, Inner: JSParameters;
   Depth: integer;
+  WasGen: QWord;
+  Text: string;
+  Obj: JSValue;
+
+  { Whether the object the script put in w is still alive: a WeakRef
+    lets go once the last reference has, so the count is seen without
+    reading QuickJS's memory (its layout differs on the Windows build). }
+  function Alive: boolean;
+  var
+    v: JSValue;
+  begin
+    JS_RunGC(FRuntime);
+    v := JS_Eval(FContext, 'w.deref() !== undefined', 'test.js', JS_EVAL_TYPE_GLOBAL);
+    try
+      Result := JS_ToBool(FContext, v) = 1;
+    finally
+      JS_FreeValue(FContext, v);
+    end;
+  end;
+
 begin
+  { The objects parsed hold a reference, which FreeJSParameters gives back
+    through this runtime. }
+  WasGen := ExtRuntimeGeneration;
+  ExtRuntimeStarted;
+  try
+  { Given back while its runtime is the live one; left alone once
+    another has started, as the one it was taken in is gone. }
+  Obj := JS_Eval(FContext,
+    '(() => { const o = {a: 1}; globalThis.w = new WeakRef(o); return o; })()',
+    'test.js', JS_EVAL_TYPE_GLOBAL);
+  P := JSParseParameters(FContext, 1, PJSValueConst(@Obj));
+  JS_FreeValue(FContext, Obj);
+  AssertTrue('a reference of its own', Alive);
+  FreeJSParameters(P);
+  AssertFalse('given back', Alive);
+  Obj := JS_Eval(FContext,
+    '(() => { const o = {a: 1}; globalThis.w = new WeakRef(o); return o; })()',
+    'test.js', JS_EVAL_TYPE_GLOBAL);
+  P := JSParseParameters(FContext, 1, PJSValueConst(@Obj));
+  ExtRuntimeStarted;
+  FreeJSParameters(P);
+  JS_FreeValue(FContext, Obj);
+  AssertTrue('kept for another runtime', Alive);
+  { The reference the list kept, so the runtime is freed clean. }
+  JS_FreeValue(FContext, Obj);
+  AssertFalse('the kept one given back here', Alive);
   P := Parsed('({length: 2e9})');
   try
-    AssertTrue('a made-up length', P[0]^.Data.match = JD_UNDEFINED);
+    AssertTrue('a made-up length is an object''s', P[0]^.Data.match = JD_OBJ);
+  finally
+    FreeJSParameters(P);
+  end;
+  { Only an array is one: an object without a length was an empty array,
+    a function one as long as its parameters. }
+  P := Parsed('({a: 1})');
+  try
+    AssertTrue('an object', P[0]^.Data.match = JD_OBJ);
+  finally
+    FreeJSParameters(P);
+  end;
+  { A string is one; an object is not, and is not parsed, so it keeps
+    no reference. }
+  Obj := JS_Eval(FContext, '"text"', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertTrue('a string', JSTryToString(FContext, Obj, Text));
+    AssertEquals('text', Text);
+  finally
+    JS_FreeValue(FContext, Obj);
+  end;
+  Obj := JS_Eval(FContext, '({a: 1})', 'test.js', JS_EVAL_TYPE_GLOBAL);
+  try
+    AssertFalse('an object is no string', JSTryToString(FContext, Obj, Text));
+  finally
+    JS_FreeValue(FContext, Obj);
+  end;
+  P := Parsed('(function (a, b) {})');
+  try
+    AssertTrue('a function', P[0]^.Data.match <> JD_ARRAY);
+  finally
+    FreeJSParameters(P);
+  end;
+  P := Parsed('new Proxy([], {get: function () { throw new Error("no length"); }})');
+  try
+    AssertTrue('a length that throws', P[0]^.Data.match = JD_OBJ);
+    AssertFalse('leaves nothing pending', JS_HasException(FContext));
   finally
     FreeJSParameters(P);
   end;
@@ -259,6 +341,9 @@ begin
     AssertEquals('a plain one is kept', 2, JSParameters(P[0]^.Data.ArrayVal).Count);
   finally
     FreeJSParameters(P);
+  end;
+  finally
+    ExtRuntimeGeneration := WasGen;
   end;
 end;
 

@@ -83,7 +83,8 @@ type
 implementation
 
 uses
-  gittan.ext.host, gittan.ext.grant, gittan.ext.modules, gittan.textfile, gittan.forge;
+  gittan.ext.host, gittan.ext.grant, gittan.ext.modules, gittan.ext.promise, gittan.textfile,
+  gittan.forge;
 
 resourcestring
   rsExtReadFailed = 'The extension file could not be read';
@@ -369,7 +370,19 @@ begin
         Engine.EndRegistration;
       end;
     end;
-    Res := string(Engine.ExtExecuteFile(Ext));
+    { What runs is the text whose hash was granted, not the file read a
+      third time, which may be gone or another by now. }
+    try
+      Res := string(Engine.ExtExecuteSource(Ext, UTF8String(Source)));
+    except
+      on E: Exception do
+      begin
+        Inf.Error := E.Message;
+        ExtHost.ReportError(ExtractFileName(AFileName), Inf.Error);
+        Engine.DropExtensionContext(Ext);
+        Exit;
+      end;
+    end;
     if Engine.LastLoadFailed then
     begin
       { Reported by the engine as it happened. What the script did
@@ -443,8 +456,19 @@ begin
   ExtHost.CommandsChanged;
 end;
 
+{ Refused while a load or an unload is under way: either runs the message
+  loop (a permission question, the wait for the promise tasks), and a
+  Reload clicked meanwhile would load the extensions beside the ones
+  still going, or free those still being loaded. }
 procedure TGittanExtLoader.Reload;
+var
+  Engine: TGittanExtEngine;
 begin
+  { Existing gives nil once the unload has signalled the promise tasks,
+    which is when it waits; Unloading covers the unload hooks before. }
+  Engine := TGittanExtEngine.Existing;
+  if FLoading or IsExtShuttingDown or ((Engine <> nil) and Engine.Unloading) then
+    Exit;
   Unload;
   Load;
 end;

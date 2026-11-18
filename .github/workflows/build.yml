@@ -816,9 +816,11 @@ jobs:
           # FPC's link through a shell, so libqjs was not found.) Git on
           # Haiku now and then fails a run when several go at once (a push
           # with "pthread_join failed", one of TestAsyncReads' six reads
-          # coming back empty), a different test each time, so a failed
-          # round is run again: a failure in both stops the leg, one in the
-          # first alone is a warning.
+          # coming back empty, TestExecWithoutData's git exiting with 217
+          # or hanging), a different test each time; those two now run
+          # their git calls one after the other. A failed round is run
+          # again: a failure in every round stops the leg, one in an
+          # earlier round alone is a warning.
           # The output goes to a file, so a test that hangs showed nothing
           # until the job's 90 minutes ran out: each test's name goes to a
           # trace as it starts (GITTAN_TEST_TRACE), and a round is given 15

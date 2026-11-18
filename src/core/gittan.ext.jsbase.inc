@@ -17,10 +17,9 @@ begin
   res^ := JS_NewObjectClass(ctx, GittanClassID);
 end;
 
-{** Log function exposed to JavaScript.
-    Concatenates all arguments into UTF-8 and appends them to the engine’s
-    output buffer via @code(TGittanExtEngine.SetOutput). Intended for simple
-    console-like logging.
+{** Gittan.log: the arguments, each converted once, as one entry of the
+    console under the extension's name (AddConsoleLine, which keeps the
+    newest lines only), as console.push would.
 
     @param(ctx)      Current QuickJS context
     @param(this_val) The 'this' value from JavaScript (unused)
@@ -30,8 +29,14 @@ end;
 }
 procedure JSDoLog(res: PJSValue; ctx: JSContext; this_val: PJSValue;
 argc: integer; argv: PJSValues; magic: integer);
+var
+  i: integer;
+  Text: string;
 begin
-  TGittanExtEngine.Instance.SetOutput(ctx, argv, argc - 1);
+  Text := '';
+  for i := 0 to argc - 1 do
+    Text := Text + string(ctx^.ToUtf8(argv^[i]));
+  AddConsoleLine(ConsoleAttribution(ctx) + Text);
   res^ := JS_UNDEFINED;
 end;
 
@@ -78,13 +83,21 @@ argc: integer; argv: PJSValues; magic: integer);
 var
   i: integer;
   output: rawutf8;
+  Wait: TJSWait;
+  Yes: boolean;
 begin
   try
     output := '';
     for i := 0 to argc - 1 do
       output := output + ctx^.ToUtf8(argv^[i]);
 
-    if ExtHost.Confirm(TGittanExtEngine.Instance.ExtensionNameForContext(ctx), output) then
+    Wait := JSWaitBegin;
+    try
+      Yes := ExtHost.Confirm(TGittanExtEngine.Instance.ExtensionNameForContext(ctx), output);
+    finally
+      JSWaitEnd(Wait);
+    end;
+    if Yes then
       res^ := JS_TRUE
     else
       res^ := JS_FALSE;
@@ -115,6 +128,7 @@ argc: integer; argv: PJSValues; magic: integer);
 var
   Caption, desc, def: rawutf8;
   response: string;
+  Wait: TJSWait;
 begin
   res^ := JS_UNDEFINED;
   if argc < 3 then
@@ -125,8 +139,13 @@ begin
   Caption := ctx^.ToUtf8(argv^[0]);
   desc := ctx^.ToUtf8(argv^[1]);
   def := ctx^.ToUtf8(argv^[2]);
-  if not ExtHost.Prompt(Caption, desc, def, response) then
-    response := '';
+  Wait := JSWaitBegin;
+  try
+    if not ExtHost.Prompt(Caption, desc, def, response) then
+      response := '';
+  finally
+    JSWaitEnd(Wait);
+  end;
   res^ := JS_NewString(ctx, pansichar(Response));
 end;
 
@@ -150,6 +169,7 @@ var
   Caption, desc: rawutf8;
   response: int64;
   vals: TStringList;
+  Wait: TJSWait;
 begin
   if argc < 3 then
   begin
@@ -162,7 +182,12 @@ begin
     vals.Add(ctx^.ToUtf8(argv^[i]));
   Caption := ctx^.ToUtf8(argv^[0]);
   desc := ctx^.ToUtf8(argv^[1]);
-  response := ExtHost.Select(Caption, desc, vals.ToStringArray(2, argc - 1));
+  Wait := JSWaitBegin;
+  try
+    response := ExtHost.Select(Caption, desc, vals.ToStringArray(2, argc - 1));
+  finally
+    JSWaitEnd(Wait);
+  end;
   // Ignore the first params
   //  res := vals.strings[response+2];
   vals.Free;
@@ -208,8 +233,9 @@ procedure PromiseRejectionTracker(ctx: JSContext; promise, reason: PJSValue;
 is_handled: integer; opaque: Pointer); cdecl;
 var
   error_msg, stack: RawUtf8;
-  st: JSValue;
+  st, left: JSValue;
   eng: TGittanExtEngine;
+  hadException: boolean;
 begin
   // The runtime calls this from inside a C frame, so nothing may unwind out of
   // it - and Instance returns nil once shutdown has been signalled, which is
@@ -236,6 +262,10 @@ begin
       Exit;
     end;
 
+    // A toString or a stack getter of the reason may throw itself (an object
+    // without a prototype, a Symbol): what it leaves pending is taken off
+    // below, as it would be thrown by the next native of any extension.
+    hadException := JS_HasException(ctx);
     try
       // Convert the JS 'reason' value to a string for display/logging
       error_msg := JSValueConstToUtf8(ctx, reason^);
@@ -258,6 +288,13 @@ begin
     except
       on E: Exception do
         error_msg := '[error retrieving message]';
+    end;
+    if not hadException and JS_HasException(ctx) then
+    begin
+      left := JS_GetException(ctx);
+      JS_FreeValue(ctx, left);
+      if error_msg = '' then
+        error_msg := '[a reason that cannot be shown]';
     end;
     eng.NoteRejection(JSValueId(promise^), string(error_msg));
   except
@@ -370,7 +407,9 @@ begin
   end;
 
   // 5) Validate arity against min/max constraints (unless min=-1 which means “free-form”).
-  //    On mismatch the promise is rejected and the task never runs.
+  //    On mismatch the promise is rejected and the task never runs, and so it
+  //    is when the context has MaxAsyncTasksPerContext running already.
+  arityMsg := '';
   if (not ((params >= cb^.params.min) and (params <= cb^.params.max))) and
     (cb^.params.min > -1) then
   begin
@@ -381,7 +420,31 @@ begin
       arityMsg := Format('[%s] Needs %d - %d parameters, but we got %d',
         [func, cb^.params.min, cb^.params.max, params]);
     ExtError(arityMsg);
+  end
+  else if AsyncTasksOf(ctx) >= MaxAsyncTasksPerContext then
+    arityMsg := Format('[%s] More than %d calls are under way at once; wait for some to end',
+      [func, MaxAsyncTasksPerContext])
+  else
+  begin
+    // 6) Kick off the asynchronous work.
+    //    The task is responsible for:
+    //      - Performing the actual native operation tied to 'func'
+    //      - Calling funcs[0] (resolve) or funcs[1] (reject) with a JS value
+    //      - Freeing any allocated argument/JS values when done
+    //    A thread that cannot be made (too many at once) leaves all of that
+    //    here: the promise is rejected below.
+    try
+      TJSAsyncTask.Create(ctx, cb^, @funcs);
+      // Avoid further use of params by the engine; ownership transferred to the task
+      cb^.params.values.Data := nil;
+    except
+      on E: Exception do
+        arityMsg := Format('[%s] %s', [func, E.Message]);
+    end;
+  end;
 
+  if arityMsg <> '' then
+  begin
     errVal := JS_NewString(ctx, pansichar(RawUtf8(arityMsg)));
     callRes := JS_Call(ctx, funcs[JprReject], JS_UNDEFINED, 1, @errVal);
     ctx^.FreeInlined(PJSValue(@callRes));
@@ -390,18 +453,7 @@ begin
     ctx^.FreeInlined(PJSValue(@funcs[JprReject]));
 
     FreeJSParameters(cb^.params.values.Data);
-    res^ := promise;
-    Exit;
   end;
-
-  // 6) Kick off the asynchronous work.
-  //    The task is responsible for:
-  //      - Performing the actual native operation tied to 'func'
-  //      - Calling funcs[0] (resolve) or funcs[1] (reject) with a JS value
-  //      - Freeing any allocated argument/JS values when done
-  TJSAsyncTask.Create(ctx, cb^, @funcs);
-  // Avoid further use of params by the engine; ownership transferred to the task
-  cb^.params.values.Data := nil;
 
   // 7) Return the Promise object to JavaScript immediately.
   res^ := promise;

@@ -83,8 +83,12 @@ function ParseLpiPackages(const AXml: string): TGittanDependencies;
 function LpiVersion(const AXml: string): string;
 
 {** The .lpk files under ARoot, as paths from it with "/", by name: a
-  walk at most LazPackageDepth folders deep that skips hidden folders
-  and lib, backup and node_modules. }
+  walk at most LazPackageDepth folders deep that skips hidden folders,
+  lib, backup and node_modules, and symbolic links: a committed link to
+  . or .. would walk the tree again for every link at every level
+  (fifteen of them gave 800,000 paths in 55 seconds), and one to a file
+  would read what lies outside the clone. It looks at LazPackageEntries
+  entries at most. }
 function FindLazPackages(const ARoot: string): TStringArray;
 
 {** Whether AName is a package that comes with Lazarus (LCL, FCL,
@@ -99,6 +103,9 @@ function LazBuildCommand(const ALpi, AMode: string): string;
 const
   {** How deep FindLazPackages looks. }
   LazPackageDepth = 5;
+  {** How many folder entries FindLazPackages looks at, at most: the
+    page is built on the main thread. }
+  LazPackageEntries = 20000;
 
 implementation
 
@@ -165,14 +172,16 @@ resourcestring
 
 { No DOCTYPE is read: Lazarus writes none, and its entities would be
   expanded without a limit (a file under a kilobyte can ask for
-  gigabytes, the "billion laughs"). }
+  gigabytes, the "billion laughs"). A file nested deeper than MaxNesting
+  is not read either: the parser, the freeing of its tree and Find go
+  down it by recursion, and some 30 000 levels end the process. }
 function LoadXml(const AXml: string): TXMLDocument;
 var
   Parser: TDOMParser;
   Source: TXMLInputSource;
 begin
   Result := nil;
-  if Trim(AXml) = '' then
+  if (Trim(AXml) = '') or XmlTooDeep(AXml) then
     Exit;
   Parser := TDOMParser.Create;
   Source := TXMLInputSource.Create(AXml);
@@ -515,7 +524,7 @@ end;
 function FindLazPackages(const ARoot: string): TStringArray;
 var
   Found: TStringList;
-  i: integer;
+  i, Seen: integer;
 
   procedure Walk(const ARel: string; ADepth: integer);
   var
@@ -523,11 +532,16 @@ var
     Dir, Rel: string;
   begin
     Dir := IncludeTrailingPathDelimiter(RootFile(ARoot, ARel));
-    if FindFirst(Dir + '*', faAnyFile, Info) <> 0 then
+    if FindFirst(Dir + '*', faAnyFile or faSymLink, Info) <> 0 then
       Exit;
     try
       repeat
         if (Info.Name = '.') or (Info.Name = '..') then
+          Continue;
+        Inc(Seen);
+        if Seen > LazPackageEntries then
+          Exit;
+        if (Info.Attr and faSymLink) <> 0 then
           Continue;
         if ARel = '' then
           Rel := Info.Name
@@ -550,6 +564,7 @@ var
 
 begin
   Found := TStringList.Create;
+  Seen := 0;
   try
     if (ARoot <> '') and DirectoryExists(ARoot) then
       Walk('', 0);

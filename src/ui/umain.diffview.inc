@@ -1088,6 +1088,19 @@ begin
     FEditOld.OptWrapMode := Mode;
 end;
 
+{ The diff line of the caret's row; on a gap, its first hidden line,
+  shown or in a gap again after; -1 for none. }
+function TRepoFrame.CaretDiffLine: integer;
+var
+  CaretY: integer;
+begin
+  CaretY := Edit.Carets[0].PosY;
+  Result := LineAtRow(CaretY);
+  if (Result < 0) and (CaretY >= 0) and (CaretY <= High(FRows)) and
+    (FRows[CaretY].Line = rowGap) then
+    Result := FRows[CaretY].GapFrom;
+end;
+
 { After a view option changed: the change view is built again at the
   same place, other views are left alone. }
 procedure TRepoFrame.RebuildIfChanges;
@@ -1099,12 +1112,12 @@ begin
   TopLine := Edit.LineTop;
   CaretY := Edit.Carets[0].PosY;
   { The rows change with the layout (Hide Unchanged Lines, side by side):
-    the caret stays on its diff line, as far from the top as it was. }
-  CaretLine := LineAtRow(CaretY);
-  { On a gap: its first hidden line, shown or in a gap again after. }
-  if (CaretLine < 0) and (CaretY >= 0) and (CaretY <= High(FRows)) and
-    (FRows[CaretY].Line = rowGap) then
-    CaretLine := FRows[CaretY].GapFrom;
+    the caret stays on its diff line, as far from the top as it was. The
+    diff's lines were others before RebuildKeeps, which took it. }
+  if FKeepCaret then
+    CaretLine := FKeepCaretLine
+  else
+    CaretLine := CaretDiffLine;
   KeepFolds;
   ApplyLayout;
   BuildChangeView;

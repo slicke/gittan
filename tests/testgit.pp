@@ -33,6 +33,10 @@ type
   published
     procedure TestWindowsArg;
     procedure TestEmptyArgument;
+    procedure TestNulArgument;
+    procedure TestLargeOutput;
+    procedure TestTagWithSigningOn;
+    procedure TestNoEditor;
     procedure TestInsteadOf;
     procedure TestChangeKind;
     procedure TestStageFlags;
@@ -54,6 +58,9 @@ type
     procedure TestBlame;
     procedure TestBlameSha256;
     procedure TestInputClosed;
+    procedure TestInputHeldElsewhere;
+    procedure TestSpawnCloseOnExec;
+    procedure TestRefreshIndex;
     procedure TestConflictCrlf;
     procedure TestCommitRange;
     procedure TestLineHistory;
@@ -79,6 +86,9 @@ type
     procedure TestPathCommits;
     procedure TestOperation;
     procedure TestBranchesAndSwitch;
+    procedure TestSwitchTrack;
+    procedure TestCompareRef;
+    procedure TestConflictMarkerSize;
     procedure TestGoneBranches;
     procedure TestGoneUpstreams;
     procedure TestCommit;
@@ -128,6 +138,7 @@ type
     procedure TestRebaseOntoConflicts;
     procedure TestRebaseStray;
     procedure TestRebaseInteractive;
+    procedure TestRebaseInteractiveMissing;
     procedure TestRebaseInteractiveEdit;
     procedure TestRebaseInteractiveFixup;
     procedure TestRebaseInteractiveConflicts;
@@ -355,6 +366,14 @@ begin
   AssertTrue(FileExists(IncludeTrailingPathDelimiter(FRepo.Root) + 'a.txt'));
   FRepo.Close;
   AssertEquals('', FRepo.Root);
+  { A folder whose name ends in a space keeps it, in the root and the
+    git directory. Windows has no such folders. }
+  {$ifdef unix}
+  Git(['init', '-q', 'trail ']);
+  AssertTrue(FRepo.Error, FRepo.Open(IncludeTrailingPathDelimiter(FDir) + 'trail '));
+  AssertEquals('trail ', ExtractFileName(FRepo.Root));
+  AssertEquals(IncludeTrailingPathDelimiter(FRepo.Root) + '.git', FRepo.GitDir);
+  {$endif}
 end;
 
 { An untracked file that cannot be read when it is counted (gone since
@@ -629,10 +648,39 @@ begin
   AssertTrue(FRepo.Fingerprint <> '');
 end;
 
+{ The tabs of the line of AFingerprint that starts with APath and a tab. }
+function TabsOfLine(const AFingerprint, APath: string): integer;
+var
+  Line: string;
+  c: char;
+begin
+  Result := -1;
+  for Line in AFingerprint.Split([#10]) do
+    if Pos(APath + #9, Line) = 1 then
+    begin
+      Result := 0;
+      for c in Line do
+        if c = #9 then
+          Inc(Result);
+    end;
+end;
+
+{ The line of APath in AFingerprint. }
+function LineOf(const AFingerprint, APath: string): string;
+var
+  Line: string;
+begin
+  Result := '';
+  for Line in AFingerprint.Split([#10]) do
+    if Pos(APath + #9, Line) = 1 then
+      Exit(Line);
+end;
+
 procedure TGitRepoTest.TestFingerprint;
 
 var
   A, B: string;
+  Stamp: TDateTime;
 begin
   MakeHistory;
   WriteFile('a.txt', 'one'#10'zwei'#10'three'#10);
@@ -686,6 +734,28 @@ begin
   AssertTrue('the personal file seen', A <> B);
   WriteFile('a.txt', 'changed in the work tree'#10);
   AssertEquals('a work tree file not, in a range', A, FRepo.Fingerprint);
+  { A file written now is hashed, one an hour old not (a 512 MB file
+    made every poll take 1.7 s): a write after it gives a newer time. }
+  FRepo.Base := '';
+  WriteFile('new.txt', 'k'#10);
+  AssertEquals('fresh: time, size and hash', 3, TabsOfLine(FRepo.Fingerprint, 'new.txt'));
+  AssertEquals(0, FileSetDate(FDir + PathDelim + 'new.txt', DateTimeToFileDate(Now - 1 / 24)));
+  AssertEquals('old: time and size', 2, TabsOfLine(FRepo.Fingerprint, 'new.txt'));
+  { A write of the same size at the same time as one hashed while fresh,
+    seen only once the file has settled: it is hashed once more then. }
+  { The stamp as the file system keeps it: Windows's file dates go by
+    two seconds, so Now less a little could already be past fresh. }
+  Stamp := FileDateToDateTime(DateTimeToFileDate(Now));
+  WriteFile('new.txt', 'k'#10);
+  AssertEquals(0, FileSetDate(FDir + PathDelim + 'new.txt', DateTimeToFileDate(Stamp)));
+  A := LineOf(FRepo.Fingerprint, 'new.txt');
+  WriteFile('new.txt', 'j'#10);
+  AssertEquals(0, FileSetDate(FDir + PathDelim + 'new.txt', DateTimeToFileDate(Stamp)));
+  Sleep(3200);
+  B := LineOf(FRepo.Fingerprint, 'new.txt');
+  AssertEquals('settled: hashed', 3, TabsOfLine(B + #10, 'new.txt'));
+  AssertTrue('the write seen once settled', A <> B);
+  AssertEquals('and then kept', B, LineOf(FRepo.Fingerprint, 'new.txt'));
 end;
 
 { A snapshot holds the untracked files, and the whole tree comparison
@@ -903,6 +973,90 @@ begin
   AssertTrue(Err, RunGitIn(FDir, ['-c', 'alias.readall=!cat; echo read', 'readall'],
     Output, Err));
   AssertEquals('read', Trim(Output));
+end;
+
+{ A tool that ends without reading its input while a process it left
+  behind holds the pipe, as a hook's background job may: RunTool
+  returns at once rather than when that process ends. }
+procedure TGitRepoTest.TestInputHeldElsewhere;
+{$IFDEF UNIX}
+var
+  Output, Err: string;
+  Code: integer;
+  Started: QWord;
+{$ENDIF}
+begin
+  {$IFDEF UNIX}
+  Started := GetTickCount64;
+  AssertTrue(RunTool('/bin/sh', '', ['-c', 'exec 3<&0; sleep 4 <&3 3<&- >/dev/null 2>&1 & exit 0'],
+    [], [], Output, Err, Code, nil, StringOfChar('a', 4 * 1024 * 1024)));
+  AssertEquals(0, Code);
+  AssertTrue('returned in ' + IntToStr(GetTickCount64 - Started) + ' ms',
+    GetTickCount64 - Started < 2500);
+  {$ENDIF}
+end;
+
+{ A process started through SpawnProcess keeps its pipes from what is
+  started after it: its ends are closed on exec. One without pipes
+  starts too. }
+procedure TGitRepoTest.TestSpawnCloseOnExec;
+{$IFDEF UNIX}
+var
+  P: TProcess;
+{$ENDIF}
+begin
+  {$IFDEF UNIX}
+  P := TProcess.Create(nil);
+  try
+    P.Executable := '/bin/cat';
+    P.Options := [poUsePipes];
+    SpawnProcess(P);
+    AssertEquals('input', 1, FpFcntl(P.Input.Handle, F_GETFD) and 1);
+    AssertEquals('output', 1, FpFcntl(P.Output.Handle, F_GETFD) and 1);
+    AssertEquals('stderr', 1, FpFcntl(P.Stderr.Handle, F_GETFD) and 1);
+    P.CloseInput;
+    P.WaitOnExit;
+  finally
+    P.Free;
+  end;
+  P := TProcess.Create(nil);
+  try
+    P.Executable := '/bin/sh';
+    P.Parameters.Add('-c');
+    P.Parameters.Add('exit 0');
+    P.Options := [poWaitOnExit];
+    SpawnProcess(P);
+    AssertEquals(0, P.ExitStatus);
+  finally
+    P.Free;
+  end;
+  {$ENDIF}
+end;
+
+{ A file touched but not changed: the index's time is old, which
+  diff-files reports, until RefreshIndex; not while index.lock is
+  there. }
+procedure TGitRepoTest.TestRefreshIndex;
+var
+  Lock: string;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Git(['update-index', '-q', '--refresh']);
+  AssertEquals('', Trim(Git(['diff-files', '--name-only'])));
+  FileSetDate(IncludeTrailingPathDelimiter(FDir) + 'a.txt',
+    DateTimeToFileDate(Now - 1));
+  AssertEquals('stale', 'a.txt', Trim(Git(['diff-files', '--name-only'])));
+  Lock := IncludeTrailingPathDelimiter(FDir) + '.git' + PathDelim + 'index.lock';
+  WriteFile('.git' + PathDelim + 'index.lock', '');
+  try
+    AssertFalse('not while locked', FRepo.RefreshIndex);
+    AssertEquals('still stale', 'a.txt', Trim(Git(['diff-files', '--name-only'])));
+  finally
+    DeleteFile(Lock);
+  end;
+  AssertTrue(FRepo.RefreshIndex);
+  AssertEquals('known again', '', Trim(Git(['diff-files', '--name-only'])));
 end;
 
 { The range of a commit runs from its parent; a root commit, which has
@@ -1300,6 +1454,10 @@ begin
     AssertEquals(Head, Trim(Git(['rev-parse', HeadRef])));
     AssertTrue(FRepo.HasCommit('origin/' + Branch));
     AssertFalse(FRepo.FetchPullRequest('origin', 8, 'refs/pull/8/head', Branch, HeadRef));
+    AssertFalse(FRepo.FetchPullRequest('', 7, 'refs/pull/7/head', Branch, HeadRef));
+    AssertEquals('No remote to fetch the pull request from', FRepo.Error);
+    AssertFalse(FRepo.FetchPullRequest('origin', 7, '', Branch, HeadRef));
+    AssertEquals('The forge gave no ref for the pull request', FRepo.Error);
     FRepo.Base := 'origin/' + Branch + '...' + HeadRef;
     AssertTrue(FRepo.IsRange);
   finally
@@ -1623,7 +1781,14 @@ begin
   AssertTrue('on side kept', Found);
   AssertTrue(FRepo.GraphCommits(Commits, 500, True, True));
   AssertEquals(2, Length(Commits));
-  AssertEquals('on main', Commits[0].Subject);
+  AssertEquals('on main', Commits[0].Subject);  { A commit on the merge: the layout leaves out the parent the list
+    lacks, the commit keeps it (a fixup rebases onto it). }
+  WriteFile('a.txt', 'after'#10);
+  Commit('after the merge');
+  AssertTrue(FRepo.GraphCommits(Commits, 500, False, True));
+  AssertEquals('after the merge', Commits[0].Subject);
+  AssertEquals(Trim(Git(['rev-parse', 'HEAD~1'])), Commits[0].Parents[0]);
+  AssertEquals('no lane kept open for the merge', 0, Length(Commits[0].BottomEdges));
 end;
 
 { A note is set, read by the graph and the details, replaced and
@@ -2813,18 +2978,36 @@ end;
 procedure TGitRepoTest.TestRemoteEnvironment;
 var
   Env: TStringArray;
+  i: integer;
 begin
   MakeHistory;
   AssertTrue(FRepo.Open(FDir));
   Env := FRepo.RemoteEnvironment;
   if (GetEnvironmentVariable('GIT_SSH_COMMAND') = '') and
-    (GetEnvironmentVariable('GIT_SSH') = '') then
+    (GetEnvironmentVariable('GIT_SSH') = '') and
+    (GetEnvironmentVariable('GIT_HTTP_LOW_SPEED_LIMIT') = '') and
+    (GetEnvironmentVariable('GIT_HTTP_LOW_SPEED_TIME') = '') then
   begin
+    AssertEquals(3, Length(Env));
+    AssertEquals('GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=30 ' +
+      '-o ServerAliveInterval=15 -o ServerAliveCountMax=4', Env[0]);
+    AssertEquals('GIT_HTTP_LOW_SPEED_LIMIT=1', Env[1]);
+    AssertEquals('GIT_HTTP_LOW_SPEED_TIME=60', Env[2]);
+    Env := RemoteEnvironmentIn(FDir, 20);
+    AssertTrue('a shorter time to connect',
+      Pos(' -o ConnectTimeout=20 ', Env[0]) > 0);
+    { A lowest speed for one host is the user's choice too. }
+    Git(['config', 'http.https://example.invalid/.lowSpeedTime', '600']);
+    Env := FRepo.RemoteEnvironment;
     AssertEquals(1, Length(Env));
-    AssertEquals('GIT_SSH_COMMAND=ssh -o BatchMode=yes', Env[0]);
+    AssertEquals('GIT_SSH_COMMAND=', Copy(Env[0], 1, Length('GIT_SSH_COMMAND=')));
   end;
+  { The ssh part alone: the HTTP variables may come from the tests'
+    own environment, or not. }
   Git(['config', 'core.sshCommand', 'ssh -i key']);
-  AssertEquals('the user runs ssh their own way', 0, Length(FRepo.RemoteEnvironment));
+  Env := FRepo.RemoteEnvironment;
+  for i := 0 to High(Env) do
+    AssertFalse('the user runs ssh their own way', Pos('GIT_SSH_COMMAND=', Env[i]) = 1);
 end;
 
 { Sets a variable in the test's own environment, as the shell that
@@ -3495,6 +3678,35 @@ end;
 { The commits after the first, replayed in another order: the fourth
   squashed into the third with the messages joined, then the second
   with another message. }
+{ A commit made after the list was read (from the terminal while the
+  dialog was open) is in none of its lines: git refuses rather than
+  drop it, and the branch is as it was. }
+procedure TGitRepoTest.TestRebaseInteractiveMissing;
+var
+  First, Late: string;
+  Steps: TGittanRebaseSteps;
+  Merges, Conflicts, Stopped: boolean;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  First := Trim(Git(['rev-parse', 'HEAD']));
+  WriteFile('b.txt', 'b'#10);
+  Commit('second');
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.RebaseSteps(First, Steps, Merges));
+  AssertEquals(1, Length(Steps));
+  WriteFile('c.txt', 'c'#10);
+  Commit('late');
+  Late := Trim(Git(['rev-parse', 'HEAD']));
+  AssertFalse('refused', FRepo.RebaseInteractive(First, Steps, Conflicts, Stopped));
+  AssertTrue(FRepo.Error, Pos('nothing was rebased', FRepo.Error) > 0);
+  AssertFalse(Conflicts);
+  AssertFalse(Stopped);
+  AssertEquals('no rebase left begun', '', FRepo.Operation);
+  AssertEquals('the late commit kept', Late, Trim(Git(['rev-parse', 'HEAD'])));
+end;
+
 procedure TGitRepoTest.TestRebaseInteractive;
 var
   First, Main: string;
@@ -4118,6 +4330,93 @@ begin
   end;
 end;
 
+{ A remote branch picked from the list becomes a local branch tracking
+  that very ref: with two remotes that both have feature, the name
+  alone is refused by git (or goes to checkout.defaultRemote), the ref
+  is not. A remote with a slash in its name gives the right branch
+  name. The remote-tracking refs are set by hand, no remote is
+  reached. }
+procedure TGitRepoTest.TestSwitchTrack;
+var
+  First, Second: string;
+  Remotes: TStringList;
+  Remote: string;
+begin
+  MakeHistory;
+  Git(['config', 'user.name', 'Gittan Test']);
+  Git(['config', 'user.email', 'test@example.invalid']);
+  WriteFile('a.txt', 'second'#10);
+  Commit('second');
+  AssertTrue(FRepo.Open(FDir));
+  First := Trim(Git(['rev-parse', 'HEAD~1']));
+  Second := Trim(Git(['rev-parse', 'HEAD']));
+  Git(['remote', 'add', 'origin', 'https://example.invalid/a.git']);
+  Git(['remote', 'add', 'upstream', 'https://example.invalid/b.git']);
+  Git(['remote', 'add', 'team/x', 'https://example.invalid/c.git']);
+  Git(['update-ref', 'refs/remotes/origin/feature', Second]);
+  Git(['update-ref', 'refs/remotes/upstream/feature', First]);
+  Git(['update-ref', 'refs/remotes/team/x/topic/one', First]);
+  Git(['config', 'checkout.defaultRemote', 'origin']);
+  { A tag of the same name is passed over. }
+  Git(['tag', 'upstream/feature', Second]);
+
+  AssertTrue(FRepo.Error, FRepo.Switch('feature', False, False, 'upstream/feature'));
+  AssertEquals('feature', FRepo.Branch);
+  AssertEquals('the picked remote''s commit', First, Trim(Git(['rev-parse', 'HEAD'])));
+  AssertEquals('tracks the picked remote', 'upstream', Trim(Git(['config', 'branch.feature.remote'])));
+  AssertEquals('refs/heads/feature', Trim(Git(['config', 'branch.feature.merge'])));
+
+  Remotes := TStringList.Create;
+  try
+    AssertTrue(FRepo.Remotes(Remotes));
+    AssertEquals('topic/one', RemoteRefBranch('team/x/topic/one', Remotes, Remote));
+    AssertEquals('team/x', Remote);
+    AssertEquals('', RemoteRefBranch('elsewhere/topic', Remotes, Remote));
+    AssertEquals('', Remote);
+  finally
+    Remotes.Free;
+  end;
+  AssertTrue(FRepo.Error, FRepo.Switch('topic/one', False, False, 'team/x/topic/one'));
+  AssertEquals('topic/one', FRepo.Branch);
+  AssertEquals('team/x/topic/one', FRepo.Upstream('topic/one'));
+end;
+
+{ The markers' length from .gitattributes, 7 without it. }
+procedure TGitRepoTest.TestConflictMarkerSize;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  AssertEquals(7, FRepo.ConflictMarkerSize('a.txt'));
+  WriteFile('.gitattributes', '*.txt conflict-marker-size=10'#10'odd.md conflict-marker-size=x'#10);
+  AssertEquals(10, FRepo.ConflictMarkerSize('a.txt'));
+  AssertEquals(10, FRepo.ConflictMarkerSize('dir sp/fil å.txt'));
+  AssertEquals('not a number', 7, FRepo.ConflictMarkerSize('odd.md'));
+  AssertEquals(7, FRepo.ConflictMarkerSize('other.md'));
+end;
+
+{ What Compare With takes: a commit or a range of commits, never a side
+  git would read as an option. }
+procedure TGitRepoTest.TestCompareRef;
+begin
+  MakeHistory;
+  WriteFile('a.txt', 'second'#10);
+  Commit('second');
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.IsCompareRef('HEAD~1'));
+  AssertTrue(FRepo.IsCompareRef('HEAD~1..HEAD'));
+  AssertTrue(FRepo.IsCompareRef('HEAD~1...HEAD'));
+  AssertTrue('the other side is HEAD', FRepo.IsCompareRef('HEAD~1..'));
+  AssertTrue(FRepo.IsCompareRef('..HEAD~1'));
+  AssertFalse(FRepo.IsCompareRef(''));
+  AssertFalse(FRepo.IsCompareRef('..'));
+  AssertFalse(FRepo.IsCompareRef('no-such-ref'));
+  AssertFalse(FRepo.IsCompareRef('HEAD..no-such-ref'));
+  AssertFalse(FRepo.IsCompareRef('--output=' + FDir + '/out..HEAD'));
+  AssertFalse(FRepo.IsCompareRef('HEAD..-p'));
+  AssertFalse(FRepo.IsCompareRef('-p'));
+  AssertFalse(FileExists(IncludeTrailingPathDelimiter(FDir) + 'out'));
+end;
+
 { A switch the local changes block names the files; a stash clears the
   way, and --merge brings them along. }
 procedure TGitRepoTest.TestSwitchBlocked;
@@ -4352,6 +4651,14 @@ begin
     WriteFile('crlf.txt', 'x'#13#10'y'#13#10);
     AssertTrue(FRepo.FileChanges('crlf.txt', Lines));
     AssertEquals('+x|+y|', Joined(Lines));
+    { A tracked file made a link: git gives two diffs, and the second's
+      header is no line of the first. }
+    {$ifdef unix}
+    DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'cr.txt');
+    AssertEquals(0, fpSymlink('target', PChar(IncludeTrailingPathDelimiter(FDir) + 'cr.txt')));
+    AssertTrue(FRepo.FileChanges('cr.txt', Lines));
+    AssertEquals('-a'#13' b|-c|-d|-e|+target|', Joined(Lines));
+    {$endif}
   finally
     Lines.Free;
   end;
@@ -4361,6 +4668,17 @@ procedure TGitRepoTest.TestRevertFiles;
 var
   Paths, Saved: TStringList;
   Root: string;
+
+  {$ifdef unix}
+  function ModeOf(const AFile: string): integer;
+  var
+    Info: Stat;
+  begin
+    AssertEquals(0, fpStat(AFile, Info));
+    Result := Info.st_mode and &777;
+  end;
+  {$endif}
+
 begin
   MakeHistory;
   AssertTrue(FRepo.Open(FDir));
@@ -4370,10 +4688,18 @@ begin
   Git(['add', 'staged.txt']);
   DeleteFile(Root + 'del.txt');
   WriteFile('added.txt', 'added'#10);
+  {$ifdef unix}
+  { A new script. }
+  fpChmod(Root + 'added.txt', &755);
+  {$endif}
   Git(['add', 'added.txt']);
   WriteFile('un=tracked.txt', 'untracked'#10);
   Git(['mv', QuoteName, 'moved.txt']);
   WriteFile('dir sp/fil å.txt', 'kept'#10);
+  {$ifdef unix}
+  { A change that adds the executable bit too. }
+  fpChmod(Root + 'a.txt', &755);
+  {$endif}
   Paths := TStringList.Create;
   Saved := TStringList.Create;
   try
@@ -4402,6 +4728,10 @@ begin
     AssertEquals('added'#10, FileText(Root + 'added.txt'));
     AssertEquals('untracked'#10, FileText(Root + 'un=tracked.txt'));
     AssertEquals('x'#10, FileText(Root + 'moved.txt'));
+    {$ifdef unix}
+    AssertEquals('the new script is executable again', &755, ModeOf(Root + 'added.txt'));
+    AssertEquals('and the changed file', &755, ModeOf(Root + 'a.txt'));
+    {$endif}
   finally
     Paths.Free;
     Saved.Free;
@@ -4806,6 +5136,82 @@ begin
   AssertTrue(Err, RunGitIn(FDir, ['config', '--local', 'gittan.test', ''], Output, Err));
   AssertEquals('set, empty', '', Trim(Git(['config', 'gittan.test'])));
   {$ENDIF}
+end;
+
+{ A NUL would end the C string the argument is passed as, so the tool
+  would get less than was checked: refused on every system. }
+{ A large output comes whole and fast: each piece appended to the
+  string copied all of it, 7.5 s for 130 MB. NUL bytes straight from
+  head, as a filter such as tr took most of the time itself and hid
+  the copying: some 0.03 s read into the buffer, 1.8 s copied whole. }
+procedure TGitRepoTest.TestLargeOutput;
+{$IFDEF UNIX}
+var
+  Output, Err: string;
+  Code: integer;
+  T: QWord;
+begin
+  T := GetTickCount64;
+  AssertTrue(RunTool('/bin/sh', '', ['-c', 'head -c 40000000 /dev/zero; printf b'],
+    [], [], Output, Err, Code, nil));
+  AssertEquals(40000001, Length(Output));
+  AssertEquals(#0, Output[1]);
+  AssertEquals('b', Output[Length(Output)]);
+  AssertEquals('', Err);
+  AssertTrue('took ' + IntToStr(GetTickCount64 - T) + ' ms', GetTickCount64 - T < 1000);
+end;
+{$ELSE}
+begin
+end;
+{$ENDIF}
+
+procedure TGitRepoTest.TestNulArgument;
+var
+  Output, Err: string;
+begin
+  Git(['init', '-q']);
+  Git(['config', 'gittan.test', 'before']);
+  AssertFalse('refused', RunGitIn(FDir, ['config', '--local', 'gittan.test', 'after'#0'x'],
+    Output, Err));
+  AssertTrue(Err, Pos('NUL', Err) > 0);
+  AssertEquals('nothing run', 'before', Trim(Git(['config', 'gittan.test'])));
+  AssertFalse('a tool too', RunCli('git', FDir, ['config', 'gittan.test'#0, 'x'], [], Output, Err));
+  AssertTrue(Err, Pos('NUL', Err) > 0);
+end;
+
+{ Gittan's signing sets tag.gpgSign, with which git wants a message for
+  any tag and starts an editor for it ("Terminal is dumb" from the Dock).
+  A tag without a message is a lightweight one, never signed. }
+procedure TGitRepoTest.TestTagWithSigningOn;
+begin
+  MakeHistory;
+  Git(['config', 'tag.gpgSign', 'true']);
+  Git(['config', 'core.editor', 'false']);
+  AssertTrue(FRepo.Open(FDir));
+  AssertTrue(FRepo.Error, FRepo.CreateTag('v1', 'HEAD', ''));
+  AssertEquals('lightweight', 'commit', Trim(Git(['cat-file', '-t', 'v1'])));
+end;
+
+{ No command starts an editor: one that wants a text gets an empty one,
+  whatever core.editor says (false would fail as the editor). }
+procedure TGitRepoTest.TestNoEditor;
+var
+  Output, Err, Was: string;
+begin
+  MakeHistory;
+  Git(['config', 'core.editor', 'false']);
+  { A GIT_EDITOR the tests were started with (an agent's true) would
+    stand in for Gittan's. }
+  Was := GetEnvironmentVariable('GIT_EDITOR');
+  UnsetTestVariable('GIT_EDITOR');
+  try
+    AssertFalse('no message, no commit', RunGitIn(FDir, ['commit', '--allow-empty'],
+      Output, Err));
+    AssertTrue(Err, Pos('empty', LowerCase(Err)) > 0);
+  finally
+    if Was <> '' then
+      SetTestVariable('GIT_EDITOR', Was);
+  end;
 end;
 
 procedure TGitRepoTest.TestParseGitVersion;
@@ -5414,6 +5820,28 @@ begin
   AssertEquals('https://example.invalid/d.git', R[0].PushUrl);
   AssertTrue('without a push URL to unset', FRepo.SetRemoteUrls('origin',
     'https://example.invalid/d.git', 'https://example.invalid/d.git'));
+  { The URLs as the config has them, not rewritten: an edit writes
+    them back, and a rewritten push URL would become a pushurl. }
+  Git(['config', 'url.git@example.invalid:.pushInsteadOf', 'https://example.invalid/']);
+  Git(['config', 'url.https://example.invalid/.insteadOf', 'ex:']);
+  Git(['remote', 'set-url', 'origin', 'ex:e.git']);
+  AssertTrue(ReadRemotes(FDir, R, Err));
+  AssertEquals('ex:e.git', R[0].Url);
+  AssertEquals('no pushurl of its own', 'ex:e.git', R[0].PushUrl);
+  AssertEquals('the web page git reaches', 'https://example.invalid/e', R[0].Web);
+  Git(['config', '--unset', 'url.git@example.invalid:.pushInsteadOf']);
+  Git(['config', '--unset', 'url.https://example.invalid/.insteadOf']);
+  { Two urls (a push to a mirror as well): the first is the one fetch
+    takes, which --get alone would not give. }
+  Git(['config', '--add', 'remote.' + R[0].Name + '.url', 'https://example.invalid/mirror.git']);
+  AssertTrue(ReadRemotes(FDir, R, Err));
+  AssertEquals('the first url', 'ex:e.git', R[0].Url);
+  Git(['config', '--unset', 'remote.' + R[0].Name + '.url', 'mirror']);
+  { A value may hold a line break, which ends no value of -z. }
+  Git(['config', '--add', 'remote.' + R[0].Name + '.pushurl', '/tmp/up'#10'stream.git']);
+  AssertTrue(ReadRemotes(FDir, R, Err));
+  AssertEquals('a line break kept', '/tmp/up'#10'stream.git', R[0].PushUrl);
+  Git(['config', '--unset-all', 'remote.' + R[0].Name + '.pushurl']);
 
   { A rename takes the remote-tracking branches and the upstream along. }
   Git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);

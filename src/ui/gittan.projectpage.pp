@@ -125,7 +125,7 @@ type
 implementation
 
 uses
-  Math, LCLIntf, LCLType, gittan.textfit, gittan.theme;
+  Math, Forms, LCLIntf, LCLType, gittan.textfit, gittan.theme;
 
 resourcestring
   rsPageTitle = 'Project';
@@ -259,6 +259,8 @@ begin
 end;
 
 procedure TGittanProjectPage.SetHot(AValue: integer);
+var
+  Told: string;
 begin
   if FHot = AValue then
     Exit;
@@ -267,10 +269,16 @@ begin
     Cursor := crDefault
   else
     Cursor := crHandPoint;
+  { The tooltip of what is under the mouse now, not of what was. }
   if AValue >= 0 then
-    Hint := FLinks[AValue].Hint
+    Told := FLinks[AValue].Hint
   else
-    Hint := '';
+    Told := '';
+  if Told <> Hint then
+  begin
+    Hint := Told;
+    Application.CancelHint;
+  end;
   Invalidate;
 end;
 

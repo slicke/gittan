@@ -513,16 +513,11 @@ begin
   AOutput := Trim(AOutput);
 end;
 
-{ RemoteEnvironmentIn with ssh's ConnectTimeout added to the batch mode
-  Gittan sets; nothing changed when the user runs ssh their own way. }
+{ RemoteEnvironmentIn with ssh's shorter ConnectTimeout of a batch;
+  nothing changed when the user runs ssh their own way. }
 function BatchRemoteEnv(const ADir: string): TStringArray;
-var
-  i: integer;
 begin
-  Result := RemoteEnvironmentIn(ADir);
-  for i := 0 to High(Result) do
-    if Copy(Result[i], 1, Length('GIT_SSH_COMMAND=')) = 'GIT_SSH_COMMAND=' then
-      Result[i] := Result[i] + ' -o ConnectTimeout=' + IntToStr(BatchConnectTimeout);
+  Result := RemoteEnvironmentIn(ADir, BatchConnectTimeout);
 end;
 
 { Fetches, with --prune, the remotes the local branches of the
@@ -1151,9 +1146,10 @@ begin
   case AItem.Task of
     mtSetHead:
       { set-head needs refs/remotes/<remote>/<want>, which a branch
-        made on the remote since the last fetch does not have yet. }
+        made on the remote since the last fetch does not have yet; the
+        + takes one force-pushed there since. }
       AItem.Done := ((AItem.Want = '') or RunGitEnv(APath, ['fetch', '--', AItem.Remote,
-        'refs/heads/' + AItem.Want + ':refs/remotes/' + AItem.Remote + '/' + AItem.Want],
+        '+refs/heads/' + AItem.Want + ':refs/remotes/' + AItem.Remote + '/' + AItem.Want],
         BatchRemoteEnv(APath), Output, Err)) and
         RunGitEnv(APath, ['remote', 'set-head', AItem.Remote, '--auto'],
         BatchRemoteEnv(APath), Output, Err);

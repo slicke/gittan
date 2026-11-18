@@ -144,30 +144,30 @@ begin
   Caption := ATitle;
   BorderStyle := bsSizeable;
   Position := poMainFormCenter;
-  Width := Scale96ToScreen(600);
-  Height := Scale96ToScreen(460);
-  Constraints.MinWidth := Scale96ToScreen(440);
-  Constraints.MinHeight := Scale96ToScreen(320);
+  Width := Scale96ToForm(600);
+  Height := Scale96ToForm(460);
+  Constraints.MinWidth := Scale96ToForm(440);
+  Constraints.MinHeight := Scale96ToForm(320);
 
   FHint := TLabel.Create(Self);
   FHint.WordWrap := True;
   FHint.Align := alTop;
-  FHint.BorderSpacing.Around := Scale96ToScreen(Margin);
+  FHint.BorderSpacing.Around := Scale96ToForm(Margin);
   FHint.Parent := Self;
 
   FBottom := TPanel.Create(Self);
   FBottom.BevelOuter := bvNone;
   FBottom.AutoSize := True;
   FBottom.Align := alBottom;
-  FBottom.BorderSpacing.Left := Scale96ToScreen(Margin);
-  FBottom.BorderSpacing.Right := Scale96ToScreen(Margin);
-  FBottom.BorderSpacing.Bottom := Scale96ToScreen(Margin);
+  FBottom.BorderSpacing.Left := Scale96ToForm(Margin);
+  FBottom.BorderSpacing.Right := Scale96ToForm(Margin);
+  FBottom.BorderSpacing.Bottom := Scale96ToForm(Margin);
   FBottom.Parent := Self;
 
   FList := TListBox.Create(Self);
   FList.Align := alClient;
-  FList.BorderSpacing.Left := Scale96ToScreen(Margin);
-  FList.BorderSpacing.Right := Scale96ToScreen(Margin);
+  FList.BorderSpacing.Left := Scale96ToForm(Margin);
+  FList.BorderSpacing.Right := Scale96ToForm(Margin);
   FList.Parent := Self;
 end;
 
@@ -176,7 +176,7 @@ end;
 procedure TPatchForm.Place(AControl: TControl; ASpaceAbove: integer);
 begin
   AControl.Align := alTop;
-  AControl.BorderSpacing.Top := Scale96ToScreen(ASpaceAbove);
+  AControl.BorderSpacing.Top := Scale96ToForm(ASpaceAbove);
   Inc(FNextTop, 1000);
   AControl.Top := FNextTop;
   AControl.Parent := FBottom;
@@ -197,7 +197,7 @@ begin
   FOkButton.ModalResult := mrOK;
   FOkButton.Default := True;
   FOkButton.AutoSize := True;
-  FOkButton.Constraints.MinWidth := Scale96ToScreen(84);
+  FOkButton.Constraints.MinWidth := Scale96ToForm(84);
   FOkButton.Align := alRight;
   FOkButton.Parent := Row;
   Cancel := TButton.Create(Self);
@@ -205,7 +205,7 @@ begin
   Cancel.ModalResult := mrCancel;
   Cancel.Cancel := True;
   Cancel.AutoSize := True;
-  Cancel.Constraints.MinWidth := Scale96ToScreen(84);
+  Cancel.Constraints.MinWidth := Scale96ToForm(84);
   Cancel.Align := alRight;
   Cancel.Parent := Row;
   {$IFDEF DARWIN}
@@ -215,8 +215,8 @@ begin
   FOkButton.Left := 0;
   Cancel.Left := 1000;
   {$ENDIF}
-  Cancel.BorderSpacing.Left := Scale96ToScreen(8);
-  FOkButton.BorderSpacing.Left := Scale96ToScreen(8);
+  Cancel.BorderSpacing.Left := Scale96ToForm(8);
+  FOkButton.BorderSpacing.Left := Scale96ToForm(8);
 end;
 
 { ---------------------------------------------------------------------------
@@ -239,7 +239,7 @@ begin
   Lbl := TLabel.Create(Self);
   Lbl.Caption := rsSeriesFolder;
   Lbl.AutoSize := False;
-  Lbl.Width := Scale96ToScreen(LabelWidth);
+  Lbl.Width := Scale96ToForm(LabelWidth);
   Lbl.Align := alLeft;
   Lbl.Layout := tlCenter;
   Lbl.Parent := Row;
@@ -247,7 +247,7 @@ begin
   Choose.Caption := rsSeriesChoose;
   Choose.AutoSize := True;
   Choose.Align := alRight;
-  Choose.BorderSpacing.Left := Scale96ToScreen(8);
+  Choose.BorderSpacing.Left := Scale96ToForm(8);
   Choose.OnClick := @ChooseClick;
   Choose.Parent := Row;
   FFolder := TEdit.Create(Self);
@@ -260,18 +260,18 @@ begin
   FInto.Font.Color := clGrayText;
   FInto.ShowAccelChar := False;
   Place(FInto, 6);
-  FInto.BorderSpacing.Left := Scale96ToScreen(LabelWidth);
+  FInto.BorderSpacing.Left := Scale96ToForm(LabelWidth);
   FError := TLabel.Create(Self);
   FError.WordWrap := True;
   FError.Font.Color := clRed;
   FError.ShowAccelChar := False;
   FError.Visible := False;
   Place(FError, 6);
-  FError.BorderSpacing.Left := Scale96ToScreen(LabelWidth);
+  FError.BorderSpacing.Left := Scale96ToForm(LabelWidth);
   FCover := TCheckBox.Create(Self);
   FCover.Caption := rsSeriesCover;
   Place(FCover, 10);
-  FCover.BorderSpacing.Left := Scale96ToScreen(LabelWidth);
+  FCover.BorderSpacing.Left := Scale96ToForm(LabelWidth);
   AddButtons(rsSeriesButton);
 end;
 
@@ -383,15 +383,15 @@ begin
   Side.BevelOuter := bvNone;
   Side.AutoSize := True;
   Side.Align := alRight;
-  Side.BorderSpacing.Right := Scale96ToScreen(Margin);
+  Side.BorderSpacing.Right := Scale96ToForm(Margin);
   Side.Parent := Self;
-  FList.BorderSpacing.Right := Scale96ToScreen(8);
+  FList.BorderSpacing.Right := Scale96ToForm(8);
   FList.MultiSelect := True;
   FList.OnSelectionChange := @ListSelectionChange;
   Add := TButton.Create(Self);
   Add.Caption := rsApplyAdd;
   Add.AutoSize := True;
-  Add.Constraints.MinWidth := Scale96ToScreen(84);
+  Add.Constraints.MinWidth := Scale96ToForm(84);
   Add.Align := alTop;
   Add.OnClick := @AddClick;
   Add.Parent := Side;
@@ -400,7 +400,7 @@ begin
   FRemove.AutoSize := True;
   FRemove.Align := alTop;
   FRemove.Top := 1000;
-  FRemove.BorderSpacing.Top := Scale96ToScreen(6);
+  FRemove.BorderSpacing.Top := Scale96ToForm(6);
   FRemove.OnClick := @RemoveClick;
   FRemove.Parent := Side;
 

@@ -164,9 +164,11 @@ type
     {** Opens the repository at ADir: shows the frame that has it open,
       else opens it in the frame shown while that one is empty, else in
       a new frame. AOnOpened as TRepoFrame.OpenRepository, called with
-      the frame that has it as Sender, also when it was open already. }
-    procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil);
-      virtual; abstract;
+      the frame that has it as Sender, also when it was open already.
+      AInto, when it is empty, is the frame used, and is not brought to
+      the front when another frame is (a clone done behind it). }
+    procedure OpenRepository(const ADir: string; AOnOpened: TNotifyEvent = nil;
+      AInto: TRepoFrame = nil); virtual; abstract;
     {** Whether a frame has the repository at ARoot open, or is opening
       it. }
     function HasOpen(const ARoot: string): boolean; virtual; abstract;
@@ -329,6 +331,9 @@ type
       whose references in commit messages the summary's card links
       (umain.issues.inc); Repository > Issue Tracker... sets it. }
     FIssueTracker: TGittanIssueTracker;
+    { The root and the repo.toml expression OfferRepoIssues last asked
+      about, so a snapshot does not ask again. }
+    FIssuesOffered: string;
     FIssueTrackerItem: TMenuItem;
     FForgeItems: array of TMenuItem;
     FForgeCaptions: array of string;
@@ -1056,6 +1061,9 @@ type
       Again (FRetryRefs), and the sides of the image or binary file shown
       that are not downloaded (FLfsSides), for the header's Download. }
     FLfsRefs, FRetryRefs, FLfsSides: TStringArray;
+    { The header pill of that Download: after the conflict's pills for
+      a file in conflict, which stay. }
+    FLfsPill: integer;
     { The background fetch (umain.remote.inc): its job, apart from
       FRemoteJob so the rest of the form is never busy for it, the timer
       that looks once a minute whether one is due, and what StartRemote
@@ -1148,6 +1156,11 @@ type
     FChangeLines: TStringList;
     FCurrentPath: string;
     FExpanded: TIntegerDynArray;
+    { While RebuildKeeps rebuilds (FKeepCaret): the caret's diff line,
+      taken before the diff was replaced and moved to its place after
+      (KeepLineMap), so the caret stays on its line. }
+    FKeepCaret: boolean;
+    FKeepCaretLine: integer;
     FRows: TGittanRows;
     { The rows of the old side, and the number of each diff line in the
       old and the new file (see NumberLines). }
@@ -1494,6 +1507,8 @@ type
     procedure NoteRepoConfigError(const AOld: string);
     function CommitConfigNote: string;
     function EffectiveIssueTracker: TGittanIssueTracker;
+    procedure OfferRepoIssues;
+    procedure RepoIssuesTrustClick(Sender: TObject);
     procedure EditCommandsFile(const AFileName, AShown, ATemplate: string);
     procedure CommandPageCopyOutput(Sender: TObject);
     function CommandKey(AKey: word; AShift: TShiftState): boolean;
@@ -1501,6 +1516,7 @@ type
     procedure ShowEditor;
     procedure ShowImageChanges(const APath: string);
     procedure ShowBinaryChanges(const APath: string);
+    procedure ShowLfsDownload(const APath: string);
     procedure StartLfsDownload(const APath: string; const ARefs: TStringArray);
     procedure CheckLfs;
     procedure LfsCheckDone(Sender: TObject);
@@ -1601,6 +1617,7 @@ type
     procedure ApplyLayout;
     procedure ApplyWrap;
     procedure RebuildIfChanges;
+    function CaretDiffLine: integer;
     { umain.blame.inc }
     procedure MenuBlameClick(Sender: TObject);
     procedure StartBlame;
@@ -1612,6 +1629,7 @@ type
     procedure CacheBlame(const ARef, APath: string; ABlame: TGittanBlame);
     procedure BlameJobDone(Sender: TObject);
     procedure ClearBlameCache;
+    procedure AbandonBlameJobs;
     procedure StopBlame;
     procedure ApplyBlame;
     procedure SetBlameBand(AEd: TATSynEdit);
@@ -1898,6 +1916,7 @@ type
     function FileLineOfRow(ARow: integer): integer;
     function RepoBusy: boolean;
     function RepoReady: boolean;
+    function MovedWhileAsked(const AHead, ABranch, AMessage: string): boolean;
     function FoldPath: string;
     procedure KeepFolds;
     procedure RestoreFolds;
@@ -1943,6 +1962,7 @@ type
     procedure IndexParseDone(Sender: TObject; ATime: integer);
     procedure IndexTimerTimer(Sender: TObject);
     function ShownRelPath: string;
+    function TreeFilePaths: TStringList;
     function FindInRepo(const AWord: string; out APath: string;
       out ASymbol: TGittanSymbol): boolean;
     procedure ShowRepoFile(const ARelPath: string);
@@ -2033,7 +2053,8 @@ type
     procedure PullPopupPick(Sender: TObject; AIndex: integer);
     procedure StartPullFetch(ANumber: integer; const ARemote, ABaseRef: string);
     procedure PullFetchDone(AJob: TGittanRemoteJob);
-    procedure SwitchBranch(const ABranch: string; ADetach: boolean = False);
+    procedure SwitchBranch(const ABranch: string; ADetach: boolean = False;
+      const ATrack: string = '');
     function ContextFullPath: string;
     procedure MenuCopyPathClick(Sender: TObject);
     procedure MenuCopyRelativePathClick(Sender: TObject);
@@ -2581,6 +2602,11 @@ type
     {** The file being edited has changes not saved, which
       FormCloseQuery asks about. }
     function NeedsSave: boolean;
+    {** The frame is in a wait that runs the message loop (a file
+      loading, a parse waited for, a hold of the refresh), with its own
+      code on the stack below: it must not be freed until it returns,
+      so the window puts off closing it. }
+    function InNestedLoop: boolean;
     {** The welcome view says ADir is opening, before it does; '' gives
       it its buttons back. }
     procedure ShowOpening(const ADir: string);
@@ -3235,6 +3261,10 @@ resourcestring
   rsIssueTrackerRegex = 'Regular expression';
   rsIssueTrackerIdRegex = 'Expression for the ids within a reference (optional)';
   rsIssueTrackerSaved = 'Issue tracker saved';
+  rsRepoIssuesUntrusted = 'This repository''s .gittan/repo.toml names an issue tracker';
+  rsRepoIssuesUntrustedDetail = 'Its expression is used to link issues in commit messages once you allow it, ' +
+    'since an expression from a clone could make Gittan hang.';
+  rsRepoIssuesUse = 'Use It';
   rsIssueTrackerFailed = 'Could not save the issue tracker';
   rsIssueNoAddress = 'No address is set for issue %s: Repository > Issue Tracker...';
   rsIssueNeedsRegex = 'An expression for the ids needs the regular expression that finds ' +
@@ -3372,6 +3402,7 @@ resourcestring
   rsBmCommitMenu = 'Commit %s';
   rsGraphDragTip = 'Drag a commit onto %s to merge it.';
   rsGraphLoadFailed = 'Could not read the history';
+  rsOpenFileFailed = 'Could not open %s';
   rsBmCommitPick = 'Pick a Commit in the Graph...';
   rsBmNewItem = '&New Branch...';
   rsToBranchMoveIncludedItem = 'Move &Included Files to New Branch...';
@@ -3412,6 +3443,8 @@ resourcestring
     'Commit section.';
   rsBmMergeNothing = '%s has no commits %s lacks: nothing to merge';
   rsBmMergeMoved = 'The checked-out branch changed while you were asked: nothing was merged';
+  rsRiMoved = 'The checked-out branch changed while you were asked: nothing was rebased';
+  rsCaResetMoved = 'The checked-out branch changed while you were asked: nothing was reset';
   rsBmFastForward = 'Fast-forward';
   rsBmMergeCommit = 'Merge Commit';
   rsBmSquash = 'Squash';
@@ -3443,6 +3476,7 @@ resourcestring
   rsBmGoneUnmerged = 'These %d have commits that are in no other branch. Delete them too?';
   rsBmGoneDeleted = 'Deleted %d branches';
   rsBmGoneDeletedOne = 'Deleted 1 branch';
+  rsBmGoneFailed = 'Could not delete %d of the branches';
   rsBmUpstream = 'Set Upstream...';
   rsBmUpstreamItem = 'Set &Upstream of %s...';
   rsUpstreamHeader = 'Upstream of %s';
@@ -3822,6 +3856,7 @@ resourcestring
   rsRevertAsk = 'Drop the changes to %s and load it from disk again?';
   rsSaved = 'Saved %s';
   rsSaveFailed = 'Could not save %s: %s';
+  rsSaveNotRepoFile = 'it is a link now, or no longer one of the repository''s own files';
   rsSaveFailedAsk = 'Could not save %s. Try again, or drop the changes?';
   rsSaveAgain = 'Save Again';
   rsChangedOnDisk = 'changed on disk';
@@ -4920,6 +4955,15 @@ begin
   Result := ((FEditPath <> '') and Edit.Modified) or MergeDirty;
 end;
 
+{ Every wait of the frame that pumps messages sets one of these: the
+  index's and the scratch editor's loads, a hover's lookup, and a hold
+  of the refresh, which WaitForParse, OpenFile's load and FlushEdit's
+  question take. }
+function TRepoFrame.InNestedLoop: boolean;
+begin
+  Result := FIndexLoading or FScratchBusy or FHoverBusy or (FRefreshHold > 0);
+end;
+
 { Something the user would want to see happened; a frame in the
   background has its tab show it (TRepoWindow.FrameChanged). }
 procedure TRepoFrame.MarkNews;
@@ -5021,20 +5065,37 @@ begin
   AbandonFixJob;
   AbandonWhyJob;
   AbandonSummaryJob;
-  FreeAndNil(FAI);
-  StopCommitJob(True);
-  FreeAndNil(FDroppedCommits);
-  StopRemoteJob(True);
-  Application.RemoveOnActivateHandler(@AppActivate);
-  Application.RemoveOnDeactivateHandler(@AppDeactivate);
-  Application.RemoveOnIdleHandler(@NavIdle);
-  FreeAndNil(FNavHistory);
-  FreeAndNil(FUndoHistory);
-  StopWatcher;
+  { Every job is let go of before the first wait (the commit and remote
+    jobs', the watcher's, the blame zombies'), which runs queued calls
+    and Synchronize: a done event that came then would queue a call on
+    the frame being freed, or start a job of its own (the pull request's
+    a review, the blame's the next blame) for the wait to wait on. }
   AbandonPullJob;
   AbandonPullAction;
   AbandonReviewJob;
   AbandonSubmoduleJobs;
+  AbandonBlameJobs;
+  { Those waited for below lose their handlers here, not one wait later:
+    RemoteJobDone asks questions, and the watcher's change refreshes. }
+  if FRemoteJob <> nil then
+  begin
+    FRemoteJob.OnDone := nil;
+    FRemoteJob.OnOutput := nil;
+  end;
+  if FAutoFetchJob <> nil then
+    FAutoFetchJob.OnDone := nil;
+  if FWatcher <> nil then
+    FWatcher.OnChange := nil;
+  FreeAndNil(FAI);
+  Application.RemoveOnActivateHandler(@AppActivate);
+  Application.RemoveOnDeactivateHandler(@AppDeactivate);
+  Application.RemoveOnIdleHandler(@NavIdle);
+  StopCommitJob(True);
+  FreeAndNil(FDroppedCommits);
+  StopRemoteJob(True);
+  StopWatcher;
+  FreeAndNil(FNavHistory);
+  FreeAndNil(FUndoHistory);
   FreeAndNil(FSubJobs);
   FreeAndNil(FForge);
   ClearRevertUndo;
@@ -5071,6 +5132,8 @@ begin
   FreeAndNil(FReviewInk);
   FreeAndNil(FCommitOn);
   FreeAndNil(FCommitOff);
+  { What the waits above queued, so nothing runs on the freed frame. }
+  Application.RemoveAsyncCalls(Self);
   inherited Destroy;
 end;
 
@@ -6753,7 +6816,25 @@ begin
   Edit.BookmarkDeleteAll_2;
   ResetLineNumbers(Edit);
   Edit.ModeReadOnly := False;
-  Edit.LoadFromFile(AFileName, []);
+  { A large file's load pumps messages for its progress, where the tab
+    may be closed (InNestedLoop) or the watcher's refresh come. }
+  HoldRefresh;
+  try
+    try
+      Edit.LoadFromFile(AFileName, []);
+    except
+      { No permission, locked by another program on Windows, or gone
+        since it was listed: the view stays read-only, and says why. }
+      on E: Exception do
+      begin
+        Edit.ModeReadOnly := True;
+        BannerError(Format(rsOpenFileFailed, [ExtractFileName(AFileName)]), E.Message);
+        Exit;
+      end;
+    end;
+  finally
+    ReleaseRefresh;
+  end;
   Edit.ModeReadOnly := True;
   SetLineStatesBand(Edit, False);
   Edit.FileName := AFileName;
@@ -7076,6 +7157,18 @@ end;
 function TRepoFrame.RepoReady: boolean;
 begin
   Result := (FRepo.Root <> '') and not RepoBusy;
+end;
+
+{ After a question about HEAD's branch: whether it may have moved while
+  it was asked (a commit from the terminal, a pull that waited for the
+  fetch, a switch), or a job started, so what was asked about is no
+  longer what would be done; AMessage in the status bar then. AHead and
+  ABranch are HEAD's commit and FRepo.Branch from before the question. }
+function TRepoFrame.MovedWhileAsked(const AHead, ABranch, AMessage: string): boolean;
+begin
+  Result := not RepoReady or (FRepo.CommitId('HEAD') <> AHead) or (FRepo.Branch <> ABranch);
+  if Result then
+    StatusNote(AMessage, True);
 end;
 
 { The index in FStats of APath, -1 when it is not changed. }
@@ -7866,6 +7959,7 @@ begin
   LoadRepoConfig;
   FIssueTracker := ASnap.IssueTracker;
   UpdateIssueTracker;
+  OfferRepoIssues;
   ApplyFlowSnapshot(ASnap);
   { The pull request is looked up for the branch HEAD is on, the detached
     id during a rebase, so this runs before the rebase branch stands in. }
@@ -8040,9 +8134,23 @@ begin
   FWatcher.Start;
 end;
 
+{ The watcher is let go, not waited for: a poll under way (a status of a
+  large tree, a snapshot) would hold every commit, stash and switch that
+  stops it. The blame zombies free it once its thread ends; without them
+  (gone already) it is waited for. }
 procedure TRepoFrame.StopWatcher;
 begin
-  FreeAndNil(FWatcher);
+  if FWatcher = nil then
+    Exit;
+  if FBlameZombies <> nil then
+  begin
+    FWatcher.Detach;
+    FBlameZombies.Add(FWatcher);
+    FWatcher := nil;
+    FBlameZombies.FreeFinished(False);
+  end
+  else
+    FreeAndNil(FWatcher);
 end;
 
 function TRepoFrame.WatchPace: integer;
@@ -8422,8 +8530,7 @@ begin
     FLfsSides := Concat(FLfsSides, [OldRef]);
   if HasNew and ParseLfsPointer(NewData, Oid, Size) then
     FLfsSides := Concat(FLfsSides, [NewRef]);
-  if FLfsSides <> nil then
-    FHeader.SetActions([rsLfsDownloadAction]);
+  ShowLfsDownload(APath);
   FView := gvImage;
   HideMergeView;
   FSymbolBar.Visible := False;
@@ -8438,6 +8545,26 @@ begin
   FImageDiff.Visible := True;
   FSummary.Selected := APath;
   FStatus.SetPosition('');
+end;
+
+{ Download in the header while a side of the file shown is not
+  downloaded (FLfsSides): after Use Mine, Use Theirs and Mark Resolved
+  for a file in conflict, alone otherwise. }
+procedure TRepoFrame.ShowLfsDownload(const APath: string);
+begin
+  FLfsPill := -1;
+  if FLfsSides = nil then
+    Exit;
+  if IsConflictPath(APath) then
+  begin
+    FHeader.SetActions([rsUseMine, rsUseTheirs, rsMarkResolved, rsLfsDownloadAction]);
+    FLfsPill := 3;
+  end
+  else
+  begin
+    FHeader.SetActions([rsLfsDownloadAction]);
+    FLfsPill := 0;
+  end;
 end;
 
 { A binary file in the change view: its sizes before and after in
@@ -8460,10 +8587,8 @@ begin
   if HasNew and NewMissing then
     FLfsSides := Concat(FLfsSides, [NewRef]);
   if FLfsSides <> nil then
-  begin
     FBinaryView.SetNote(rsLfsNotDownloaded);
-    FHeader.SetActions([rsLfsDownloadAction]);
-  end;
+  ShowLfsDownload(APath);
   FView := gvBinary;
   HideMergeView;
   FSymbolBar.Visible := False;
@@ -8737,7 +8862,7 @@ begin
     FHeader.SetStage(FStats[i].Staged, FStats[i].Unstaged);
     if FStats[i].Kind = ckConflict then
     begin
-      FConflictRoles := ConflictRoles(FChangeLines);
+      FConflictRoles := ConflictRoles(FChangeLines, FRepo.ConflictMarkerSize(APath));
       FConflictStarts := ConflictStarts(FConflictRoles, FChangeLines);
       SetLength(FConflictEnds, Length(FConflictStarts));
       for c := 0 to High(FConflictStarts) do

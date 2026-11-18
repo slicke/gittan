@@ -20,7 +20,8 @@ uses
 function SignatureText(const ASignature: TGittanSignature): string;
 
 {** The color for ASignature's state: AOk for a verified one, AError
-  for a bad one, ADim for the rest. }
+  for a bad one, ADim for the rest (one by another signer than the
+  committer too, with an outlined shield). }
 function SignatureColor(const ASignature: TGittanSignature; AOk, ADim, AError: TColor): TColor;
 
 {** A shield ASize high at ALeft, ATop, filled with AColor for a
@@ -40,7 +41,10 @@ resourcestring
   rsSignVerifiedBy = 'Verified signature by %s';
   rsSignVerified = 'Verified signature';
   rsSignKey = 'key %s';
-  rsSignTrusted = 'trusted through %s (%s)';
+  rsSignTrusted = 'trusted through %s';
+  rsSignOtherSigner = 'Signed by %s, not by the committer';
+  rsSignOtherSignerOf = 'Signed by %s, not by the committer %s';
+  rsSignOnForge = '%s on %s';
   rsSignUnknownKey = 'Signed with a key not known here';
   rsSignBad = 'Bad signature';
   rsSignExpired = 'Signature expired';
@@ -72,13 +76,28 @@ begin
     end;
     ssTrusted:
     begin
-      if ASignature.Signer <> '' then
-        Result := Format(rsSignVerifiedBy, [ASignature.Signer])
+      { The forge's user, not the key's own user id: that is whatever
+        its maker wrote, and the forge vouches for the user. }
+      if ASignature.TrustedUser <> '' then
+        Result := Format(rsSignVerifiedBy, [ASignature.TrustedUser])
       else
         Result := rsSignVerified;
       if ASignature.Key <> '' then
         Result := Result + ' · ' + Format(rsSignKey, [ASignature.Key]);
-      Result := Result + ' · ' + Format(rsSignTrusted, [ASignature.TrustedFrom, ASignature.TrustedUser]);
+      Result := Result + ' · ' + Format(rsSignTrusted, [ASignature.TrustedFrom]);
+    end;
+    ssOtherSigner:
+    begin
+      if ASignature.TrustedUser <> '' then
+        Who := Format(rsSignOnForge, [ASignature.TrustedUser, ASignature.TrustedFrom]);
+      if Who = '' then
+        Who := '?';
+      if ASignature.Committer <> '' then
+        Result := Format(rsSignOtherSignerOf, [Who, ASignature.Committer])
+      else
+        Result := Format(rsSignOtherSigner, [Who]);
+      if (ASignature.Key <> '') and (Who <> ASignature.Key) then
+        Result := Result + ' · ' + Format(rsSignKey, [ASignature.Key]);
     end;
     ssUnknownKey:
     begin

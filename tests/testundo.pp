@@ -43,6 +43,11 @@ type
     procedure TestSwitchAndCreate;
     procedure TestDeleteAndRename;
     procedure TestRefused;
+    procedure TestMixedReset;
+    procedure TestMixedResetChanged;
+    procedure TestMixedResetStaged;
+    procedure TestMixedResetStagedCase;
+    procedure TestMixedResetLocked;
     procedure TestRedoForgotten;
   end;
 
@@ -492,6 +497,136 @@ begin
   AssertFalse('git refuses', FRepo.RunSteps(Steps));
   AssertTrue(FRepo.Error <> '');
   AssertEquals('the change is kept', 'mine', ReadFile('b.txt'));
+end;
+
+{ A mixed reset leaves the commits' files in the work tree, which
+  --keep counts as local changes: a changed file "not uptodate", an
+  added one untracked. Undo puts HEAD and the index back over them. }
+procedure TUndoTest.TestMixedReset;
+var
+  Before, Porcelain, Err: string;
+begin
+  Commit('a.txt', 'two', 'Second');
+  Commit('n.txt', 'new', 'Third');
+  Before := Rev('HEAD');
+  Track;
+  Git(['reset', '-q', 'HEAD~2']);
+  Track;
+  AssertEquals('Reset to ' + Copy(Rev('HEAD'), 1, 7), FHistory.UndoStep.Title);
+  Undo;
+  AssertEquals(Before, Rev('HEAD'));
+  AssertEquals('two', ReadFile('a.txt'));
+  AssertEquals('new', ReadFile('n.txt'));
+  AssertTrue(Err, RunGitIn(FDir, ['status', '--porcelain'], Porcelain, Err));
+  AssertEquals('nothing left over', '', Trim(Porcelain));
+end;
+
+{ A file changed since the reset is a change of its own: undo refuses
+  rather than take it into the index. }
+procedure TUndoTest.TestMixedResetChanged;
+var
+  Cur: TGittanRefState;
+  Step: TGittanUndoStep;
+  Steps: TGittanGitSteps;
+  Err: string;
+begin
+  Commit('a.txt', 'two', 'Second');
+  Track;
+  Git(['reset', '-q', 'HEAD~1']);
+  Track;
+  WriteFile('a.txt', 'mine');
+  Step := FHistory.UndoStep;
+  AssertTrue(FRepo.ReadRefState(Cur));
+  AssertTrue(PlanRefChange(Cur, Step.After, Step.Before, Step.Kind, [], Steps, Err));
+  AssertFalse('refused', FRepo.RunSteps(Steps));
+  AssertTrue('git''s reason', Pos('a.txt', FRepo.Error) > 0);
+  AssertEquals('the change is kept', 'mine', ReadFile('a.txt'));
+end;
+
+{ A file staged since the reset, with neither HEAD's content nor the
+  undo's, though the work tree has the undo's: the reset of the paths
+  would replace what was staged. }
+procedure TUndoTest.TestMixedResetStaged;
+var
+  Cur: TGittanRefState;
+  Step: TGittanUndoStep;
+  Steps: TGittanGitSteps;
+  Before, Staged, Err: string;
+begin
+  Commit('a.txt', 'two', 'Second');
+  Track;
+  Git(['reset', '-q', 'HEAD~1']);
+  Track;
+  Before := Rev('HEAD');
+  WriteFile('a.txt', 'mine');
+  Git(['add', 'a.txt']);
+  WriteFile('a.txt', 'two');
+  Step := FHistory.UndoStep;
+  AssertTrue(FRepo.ReadRefState(Cur));
+  AssertTrue(PlanRefChange(Cur, Step.After, Step.Before, Step.Kind, [], Steps, Err));
+  AssertFalse('refused', FRepo.RunSteps(Steps));
+  AssertEquals('HEAD stays', Before, Rev('HEAD'));
+  AssertTrue(Err, RunGitIn(FDir, ['show', ':a.txt'], Staged, Err));
+  AssertEquals('what was staged is kept', 'mine', Trim(Staged));
+end;
+
+{ A path staged since is told from another by its case: foo staged
+  does not hold back the reset of Foo. Only where the file system tells
+  them apart. }
+procedure TUndoTest.TestMixedResetStagedCase;
+var
+  Cur: TGittanRefState;
+  Step: TGittanUndoStep;
+  Steps: TGittanGitSteps;
+  Err, Second: string;
+begin
+  WriteFile('case.probe', '');
+  if FileExists(IncludeTrailingPathDelimiter(FDir) + 'CASE.PROBE') then
+    Exit;
+  DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'case.probe');
+  WriteFile('foo', 'x');
+  Commit('Foo', 'one', 'Both');
+  Commit('Foo', 'two', 'Second');
+  Second := Rev('HEAD');
+  Track;
+  Git(['reset', '-q', 'HEAD~1']);
+  Track;
+  WriteFile('foo', 'y');
+  Git(['add', 'foo']);
+  WriteFile('foo', 'x');
+  Step := FHistory.UndoStep;
+  AssertTrue(FRepo.ReadRefState(Cur));
+  AssertTrue(PlanRefChange(Cur, Step.After, Step.Before, Step.Kind, [], Steps, Err));
+  AssertTrue(FRepo.Error, FRepo.RunSteps(Steps));
+  AssertEquals('HEAD at Second', Second, Rev('HEAD'));
+end;
+
+{ With the index locked by another git the soft reset still moves HEAD
+  and the reset of the paths fails: HEAD goes back. }
+procedure TUndoTest.TestMixedResetLocked;
+var
+  Cur: TGittanRefState;
+  Step: TGittanUndoStep;
+  Steps: TGittanGitSteps;
+  Before, Lock: string;
+  Err: string;
+begin
+  Commit('a.txt', 'two', 'Second');
+  Track;
+  Git(['reset', '-q', 'HEAD~1']);
+  Track;
+  Before := Rev('HEAD');
+  Lock := IncludeTrailingPathDelimiter(FDir) + '.git' + PathDelim + 'index.lock';
+  WriteFile('.git' + PathDelim + 'index.lock', '');
+  try
+    Step := FHistory.UndoStep;
+    AssertTrue(FRepo.ReadRefState(Cur));
+    AssertTrue(PlanRefChange(Cur, Step.After, Step.Before, Step.Kind, [], Steps, Err));
+    AssertFalse('refused', FRepo.RunSteps(Steps));
+    AssertEquals('HEAD stays', Before, Rev('HEAD'));
+  finally
+    DeleteFile(Lock);
+  end;
 end;
 
 procedure TUndoTest.TestRedoForgotten;

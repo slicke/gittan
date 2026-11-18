@@ -348,7 +348,11 @@ begin
       Continue;
     end;
     if (Hunk >= 0) and (Line[1] in [' ', '+', '-']) then
-      AddLine(FCommits[Current].Hunks[Hunk]);
+      AddLine(FCommits[Current].Hunks[Hunk])
+    else if Line[1] <> '\' then
+      { A line of no side ends the hunk: the header of a second diff of
+        the same file, when its type changed, is not part of it. }
+      Hunk := -1;
   end;
   { A commit without a hunk (a merge, which git log -p shows without a
     diff) says nothing about the range. }

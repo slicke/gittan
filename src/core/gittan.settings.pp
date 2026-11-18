@@ -7,7 +7,12 @@ unit gittan.settings;
   the recent repositories, the commit draft, the trust given to commands
   files and extensions). Each is read whole and written whole through a
   temporary file renamed over it, with the keys Gittan does not know kept
-  as they were, so a newer build's keys outlast an older one. A missing or
+  as they were, so a newer build's keys outlast an older one. A save
+  reads the file again and merges (MergeDocs): what this process changed
+  since it read or last wrote the file wins, the rest is the file's, so
+  two Gittan processes do not undo each other's choices (an extension
+  turned off or its permissions taken back, a key or a commands file
+  trusted). A missing or
   broken file costs nothing but the defaults. Earlier builds kept one ini
   file, gittan.ini, which is not read: OldIniFound tells it is there with
   neither JSON file, so the window can say the settings started over. }
@@ -77,6 +82,10 @@ type
       extensions' (extensions) and their grants (extensionGrants), the
       trust (trust) and the project kinds (projectKinds). }
     FSettingsDoc, FStateDoc: TJSONObject;
+    { The documents as this process last read or wrote them, after
+      PutSettings and PutState: what Save holds the in-memory ones
+      against to tell this process's changes from another's. }
+    FSettingsBase, FStateBase: TJSONObject;
     FDir: string;
     FOldIniFound: boolean;
     FDamagedFiles: string;
@@ -85,7 +94,8 @@ type
     function GrantObj(const AId: string; ACreate: boolean): TJSONObject;
     procedure PutSettings;
     procedure PutState;
-    function WriteState: boolean;
+    procedure ReadFields;
+    procedure TakeBase;
   public
     {** The tab shown when the window closed, an index into Tabs. }
     ActiveTab: integer;
@@ -116,10 +126,6 @@ type
     GraphFirstParent, GraphNoMerges: boolean;
     {** Whether the Commit section under the tree is unfolded. }
     CommitOpen: boolean;
-    {** The commit message being written, kept until it is committed,
-      and the repository it is for (its root): another repository's
-      section starts empty. The message may have several lines. }
-    CommitDraft, CommitDraftRepo: string;
     {** The editor font; an empty name and a zero size keep the defaults
       (DefaultFontName, DefaultFontSize). }
     FontName: string;
@@ -288,6 +294,20 @@ type
     {** Trusts the commands file of ARoot as it is now; a change of its
       text asks again. }
     procedure TrustCommands(const ARoot, AHash: string);
+    {** Whether the [issues] expression ARegex of ARoot's .gittan/repo.toml
+      has been trusted: a clone's expression runs on every line of the
+      commit card, and TRegExpr has no step limit, so (a+)+b could hang
+      Gittan; it is used only then. An empty one needs no trust. }
+    function IssueRegexTrusted(const ARoot, ARegex: string): boolean;
+    {** Trusts ARegex for ARoot; another expression asks again. }
+    procedure TrustIssueRegex(const ARoot, ARegex: string);
+    {** The commit message being written in the repository at ARoot,
+      kept until it is committed, one per repository (commitDrafts in
+      state.json, by root), so every tab's draft outlasts a quit; ''
+      for none. The message may have several lines. }
+    function CommitDraftFor(const ARoot: string): string;
+    {** Keeps AText as ARoot's draft; '' drops it. }
+    procedure SetCommitDraft(const ARoot, AText: string);
     {** The kinds of project picked for ARoot on the Project page ("rust,
       go", "none"); '' when none were picked and the files decide. }
     function ProjectKindsOf(const ARoot: string): string;
@@ -307,10 +327,11 @@ type
       latest first (AddCoAuthor), for the co-authors dialog to list. }
     property CoAuthors: TStringList read FCoAuthors;
     {** The signing keys taken on a forge's word (gittan.signing's
-      TrustEntry: fingerprint, host, user), kept in settings.json as
+      TrustEntry: fingerprint, host, user, e-mails), kept in settings.json as
       signing.trustedKeys, since trusting a key is a choice to keep. }
     property TrustedKeys: TStringList read FTrustedKeys;
-    {** Adds AEntry unless its fingerprint is there already. }
+    {** Adds AEntry, in place of the entry with its fingerprint when there
+      is one. }
     procedure AddTrustedKey(const AEntry: string);
     {** The entries as an array, for a job to take along. }
     function TrustedKeyList: TStringArray;
@@ -355,7 +376,7 @@ resourcestring
 implementation
 
 uses
-  Math, jsonparser, gittan.textfile;
+  Math, jsonparser, gittan.textfile, gittan.sha256;
 
 const
   ConfigFolder = 'Gittan';
@@ -524,6 +545,31 @@ begin
     AObj.Delete(i);
 end;
 
+{ The one draft of the builds before a draft per repository
+  (commitDraft's text and repo) moved into commitDrafts, unless that
+  repository has one there already; a key of a newer build's stays in
+  commitDraft. Done to the state file as Load reads it and as Save
+  merges with it, so the merge sees the draft where this process keeps
+  it: a migrated draft cleared before the first save stays cleared, one
+  left alone stays. }
+procedure MoveLegacyDraft(ADoc: TJSONObject);
+var
+  O: TJSONObject;
+  Text, Repo: string;
+begin
+  O := ObjOf(ADoc, 'commitDraft');
+  if O = nil then
+    Exit;
+  Text := StrOf(O, 'text');
+  Repo := StrOf(O, 'repo');
+  if (Text <> '') and (Repo <> '') and (StrOf(ObjOf(ADoc, 'commitDrafts'), Repo) = '') then
+    ChildOf(ADoc, 'commitDrafts').Strings[Repo] := Text;
+  DropKey(O, 'text');
+  DropKey(O, 'repo');
+  if O.Count = 0 then
+    DropKey(ADoc, 'commitDraft');
+end;
+
 { AValue under AName in AObj, or no AName for an empty AValue; AObj
   goes from AParent under AObjName once it is empty. }
 procedure PutOrDrop(AParent: TJSONObject; const AObjName: string; AObj: TJSONObject;
@@ -552,19 +598,32 @@ end;
   cannot be read or is not an object. One with text that does not parse
   or is no object (ADamaged; an edit by hand that left a comma too
   many) is copied to AFileName + DamagedSuffix first, since the next
-  save writes the defaults over it. }
-function ReadDoc(const AFileName: string; out ADamaged: boolean): TJSONObject;
+  save writes the defaults over it. One that is there but cannot be
+  read (no permission, locked by another program) is AUnreadable, and
+  no save may write over it. A UTF-8 byte order mark, which Notepad and
+  PowerShell 5 write, is skipped. }
+function ReadDoc(const AFileName: string; out ADamaged, AUnreadable: boolean): TJSONObject;
 var
   Data: TJSONData;
   Text: RawByteString;
 begin
   Result := nil;
   ADamaged := False;
+  AUnreadable := False;
   Text := '';
   if FileExists(AFileName) then
+  begin
+    try
+      Text := ReadFileBytes(AFileName);
+    except
+      AUnreadable := True;
+    end;
+    if AUnreadable then
+      Exit(TJSONObject.Create);
+    if Copy(Text, 1, 3) = #$EF#$BB#$BF then
+      Delete(Text, 1, 3);
     try
       { The bytes are UTF-8 whatever the system's code page is. }
-      Text := ReadFileBytes(AFileName);
       SetCodePage(Text, CP_UTF8, False);
       ADamaged := Trim(Text) <> '';
       Data := GetJSON(UTF8String(Text));
@@ -578,6 +637,7 @@ begin
     except
       { A damaged file is treated as none. }
     end;
+  end;
   if ADamaged then
     WriteFileReplacing(AFileName + DamagedSuffix, Text, &600);
   if Result = nil then
@@ -601,6 +661,8 @@ begin
   FTrustedKeys := TStringList.Create;
   FSettingsDoc := TJSONObject.Create;
   FStateDoc := TJSONObject.Create;
+  FSettingsBase := TJSONObject.Create;
+  FStateBase := TJSONObject.Create;
   if ADir <> '' then
     FDir := ExcludeTrailingPathDelimiter(ADir)
   else
@@ -623,6 +685,8 @@ destructor TGittanSettings.Destroy;
 begin
   FSettingsDoc.Free;
   FStateDoc.Free;
+  FSettingsBase.Free;
+  FStateBase.Free;
   FRecent.Free;
   FPaletteRecent.Free;
   FTabs.Free;
@@ -691,23 +755,42 @@ end;
 
 procedure TGittanSettings.Load;
 var
-  O, Sub: TJSONObject;
-  Damaged: boolean;
+  Damaged, Unreadable: boolean;
 begin
   FreeAndNil(FSettingsDoc);
   FreeAndNil(FStateDoc);
   FOldIniFound := not FileExists(SettingsFile) and not FileExists(StateFile) and
     FileExists(IncludeTrailingPathDelimiter(FDir) + OldIniFileName);
-  FSettingsDoc := ReadDoc(SettingsFile, Damaged);
+  FSettingsDoc := ReadDoc(SettingsFile, Damaged, Unreadable);
   FDamagedFiles := '';
   if Damaged then
     FDamagedFiles := SettingsFileName;
-  FStateDoc := ReadDoc(StateFile, Damaged);
+  FStateDoc := ReadDoc(StateFile, Damaged, Unreadable);
+  MoveLegacyDraft(FStateDoc);
   if Damaged and (FDamagedFiles <> '') then
     FDamagedFiles := FDamagedFiles + ', ' + StateFileName
   else if Damaged then
     FDamagedFiles := StateFileName;
+  ReadFields;
+  TakeBase;
+end;
 
+{ The documents as they stand, with the fields put in, become the base:
+  a field never touched then equals it, a key the file lacked included. }
+procedure TGittanSettings.TakeBase;
+begin
+  PutSettings;
+  PutState;
+  FSettingsBase.Free;
+  FSettingsBase := TJSONObject(FSettingsDoc.Clone);
+  FStateBase.Free;
+  FStateBase := TJSONObject(FStateDoc.Clone);
+end;
+
+procedure TGittanSettings.ReadFields;
+var
+  O, Sub: TJSONObject;
+begin
   O := ObjOf(FSettingsDoc, 'editor');
   FontName := StrOf(O, 'fontName');
   { A value edited by hand past what the settings dialog and the zoom
@@ -775,9 +858,6 @@ begin
   O := ObjOf(FStateDoc, 'tips');
   TickHintHidden := BoolOf(O, 'tickHintHidden', False);
   GraphTipHidden := BoolOf(O, 'graphTipHidden', False);
-  O := ObjOf(FStateDoc, 'commitDraft');
-  CommitDraft := StrOf(O, 'text');
-  CommitDraftRepo := StrOf(O, 'repo');
   UpdateSnoozedUntil := ReadDay(StrOf(ObjOf(FStateDoc, 'update'), 'snoozedUntil'));
   ListOf(FStateDoc, 'recent', FRecent, MaxRecent);
   ListOf(FStateDoc, 'paletteRecent', FPaletteRecent, MaxPaletteRecent);
@@ -873,21 +953,6 @@ begin
   O := ChildOf(FStateDoc, 'tips');
   O.Booleans['tickHintHidden'] := TickHintHidden;
   O.Booleans['graphTipHidden'] := GraphTipHidden;
-  if CommitDraft <> '' then
-  begin
-    O := ChildOf(FStateDoc, 'commitDraft');
-    O.Strings['text'] := CommitDraft;
-    O.Strings['repo'] := CommitDraftRepo;
-  end
-  else
-  begin
-    { No draft: its members go, a key of a newer build's stays. }
-    O := ObjOf(FStateDoc, 'commitDraft');
-    DropKey(O, 'text');
-    DropKey(O, 'repo');
-    if (O = nil) or (O.Count = 0) then
-      DropKey(FStateDoc, 'commitDraft');
-  end;
   if UpdateSnoozedUntil > 0 then
     ChildOf(FStateDoc, 'update').Strings['snoozedUntil'] :=
       FormatDateTime('yyyy"-"mm"-"dd', UpdateSnoozedUntil)
@@ -903,19 +968,233 @@ begin
   ChildOf(FStateDoc, 'batch').Strings['operation'] := BatchOperation;
 end;
 
-function TGittanSettings.WriteState: boolean;
+{ The fingerprint of a trusted key's entry (gittan.signing's
+  TrustEntryKey; this unit does not use that one). }
+function KeyFpr(const AEntry: string): string;
 begin
-  PutState;
-  Result := WriteFileReplacing(StateFile, FStateDoc.FormatJSON(JsonLayout) + LineEnding);
+  Result := UpperCase(Trim(AEntry.Split([#31])[0]));
+end;
+
+{ The trusted keys as a set by fingerprint: the file's, less the ones
+  this process dropped since the base, with this process's added or
+  changed ones in. }
+procedure MergeTrustedKeys(ABase, AMine, ATheirs, AResult: TJSONObject);
+var
+  Base, Mine, Merged: TStringList;
+  i, k: integer;
+  Found: boolean;
+begin
+  Base := TStringList.Create;
+  Mine := TStringList.Create;
+  Merged := TStringList.Create;
+  try
+    ListOf(ObjOf(ABase, 'signing'), 'trustedKeys', Base);
+    ListOf(ObjOf(AMine, 'signing'), 'trustedKeys', Mine);
+    ListOf(ObjOf(ATheirs, 'signing'), 'trustedKeys', Merged);
+    { Dropped here: in the base, no entry of its key left in mine. }
+    for i := 0 to Base.Count - 1 do
+    begin
+      Found := False;
+      for k := 0 to Mine.Count - 1 do
+        if KeyFpr(Mine[k]) = KeyFpr(Base[i]) then
+          Found := True;
+      if not Found then
+        for k := Merged.Count - 1 downto 0 do
+          if KeyFpr(Merged[k]) = KeyFpr(Base[i]) then
+            Merged.Delete(k);
+    end;
+    { Added or changed here. }
+    for i := 0 to Mine.Count - 1 do
+      if Base.IndexOf(Mine[i]) < 0 then
+      begin
+        Found := False;
+        for k := 0 to Merged.Count - 1 do
+          if KeyFpr(Merged[k]) = KeyFpr(Mine[i]) then
+          begin
+            Merged[k] := Mine[i];
+            Found := True;
+          end;
+        if not Found then
+          Merged.Add(Mine[i]);
+      end;
+    if (Merged.Count > 0) or (ObjOf(AResult, 'signing') <> nil) then
+      ChildOf(AResult, 'signing').Arrays['trustedKeys'] := ListJson(Merged);
+  finally
+    Base.Free;
+    Mine.Free;
+    Merged.Free;
+  end;
+end;
+
+function MergeDocs(ABase, AMine, ATheirs: TJSONObject): TJSONObject;
+var
+  Names: TStringList;
+  i: integer;
+  Name: string;
+  B, M, T: TJSONData;
+  Empty: TJSONObject;
+begin
+  Result := TJSONObject.Create;
+  Names := TStringList.Create;
+  try
+    { In the file's order, then this process's new keys, so a merge
+      does not reorder the file. }
+    Names.CaseSensitive := True;
+    for i := 0 to ATheirs.Count - 1 do
+      if Names.IndexOf(ATheirs.Names[i]) < 0 then
+        Names.Add(ATheirs.Names[i]);
+    for i := 0 to AMine.Count - 1 do
+      if Names.IndexOf(AMine.Names[i]) < 0 then
+        Names.Add(AMine.Names[i]);
+    for i := 0 to ABase.Count - 1 do
+      if Names.IndexOf(ABase.Names[i]) < 0 then
+        Names.Add(ABase.Names[i]);
+    for Name in Names do
+    begin
+      B := ABase.Find(Name);
+      M := AMine.Find(Name);
+      T := ATheirs.Find(Name);
+      if M = nil then
+      begin
+        { Dropped here wins; never here, the file's. }
+        if (B = nil) and (T <> nil) then
+          Result.Add(Name, T.Clone);
+      end
+      else if (B <> nil) and (M.AsJSON = B.AsJSON) then
+      begin
+        { Not changed here: the file's, or nothing when it dropped it. }
+        if T <> nil then
+          Result.Add(Name, T.Clone);
+      end
+      else if (M is TJSONObject) and (T is TJSONObject) then
+      begin
+        if B is TJSONObject then
+          Result.Add(Name, MergeDocs(TJSONObject(B), TJSONObject(M), TJSONObject(T)))
+        else
+        begin
+          { Made here and in the file: each key as above, from no base. }
+          Empty := TJSONObject.Create;
+          try
+            Result.Add(Name, MergeDocs(Empty, TJSONObject(M), TJSONObject(T)));
+          finally
+            Empty.Free;
+          end;
+        end;
+      end
+      else
+        Result.Add(Name, M.Clone);
+    end;
+  finally
+    Names.Free;
+  end;
+end;
+
+{ Reads AFileName again and gives what to write: ADoc merged into it
+  against ABase. A file missing, broken or empty now (ReadDoc does not
+  count an empty one as damaged, and no save writes an empty object) is
+  taken as the base, so what was never changed here is kept. One that
+  is there but cannot be read is AUnreadable, and must not be written. }
+function MergedWithFile(const AFileName: string; ABase, ADoc: TJSONObject;
+  ATrustedKeys, ALegacyDraft: boolean; out AUnreadable: boolean): TJSONObject;
+var
+  Theirs: TJSONObject;
+  Damaged: boolean;
+begin
+  AUnreadable := False;
+  if FileExists(AFileName) then
+    Theirs := ReadDoc(AFileName, Damaged, AUnreadable)
+  else
+  begin
+    Theirs := nil;
+    Damaged := True;
+  end;
+  if Damaged or (Theirs.Count = 0) then
+  begin
+    Theirs.Free;
+    Theirs := TJSONObject(ABase.Clone);
+  end;
+  if ALegacyDraft then
+    MoveLegacyDraft(Theirs);
+  try
+    Result := MergeDocs(ABase, ADoc, Theirs);
+    if ATrustedKeys then
+      MergeTrustedKeys(ABase, ADoc, Theirs, Result);
+  finally
+    Theirs.Free;
+  end;
 end;
 
 procedure TGittanSettings.Save;
+var
+  Doc, OldSettings, OldState: TJSONObject;
+  SettingsUnreadable, StateUnreadable, SettingsWritten, StateWritten: boolean;
 begin
+  OldSettings := nil;
+  OldState := nil;
   try
-    PutSettings;
-    { The API key is in the file as it is, so no one else may read it. }
-    WriteFileReplacing(SettingsFile, FSettingsDoc.FormatJSON(JsonLayout) + LineEnding, &600);
-    WriteState;
+    try
+      PutSettings;
+      PutState;
+      { A file that is there but cannot be read now is left as it is: the
+        defaults merged into nothing would replace everything in it. }
+      Doc := MergedWithFile(SettingsFile, FSettingsBase, FSettingsDoc, True, False, SettingsUnreadable);
+      if SettingsUnreadable then
+        Doc.Free
+      else
+      begin
+        OldSettings := FSettingsDoc;
+        FSettingsDoc := Doc;
+      end;
+      Doc := MergedWithFile(StateFile, FStateBase, FStateDoc, False, True, StateUnreadable);
+      if StateUnreadable then
+        Doc.Free
+      else
+      begin
+        OldState := FStateDoc;
+        FStateDoc := Doc;
+      end;
+      { The other process's changes are this one's now, and the fields
+        follow; the base is what went to disk. }
+      ReadFields;
+      PutSettings;
+      PutState;
+      { The API key is in the file as it is, so no one else may read it. }
+      SettingsWritten := not SettingsUnreadable and
+        WriteFileReplacing(SettingsFile, FSettingsDoc.FormatJSON(JsonLayout) + LineEnding, &600);
+      if SettingsWritten then
+      begin
+        FSettingsBase.Free;
+        FSettingsBase := TJSONObject(FSettingsDoc.Clone);
+      end;
+      StateWritten := not StateUnreadable and
+        WriteFileReplacing(StateFile, FStateDoc.FormatJSON(JsonLayout) + LineEnding);
+      if StateWritten then
+      begin
+        FStateBase.Free;
+        FStateBase := TJSONObject(FStateDoc.Clone);
+      end;
+      { A file that could not be written keeps the document it had, this
+        process's own, and its old base: what the merge took in from the
+        other process is not this one's change at the next save, which
+        merges again with the file as it is then. }
+      if (OldSettings <> nil) and not SettingsWritten then
+      begin
+        FSettingsDoc.Free;
+        FSettingsDoc := OldSettings;
+        OldSettings := nil;
+      end;
+      if (OldState <> nil) and not StateWritten then
+      begin
+        FStateDoc.Free;
+        FStateDoc := OldState;
+        OldState := nil;
+      end;
+      if not SettingsWritten or not StateWritten then
+        ReadFields;
+    finally
+      OldSettings.Free;
+      OldState.Free;
+    end;
   except
     { Nothing to do; the next run starts with what was saved before. }
   end;
@@ -924,17 +1203,28 @@ end;
 procedure TGittanSettings.SaveRecent;
 var
   Doc: TJSONObject;
-  Damaged: boolean;
+  Damaged, Unreadable: boolean;
 begin
   { The file as it is now, which another instance may have written since
     Load, with the recent lists put in, and nothing else. }
   try
-    Doc := ReadDoc(StateFile, Damaged);
+    Doc := ReadDoc(StateFile, Damaged, Unreadable);
     try
+      if Unreadable then
+        Exit;
       Doc.Integers['version'] := SettingsVersion;
       Doc.Arrays['recent'] := ListJson(FRecent);
       Doc.Arrays['paletteRecent'] := ListJson(FPaletteRecent);
-      WriteFileReplacing(StateFile, Doc.FormatJSON(JsonLayout) + LineEnding);
+      { Written, the lists are on disk as they are here: the base takes
+        them, and nothing else of the file, or a repository removed,
+        saved and opened again would equal the base at the next Save,
+        which would take the file's list without it. }
+      if WriteFileReplacing(StateFile, Doc.FormatJSON(JsonLayout) + LineEnding) and
+        (FStateBase <> nil) then
+      begin
+        FStateBase.Arrays['recent'] := ListJson(FRecent);
+        FStateBase.Arrays['paletteRecent'] := ListJson(FPaletteRecent);
+      end;
     finally
       Doc.Free;
     end;
@@ -1036,6 +1326,34 @@ begin
   ChildOf(FStateDoc, 'trust').Strings[ARoot] := AHash;
 end;
 
+function TGittanSettings.IssueRegexTrusted(const ARoot, ARegex: string): boolean;
+begin
+  Result := (ARegex = '') or (StrOf(ObjOf(FStateDoc, 'trustIssues'), ARoot) =
+    SHA256Print(SHA256String(ARegex)));
+end;
+
+procedure TGittanSettings.TrustIssueRegex(const ARoot, ARegex: string);
+begin
+  if ARegex = '' then
+    Exit;
+  ChildOf(FStateDoc, 'trustIssues').Strings[ARoot] := SHA256Print(SHA256String(ARegex));
+end;
+
+function TGittanSettings.CommitDraftFor(const ARoot: string): string;
+begin
+  Result := StrOf(ObjOf(FStateDoc, 'commitDrafts'), ARoot);
+end;
+
+procedure TGittanSettings.SetCommitDraft(const ARoot, AText: string);
+begin
+  if ARoot = '' then
+    Exit;
+  if AText <> '' then
+    ChildOf(FStateDoc, 'commitDrafts').Strings[ARoot] := AText
+  else
+    DropKey(ObjOf(FStateDoc, 'commitDrafts'), ARoot);
+end;
+
 function TGittanSettings.ProjectKindsOf(const ARoot: string): string;
 begin
   Result := StrOf(ObjOf(FStateDoc, 'projectKinds'), ARoot);
@@ -1078,9 +1396,14 @@ begin
   Key := UpperCase(Trim(AEntry.Split([#31])[0]));
   if Key = '' then
     Exit;
+  { Trusted again: the new entry replaces the old, which may be one
+    from before the e-mails were kept. }
   for i := 0 to FTrustedKeys.Count - 1 do
     if UpperCase(Trim(FTrustedKeys[i].Split([#31])[0])) = Key then
+    begin
+      FTrustedKeys[i] := AEntry;
       Exit;
+    end;
   FTrustedKeys.Add(AEntry);
 end;
 

@@ -26,11 +26,9 @@ Math;
 
 resourcestring
   RS_EXT_FILE = 'File "%s" not found';
+  RS_EXT_SCRIPT_ERROR = 'Error in the extension %s';
 
 type
-  {** Callback signature invoked when JavaScript code emits output via this engine. }
-TOutputCallback = procedure(const Msg: RawUtf8) of object;
-
   {** Alias to the native-callback type used by the QuickJS binding.
       These are plain Pascal procedures reached through the shim trampoline;
       see @code(TJSNativeFunc) in gittan.ext.quickjs. }
@@ -117,9 +115,22 @@ TExtContextInfo = record
   Repos: TStringArray;       // @repos: the repositories it runs for, all when empty
   Forges: TStringArray;      // @forges: the forges it runs for, lower case, all when empty
   Generation: QWord;         // a number of its own, never reused, unlike Ctx's address
+  { A module entry's text as it was read and hashed, until the module
+    loader takes it in place of the file: the import() that loads it is
+    a job, which a PumpJobs with jobs of others queued before it may not
+    reach, so it stays here, not only for the call, until it is taken or
+    the context goes. }
+  EntrySource: RawUtf8;
 end;
 
 TExtContextList = specialize TFPGList<PExtContextInfo>;
+
+var
+  {** How long a script may run, from the host's call into it, before the
+      watchdog aborts it, in milliseconds; the tests make it shorter. }
+  ExtWatchdogMs: QWord = 10000;
+
+type
 
   {** Embedded JavaScript engine wrapper using QuickJS via @link(gittan.ext.quickjs).
 
@@ -152,9 +163,6 @@ private
     {** QuickJS context handle. }
   FContext: JSContext;
     {** Accumulated output produced by JS. }
-  FOutput: RawUtf8;
-    {** Output sink callback invoked by @code(SetOutput). }
-  OutCallback: TOutputCallback;
     {** Registered promises. }
   promises: TPromises;
     {** Map of active JS timers (setTimeout/setInterval). }
@@ -167,6 +175,9 @@ private
         draining so a timer is never freed beneath its own event. }
   FInTimerCallback: integer;
   FLastLoadFailed: boolean;
+  FUnloading: boolean;
+    { The entry file being loaded and the text read of it, which the module
+      loader takes instead of reading the file again (ExtExecuteSource). }
     {** Rejections seen by PromiseRejectionTracker, reported (or cancelled)
         on the next job-pump tick. }
   FPendingRejections: array of TPendingRejection;
@@ -175,6 +186,15 @@ private
         uninterrupted execution burst began. }
   FLastJSCheck: QWord;
   FJSBurstStart: QWord;
+  { A chain of jobs that requeue themselves (a reaction that queues
+    another and returns) runs each job in the watchdog's budget and never
+    empties the queue, so the rejections would never be reported again:
+    the time of the pumps that left jobs queued, waits for the
+    user left out (FChainSpent), and once it is past ExtWatchdogMs the
+    jobs run in a pump are stopped (FChainAbort) until the queue empties.
+    FPumping is set while PumpJobs runs them. }
+  FChainSpent: QWord;
+  FChainAbort, FPumping: boolean;
 
     {** Loaded per-extension contexts (Path B). Each user .js script lives in its own ctx. }
   FExtContexts: TExtContextList;
@@ -196,12 +216,13 @@ private
         the context it is used in. JS_UNDEFINED (and the error reported)
         when the text is no JSON. }
   function ParseJsonIn(ctx: JSContext; const Json: string): JSValue;
-  function GetOutput: RawUtf8;
-  procedure SetOutput(const val: RawUtf8);
 
     {** Dispose timers parked in FDeadTimers. Safe to call anytime; no-ops
         while a timer callback is running. }
   procedure DrainDeadTimers;
+    {** Disposes the timers of ctx, live and parked: they hold its values,
+        so they go before it is freed. }
+  procedure DropTimersOf(ctx: JSContext);
   procedure RunDueTimers;
 
     {** Find a registered callback by name.
@@ -276,18 +297,10 @@ public
     {** Release the singleton instance (frees resources). }
   class procedure ReleaseInstance;
 
-    {** Append values to @code(Output) by converting JS values to UTF-8.
-
-        @param(ctx  JS context)
-        @param(vals Pointer to first JS value)
-        @param(len  Number of items-1 to read; iterates inclusive from 0..len) }
-  procedure SetOutput(ctx: JSContext; const vals: PJSValues; const len: integer);
-
-    {** Clear the accumulated @code(Output). }
-  procedure ClearOutput;
-
-    {** Accessor to accumulated output; writes also trigger @code(OutCallback). }
-  property Output: RawUtf8 read GetOutput write SetOutput;
+    {** An error a script threw where no caller takes it (a listener, a
+        command, a timer, an unload hook): reported through the host under
+        the extension's name. }
+  procedure ReportScriptError(ctx: JSContext; const AMsg: string);
 
     {** Register a global JS function in the current context.
 
@@ -550,8 +563,15 @@ public
         LastLoadFailed says which, since a script's own last value may be a
         string that starts with Error: too. }
   function ExtExecuteFile(Ext: PExtContextInfo): RawUtf8;
+    {** As ExtExecuteFile, with ASource, the text read of Ext.FileName (the
+        bytes whose hash the grant is for), run instead of the file read
+        again; for a module it is also what the import of the entry gets. }
+  function ExtExecuteSource(Ext: PExtContextInfo; const ASource: RawUtf8): RawUtf8;
     {** Whether the last ExtExecuteFile threw rather than ran to its end. }
   property LastLoadFailed: boolean read FLastLoadFailed;
+    {** Whether UnloadExtensions is under way: it runs the message loop as it
+        waits for the promise tasks, so a second Reload could start then. }
+  property Unloading: boolean read FUnloading;
     {** Takes one extension's context out and frees it, with what it
         registered and its timers: one whose script threw as it loaded,
         which is not loaded but would otherwise keep its listeners,
@@ -707,7 +727,7 @@ GlobalShutdownInProgress: boolean = false;
 implementation
 
 uses
-  gittan.forge;
+  gittan.forge, gittan.textfile;
 
 const
   { The timers one extension may have at once (setTimeout and
@@ -778,10 +798,10 @@ begin
         // DumpError, not ErrorMessage: it appends the JS stack trace, so the
         // extension console shows where in the callback the throw happened.
         TimerInfo^.Context^.DumpError(err);
-        Engine.SetOutput('Timer callback error: ' + string(err));
+        Engine.ReportScriptError(TimerInfo^.Context, string(err));
       end;
     except on E: Exception do
-        TGittanExtEngine.Instance.SetOutput('Timer exception: ' + E.Message);
+        Engine.ReportScriptError(TimerInfo^.Context, E.Message);
     end;
 
     // Release the call result; the callback/args stay owned by TimerInfo.
@@ -864,8 +884,15 @@ end;
 
 {** Show a simple informational alert through the host. }
 procedure TGittanExtEngine.alert(const msg: string; const AName: string);
+var
+  Wait: TJSWait;
 begin
-  ExtHost.Alert(AName, msg);
+  Wait := JSWaitBegin;
+  try
+    ExtHost.Alert(AName, msg);
+  finally
+    JSWaitEnd(Wait);
+  end;
 end;
 
 {** Raise JS exception with filename context. }
@@ -994,35 +1021,17 @@ begin
   Result := ctx^^.ToUtf8(vals^[pos]);
 end;
 
-{** Append JS values (0..len) to @code(Output) as UTF-8 strings. }
-procedure TGittanExtEngine.SetOutput(ctx: JSContext; const vals: PJSValues;
-const len: integer);
+procedure TGittanExtEngine.ReportScriptError(ctx: JSContext; const AMsg: string);
 var
-  i: integer;
+  Name: string;
 begin
-  // One conversion a value: a toString may answer differently each time
-  for i := 0 to len do
-    output := output + ctx^.ToUtf8(vals^[i]);
-end;
-
-{** Clear accumulated output buffer. }
-procedure TGittanExtEngine.ClearOutput();
-begin
-  output := '';
-end;
-
-{** Assign output and notify optional callback. }
-procedure TGittanExtEngine.SetOutput(const val: RawUtf8);
-begin
-  FOutput := val;
-  if assigned(OutCallback) then
-    OutCallback(val);
-end;
-
-{** Read accumulated output. }
-function TGittanExtEngine.GetOutput: RawUtf8;
-begin
-  Result := FOutput;
+  if (AMsg = '') or ExtHost.Terminated then
+    Exit;
+  Name := ExtensionNameForContext(ctx);
+  if Name = '' then
+    ExtError(AMsg)
+  else
+    ExtError(Format(RS_EXT_SCRIPT_ERROR, [Name]), AMsg);
 end;
 
 {******************************************************************************
@@ -1059,6 +1068,36 @@ begin
   except
     on E: Exception do
       Result := js_strdup(ctx, pansichar(RawUtf8(ModuleErrorPrefix + E.Message)));
+  end;
+end;
+
+{ The entry text kept for ctx's extension (EntrySource) when AFileName
+  is its file, taken once: true and AScript set, the record's dropped. }
+function TakeEntrySource(ctx: JSContext; opaque: pointer; const AFileName: string;
+  out AScript: RawUtf8): boolean;
+var
+  Engine: TGittanExtEngine;
+  i: integer;
+  Info: PExtContextInfo;
+begin
+  Result := False;
+  AScript := '';
+  Engine := TGittanExtEngine(opaque);
+  if (Engine = nil) or not Assigned(Engine.FExtContexts) then
+    Exit;
+  for i := 0 to Engine.FExtContexts.Count - 1 do
+  begin
+    Info := Engine.FExtContexts[i];
+    if (Info = nil) or (Info^.Ctx <> ctx) then
+      Continue;
+    if (Info^.EntrySource <> '') and
+      (ExpandFileName(AFileName) = ExpandFileName(Info^.FileName)) then
+    begin
+      AScript := Info^.EntrySource;
+      Info^.EntrySource := '';
+      Result := True;
+    end;
+    Exit;
   end;
 end;
 
@@ -1107,6 +1146,8 @@ begin
 
   if FileName = GittanModuleSpecifier then
     Script := GittanModuleSource
+  else if TakeEntrySource(ctx, opaque, FileName, Script) then
+    { The text read and hashed, not the file read again. }
   else if not FileExists(FileName) then
   begin
     Fail('module not found: ' + FileName);
@@ -1150,43 +1191,56 @@ end;
 ******************************************************************************}
 
 const
-  {** Runaway-extension guards: a script may execute continuously for this
-      long before the watchdog aborts it, and the shared runtime heap is
-      capped so a leaking extension cannot exhaust the process. }
-  JS_WATCHDOG_MS = 10000;
-  {** A gap this long between interrupt polls means no JS was executing (or
-      it sat inside a native call, e.g. a modal dialog awaiting the user), so
-      the watchdog budget restarts rather than count host/user time. }
+  {** For JS run outside the calls the binding counts (JSEntryDepth 0: a
+      toString or a getter the host reaches some other way), a gap this
+      long between interrupt polls starts the budget over. }
   JS_WATCHDOG_GAP_MS = 500;
+  {** The shared runtime heap is capped so a leaking extension cannot exhaust
+      the process (the time a script may run is ExtWatchdogMs). }
   JS_MEMORY_LIMIT_BYTES = 64 shl 20; // 64 MB across all extension contexts
   { Not on Haiku, where quickjs-ng cannot measure an allocation
     (js__malloc_usable_size gives 0) and counts its overhead alone. }
 
 {** Interrupt hook polled by quickjs-ng between bytecodes; returning 1 aborts
-    the running script with an uncatchable InterruptError. "Continuous
-    execution" is measured through poll gaps: while JS runs, polls arrive
-    every few thousand instructions, so a long gap means the engine was idle
-    or parked in a native call - either way the budget restarts. Runs on
-    whichever thread executes JS, which in Gittan is always the main thread. }
+    the running script with an uncatchable InterruptError. A script's budget
+    runs from the host's outermost call into JS (JSEntryStart, kept by the
+    binding's JS_Call, JS_Eval and JS_ExecutePendingJob), less the time a
+    native waited for the user (JSWaitBegin): the polls come only every ten
+    thousand or so calls and jumps, so a loop whose body sits in a native
+    (a split of a long text, a JSON.parse) is still timed as a whole. Runs
+    on whichever thread executes JS, which in Gittan is always the main
+    thread. }
 function EngineInterruptHandler(rt: JSRuntime; opaque: pointer): integer; cdecl;
 var
   eng: TGittanExtEngine;
-  tick: QWord;
+  tick, start: QWord;
 begin
   Result := 0;
   eng := TGittanExtEngine(opaque);
   if eng = nil then
     Exit;
+  { A chain past its budget: each job the pump runs stops at its first
+    poll, before it can queue the next. }
+  if eng.FChainAbort and eng.FPumping then
+    Exit(1);
   tick := GetTickCount64;
-  if tick - eng.FLastJSCheck > JS_WATCHDOG_GAP_MS then
-    eng.FJSBurstStart := tick;
-  eng.FLastJSCheck := tick;
-  if tick - eng.FJSBurstStart > JS_WATCHDOG_MS then
+  if JSEntryDepth > 0 then
+    start := JSEntryStart
+  else
   begin
-    // Zeroing the poll timestamp restarts the burst at the next poll, so the
-    // next script (say, another extension in the same broadcast) gets a
-    // fresh budget instead of dying to this script's spent one.
+    if tick - eng.FLastJSCheck > JS_WATCHDOG_GAP_MS then
+      eng.FJSBurstStart := tick;
+    eng.FLastJSCheck := tick;
+    start := eng.FJSBurstStart;
+  end;
+  if tick - start > ExtWatchdogMs then
+  begin
+    // The next script (say, another extension in the same broadcast) gets a
+    // fresh budget instead of dying to this script's spent one: a new
+    // outermost call starts its own, and the rest start over here.
     eng.FLastJSCheck := 0;
+    if JSEntryDepth > 0 then
+      JSEntryStart := tick;
     Result := 1;
   end;
 end;
@@ -1210,7 +1264,7 @@ begin
   if TGittanExtEngine.HasInstance then
     eng := TGittanExtEngine.Instance;
   if eng <> nil then
-    eng.SetOutput(string(msg));
+    eng.ReportScriptError(ctx, string(msg));
 end;
 
 { For the promise tasks (gittan.ext.promise), which may not use this unit:
@@ -1237,6 +1291,8 @@ begin
   FRuntime := JS_NewRuntime;
   if FRuntime = nil then
     raise Exception.Create('Failed to create JS runtime');
+  ExtRuntimeStarted;
+  JSJobFailed := @DumpJSError;
 
   // Create the context
   FContext := JS_NewContext(FRuntime);
@@ -1824,6 +1880,11 @@ const
     '  };' + LineEnding +
     '  var deliver = t._deliver, ANSWER_SECONDS = 300;' + LineEnding +
     '  delete t._deliver;' + LineEnding +
+    { The raw natives would keep a function that never answers, and the
+      run or the tab would wait for ever: only the shim's way is left. }
+    '  var registerForgeTab = t.registerForgeTab, registerBatch = t.registerBatch;' + LineEnding +
+    '  delete t.registerForgeTab;' + LineEnding +
+    '  delete t.registerBatch;' + LineEnding +
     '  var said = function (e) { try { return String((e && e.message) || e); } catch (x) { return "The extension failed"; } };' + LineEnding +
     '  var answer = function (seq, p) {' + LineEnding +
     '    var done = false, timer = null;' + LineEnding +
@@ -1845,7 +1906,7 @@ const
     '    register: function (o) {' + LineEnding +
     '      if (!o || typeof o.render !== "function" || !o.id)' + LineEnding +
     '        throw new TypeError("Gittan.forgeTabs.register: {id, title, render} expected");' + LineEnding +
-    '      return t.registerForgeTab(String(o.id), String(o.title || o.id), String(o.description || ""), function (ctx) {' + LineEnding +
+    '      return registerForgeTab.call(t, String(o.id), String(o.title || o.id), String(o.description || ""), function (ctx) {' + LineEnding +
     '        var seq = ctx.seq; delete ctx.seq;' + LineEnding +
     '        if (ctx.kind === "action") {' + LineEnding +
     '          var a = ctx.action, row = ctx.row; delete ctx.kind; delete ctx.action; delete ctx.row;' + LineEnding +
@@ -1862,7 +1923,7 @@ const
     '    register: function (o) {' + LineEnding +
     '      if (!o || typeof o.run !== "function" || !o.id)' + LineEnding +
     '        throw new TypeError("Gittan.batch.register: {id, title, run} expected");' + LineEnding +
-    '      return t.registerBatch(String(o.id), String(o.title || o.id), String(o.description || ""), function (ctx) {' + LineEnding +
+    '      return registerBatch.call(t, String(o.id), String(o.title || o.id), String(o.description || ""), function (ctx) {' + LineEnding +
     '        var seq = ctx.seq; delete ctx.seq;' + LineEnding +
     '        answer(seq, function () { return o.run(ctx); });' + LineEnding +
     '      });' + LineEnding +
@@ -1931,7 +1992,7 @@ destructor TGittanExtEngine.Destroy;
 var
   cb: PJSCallback;
   tmpCtx: JSContext;
-  timeoutCounter: integer;
+  timeoutCounter, r: integer;
   WaitUntil: QWord;
   globalObj, timersObj: JSValueRaw;
   i: integer;
@@ -2037,8 +2098,10 @@ begin
     timeoutCounter := 0;
     while JS_IsJobPending(FRuntime) and (timeoutCounter < 100) do  // Max 100 iterations
     begin
-      if JS_ExecutePendingJob(FRuntime, @tmpCtx) <= 0 then
+      r := JS_ExecutePendingJob(FRuntime, @tmpCtx);
+      if r = 0 then
         Break;
+      JS_JobDone(tmpCtx, r);
       Inc(timeoutCounter);
 
       // Give a small pause every few iterations
@@ -2102,7 +2165,7 @@ begin
         timeoutCounter := 0;
         while JS_IsJobPending(FRuntime) and (timeoutCounter < 10) do
         begin
-          JS_ExecutePendingJob(FRuntime, @tmpCtx);
+          JS_JobDone(tmpCtx, JS_ExecutePendingJob(FRuntime, @tmpCtx));
           Inc(timeoutCounter);
         end;
 
@@ -2118,7 +2181,10 @@ begin
     FContext := nil;
   end;
 
-  // Normal runtime cleanup
+  JSJobFailed := nil;
+  // Normal runtime cleanup; a promise task that ends later leaves its
+  // values alone from here on.
+  ExtRuntimeGeneration := 0;
   if Assigned(FRuntime) then
   begin
     try
@@ -2435,20 +2501,10 @@ begin
   end;
 end;
 
-procedure TGittanExtEngine.DropExtensionContext(Ext: PExtContextInfo);
+procedure TGittanExtEngine.DropTimersOf(ctx: JSContext);
 var
   i: integer;
-  ctx: JSContext;
 begin
-  if (Ext = nil) or (Ext^.Ctx = nil) or not Assigned(FExtContexts) then
-    Exit;
-  i := FExtContexts.IndexOf(Ext);
-  if i < 0 then
-    Exit;
-  ctx := Ext^.Ctx;
-  FRegistry.RemoveContext(ctx);
-  FRegistry.RemoveSettingsOf(Ext^.ExtId);
-  { Its timers hold values of the context, so they go before it. }
   if Assigned(FJSTimers) then
     for i := FJSTimers.Count - 1 downto 0 do
       if FJSTimers.Data[i]^.Context = ctx then
@@ -2463,6 +2519,23 @@ begin
         DisposeTimerInfo(FDeadTimers[i]);
         FDeadTimers.Delete(i);
       end;
+end;
+
+procedure TGittanExtEngine.DropExtensionContext(Ext: PExtContextInfo);
+var
+  i: integer;
+  ctx: JSContext;
+begin
+  if (Ext = nil) or (Ext^.Ctx = nil) or not Assigned(FExtContexts) then
+    Exit;
+  i := FExtContexts.IndexOf(Ext);
+  if i < 0 then
+    Exit;
+  ctx := Ext^.Ctx;
+  FRegistry.RemoveContext(ctx);
+  FRegistry.RemoveSettingsOf(Ext^.ExtId);
+  { Its timers hold values of the context, so they go before it. }
+  DropTimersOf(ctx);
   { Out of the list first: a promise task of it then finds no generation
     and leaves its promise alone. }
   FExtContexts.Remove(Ext);
@@ -2472,11 +2545,13 @@ end;
 
 procedure TGittanExtEngine.UnloadExtensions;
 var
-  i, timeoutCounter: integer;
+  i, timeoutCounter, r: integer;
   WaitUntil: QWord;
   tmpCtx: JSContext;
 begin
-  if IsGlobalShutdown or ExtHost.Terminated then Exit;
+  if IsGlobalShutdown or ExtHost.Terminated or FUnloading then Exit;
+  FUnloading := true;
+  try
 
   // Let extensions flush state while their contexts (and timers) still exist.
   NotifyUnloadAll;
@@ -2519,9 +2594,14 @@ begin
       timeoutCounter := 0;
       while JS_IsJobPending(FRuntime) and (timeoutCounter < 100) do
       begin
-        if JS_ExecutePendingJob(FRuntime, @tmpCtx) <= 0 then Break;
+        r := JS_ExecutePendingJob(FRuntime, @tmpCtx);
+        if r = 0 then Break;
+        JS_JobDone(tmpCtx, r);
         Inc(timeoutCounter);
       end;
+      // What is left of a chain goes with its context.
+      FChainSpent := 0;
+      FChainAbort := False;
       JS_RunGC(FRuntime);
     end;
 
@@ -2533,6 +2613,9 @@ begin
         begin
           if FExtContexts[i]^.Ctx <> nil then
           try
+            { A timer made since the ones above went (by a promise reaction
+              the drain ran) holds values of the context: it goes first. }
+            DropTimersOf(FExtContexts[i]^.Ctx);
             FRegistry.RemoveContext(FExtContexts[i]^.Ctx);
             { What the script defines on its next load is what it has: a
               key it no longer defines goes. }
@@ -2548,6 +2631,9 @@ begin
   finally
     // Re-arm so a subsequent LoadExtensions can register and run scripts again.
     SetExtShuttingDown(false);
+  end;
+  finally
+    FUnloading := false;
   end;
 end;
 
@@ -2728,8 +2814,28 @@ end;
 function TGittanExtEngine.ExtExecuteFile(Ext: PExtContextInfo): RawUtf8;
 var
   Script: RawUtf8;
-  FileStream: TFileStream;
-  StringStream: TStringStream;
+begin
+  Result := '';
+  FLastLoadFailed := false;
+  if (Ext = nil) or IsGlobalShutdown or (Ext^.Ctx = nil) then Exit;
+  try
+    Script := RawUtf8(ReadFileBytes(Ext^.FileName));
+  except
+    on E: Exception do
+    begin
+      FLastLoadFailed := true;
+      Result := RawUtf8('Error: ' + Format(RS_EXT_FILE, [Ext^.FileName]));
+      ExtError('Error loading', string(Result));
+      Exit;
+    end;
+  end;
+  Result := ExtExecuteSource(Ext, Script);
+end;
+
+function TGittanExtEngine.ExtExecuteSource(Ext: PExtContextInfo;
+  const ASource: RawUtf8): RawUtf8;
+var
+  Script: RawUtf8;
   EvalResult: JSValue;
   ResultStr: pansichar;
   err: RawUtf8;
@@ -2740,23 +2846,13 @@ begin
   if (Ext = nil) or IsGlobalShutdown then Exit;
   ctx := Ext^.Ctx;
   if ctx = nil then Exit;
+  Script := ASource;
 
-  if not FileExists(Ext^.FileName) then
-    raise Exception.CreateFmt(RS_EXT_FILE, [Ext^.FileName]);
-
-  FileStream := TFileStream.Create(Ext^.FileName, fmOpenRead or fmShareDenyWrite);
-  StringStream := TStringStream.Create;
-  try
-    StringStream.CopyFrom(FileStream, FileStream.Size);
-    Script := StringStream.DataString;
-  finally
-    StringStream.Free;
-    FileStream.Free;
-  end;
-
-  FOutput := '';
   if ScriptLooksLikeModule(Script) then
+  begin
+    Ext^.EntrySource := Script;
     Exit(ExtExecuteModule(Ext));
+  end;
 
   EvalResult := ctx^.Eval(Script, ExtractFileName(Ext^.FileName),
     JS_EVAL_TYPE_GLOBAL, err);
@@ -2850,7 +2946,6 @@ begin
     Exit;
   end;
 
-  FOutput := '';
 
   EvalResult := FContext^.Eval(Script, Name, JS_EVAL_TYPE_GLOBAL, err);
 
@@ -3422,11 +3517,43 @@ end;
     one in gittan.ext.promise share an implementation and a budget; see it for
     why the drain is bounded. }
 function TGittanExtEngine.PumpJobs: boolean;
+var
+  WasPumping, Outer: boolean;
+  Began, Waited, Spent: QWord;
 begin
   Result := true;
   if IsExtShuttingDown or (FRuntime = nil) then
     Exit;
-  Result := DrainPendingJobs(FContext);
+  WasPumping := FPumping;
+  FPumping := True;
+  Outer := JSPumpDepth = 0;
+  Inc(JSPumpDepth);
+  Began := GetTickCount64;
+  Waited := JSWaitedMs;
+  try
+    Result := DrainPendingJobs(FContext);
+  finally
+    Dec(JSPumpDepth);
+    FPumping := WasPumping;
+  end;
+  { A pump inside another adds nothing: its time is the outer one's, and
+    an empty queue there does not end the chain the outer job may still
+    add to. A pump in a dialog opened by a job is outermost again. }
+  if not Outer then
+    Exit;
+  if Result then
+  begin
+    FChainSpent := 0;
+    FChainAbort := False;
+  end
+  else
+  begin
+    Spent := GetTickCount64 - Began;
+    if JSWaitedMs - Waited < Spent then
+      Inc(FChainSpent, Spent - (JSWaitedMs - Waited));
+    if FChainSpent > ExtWatchdogMs then
+      FChainAbort := True;
+  end;
 end;
 
 {** Pump the QuickJS job queue (Promises/microtasks) on each timer tick. }
@@ -3445,8 +3572,12 @@ begin
   // them may be the .catch() that handles a rejection already on the pending
   // list, so reporting now would open a modal alert for a rejection that is
   // about to be handled. The next tick pumps again and reports it then if it
-  // survives; a runaway chain that truncates every tick is ended by the
-  // watchdog, after which the queue empties and reporting resumes.
+  // survives. A runaway chain that truncates every tick is not ended by the
+  // watchdog, which times each job alone: its pumps are added up here, and
+  // past ExtWatchdogMs its jobs are stopped, after which the queue empties
+  // and reporting resumes. A finite chain within that time runs to its end.
+  // PumpJobs keeps that count, for every pump: the ones RunDueTimers ran
+  // after each callback above too.
   if PumpJobs then
     FlushPendingRejections;
 end;

@@ -97,7 +97,7 @@ begin
     end;
     for i := 0 to Lines.Count - 1 do
       Lines[i] := ' ' + Lines[i];
-    Result := ConflictCount(ConflictRoles(Lines), Lines);
+    Result := ConflictCount(ConflictRoles(Lines, FRepo.ConflictMarkerSize(APath)), Lines);
   finally
     Lines.Free;
   end;

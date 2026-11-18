@@ -12,7 +12,7 @@ unit gittan.textfile;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, fpjson;
 
 {** The bytes of the file AFileName, unconverted; raises when it cannot
   be read. }
@@ -33,8 +33,9 @@ function NextLine(const S: string; var AStart: integer; out ALine: string): bool
   backslash before any other character for that character. }
 function UnescapeC(const S: string): string;
 
-{** The deepest a JSON or TOML file a repository holds may nest its
-  arrays and tables. fpjson and toml-fp read nesting by recursion, and
+{** The deepest a JSON, TOML or XML file a repository holds may nest its
+  arrays, tables and elements. fpjson, toml-fp and fcl-xml (with the
+  code that walks its tree) read nesting by recursion, and
   100 000 levels end the process on a stack overflow that no except
   catches, so a deeper text is refused before it is parsed. }
 const
@@ -47,9 +48,23 @@ resourcestring
   strings left out. }
 function JsonTooDeep(const AJson: string): boolean;
 
+{** GetJSON of AJson, which raises as on text that is not JSON when it
+  nests deeper than MaxNesting; for JSON that others write, an
+  extension's included. }
+function GetJSONLimited(const AJson: string): TJSONData;
+
 {** The same for TOML: its basic, literal and multi-line strings and its
-  comments left out, inline tables and arrays counted. }
+  comments left out, inline tables and arrays counted, and the parts of
+  a dotted key or table header (a.b.c, [a.b.c]) as one level each. }
 function TomlTooDeep(const AToml: string): boolean;
+
+{** The same for XML: its elements counted, an empty one (<a/>) not,
+  comments, CDATA sections, processing instructions and the quoted
+  values of attributes left out. Text with a NUL byte counts as too
+  deep: UTF-16 or UTF-32, which the scan of bytes cannot read (a
+  character with a byte of 22h would pass for a quote) and the parser
+  can. }
+function XmlTooDeep(const AXml: string): boolean;
 
 {** S with every byte that does not start a valid UTF-8 character (a
   CP1252 é, a character cut in half, an overlong form or a surrogate)
@@ -89,10 +104,10 @@ function WriteFileReplacing(const AFileName: RawByteString; const AText: RawByte
 
 implementation
 
-{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
 uses
-  BaseUnix;
-{$ENDIF}
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}BaseUnix,{$ENDIF}
+  { The parser GetJSON reads with. }
+  jsonparser;
 
 function ReadFileBytes(const AFileName: string): RawByteString;
 var
@@ -185,16 +200,19 @@ end;
 function JsonTooDeep(const AJson: string): boolean;
 var
   i, Depth: integer;
+  Quote: char;
 begin
   Depth := 0;
   i := 1;
   while i <= Length(AJson) do
   begin
     case AJson[i] of
-      '"':
+      { GetJSON is not strict and reads a string in single quotes too. }
+      '"', '''':
       begin
+        Quote := AJson[i];
         Inc(i);
-        while (i <= Length(AJson)) and (AJson[i] <> '"') do
+        while (i <= Length(AJson)) and (AJson[i] <> Quote) do
         begin
           if AJson[i] = '\' then
             Inc(i);
@@ -291,9 +309,18 @@ begin
   SetLength(Result, Out);
 end;
 
+function GetJSONLimited(const AJson: string): TJSONData;
+begin
+  if JsonTooDeep(AJson) then
+    raise EJSON.CreateFmt(rsNestedTooDeep, [MaxNesting]);
+  Result := GetJSON(AJson);
+end;
+
 function TomlTooDeep(const AToml: string): boolean;
 var
-  i, Depth: integer;
+  i, Depth, Dots, Carried: integer;
+  { What Carried was outside each bracket open. }
+  Outer: array[1..MaxNesting] of integer;
 
   function At(const AQuote: string): boolean;
   begin
@@ -332,8 +359,16 @@ var
     Inc(i);
   end;
 
+{ toml-fp makes a table of every part of a dotted key, a.b.c = 1 or
+  [a.b.c], and frees them by recursion too, so the dots count as levels:
+  those of the key and value being read (Dots, which a comma, a line or
+  a bracket starts again) on top of the brackets open and of the keys
+  that led into them (Carried). A dot in a value, the one of 1.5, adds
+  one to its key's. }
 begin
   Depth := 0;
+  Dots := 0;
+  Carried := 0;
   i := 1;
   while i <= Length(AToml) do
     if At('"""') then
@@ -348,22 +383,116 @@ begin
         '#':
           while (i <= Length(AToml)) and (AToml[i] <> #10) do
             Inc(i);
+        '.':
+        begin
+          Inc(Dots);
+          if Depth + Carried + Dots > MaxNesting then
+            Exit(True);
+          Inc(i);
+        end;
+        ',', #10:
+        begin
+          Dots := 0;
+          Inc(i);
+        end;
         '[', '{':
         begin
           Inc(Depth);
-          if Depth > MaxNesting then
+          if Depth + Carried + Dots > MaxNesting then
             Exit(True);
+          Outer[Depth] := Carried;
+          Inc(Carried, Dots);
+          Dots := 0;
           Inc(i);
         end;
         ']', '}':
         begin
           if Depth > 0 then
+          begin
+            Carried := Outer[Depth];
             Dec(Depth);
+          end;
+          Dots := 0;
           Inc(i);
         end;
         else
           Inc(i);
       end;
+    end;
+  Result := False;
+end;
+
+function XmlTooDeep(const AXml: string): boolean;
+var
+  i, Depth: integer;
+
+  function At(const AText: string): boolean;
+  begin
+    Result := Copy(AXml, i, Length(AText)) = AText;
+  end;
+
+  { Past the first AEnd from i on, or to the end of the text. }
+  procedure SkipPast(const AEnd: string);
+  var
+    Found: SizeInt;
+  begin
+    Found := Pos(AEnd, AXml, i);
+    if Found = 0 then
+      i := Length(AXml) + 1
+    else
+      i := Found + Length(AEnd);
+  end;
+
+  { Past the tag opened at i, to its >; a > in a quoted value does not
+    end it. Whether it ends in />. }
+  function SkipTag: boolean;
+  var
+    Quote: char;
+  begin
+    Result := False;
+    Inc(i);
+    while (i <= Length(AXml)) and (AXml[i] <> '>') do
+    begin
+      if AXml[i] in ['"', ''''] then
+      begin
+        Quote := AXml[i];
+        Inc(i);
+        while (i <= Length(AXml)) and (AXml[i] <> Quote) do
+          Inc(i);
+      end;
+      Inc(i);
+    end;
+    Result := (i <= Length(AXml)) and (AXml[i - 1] = '/');
+    Inc(i);
+  end;
+
+begin
+  if Pos(#0, AXml) > 0 then
+    Exit(True);
+  Depth := 0;
+  i := 1;
+  while i <= Length(AXml) do
+    if AXml[i] <> '<' then
+      Inc(i)
+    else if At('<!--') then
+      SkipPast('-->')
+    else if At('<![CDATA[') then
+      SkipPast(']]>')
+    else if At('<?') then
+      SkipPast('?>')
+    else if At('<!') then
+      SkipPast('>')
+    else if At('</') then
+    begin
+      if Depth > 0 then
+        Dec(Depth);
+      SkipPast('>');
+    end
+    else if not SkipTag then
+    begin
+      Inc(Depth);
+      if Depth > MaxNesting then
+        Exit(True);
     end;
   Result := False;
 end;

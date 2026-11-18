@@ -13,7 +13,7 @@ unit gittan.ext.views;
 interface
 
 uses
-  Classes, SysUtils, fpjson;
+  Classes, SysUtils, fpjson, gittan.textfile;
 
 type
   {** How a row or a result reads: plain, fine, worth a look, failed. }
@@ -110,7 +110,7 @@ begin
   AValue := nil;
   AError := '';
   try
-    Data := GetJSON(AJson);
+    Data := GetJSONLimited(AJson);
   except
     AError := 'The extension''s answer could not be read';
     Exit(False);

@@ -6,7 +6,7 @@ A repository can tell Gittan about itself in a folder named `.gittan` at its roo
 | --- | --- | --- |
 | `.gittan/commands.toml` | The repository's commands: buttons on the Commands page and keyboard shortcuts | Yes |
 | `.gittan/commands/*.toml` | More commands, each file a section of its own | Yes |
-| `.gittan/repo.toml` | The kinds of project, the issue tracker, how commit messages are written, the protected branches | No |
+| `.gittan/repo.toml` | The kinds of project, the issue tracker, how commit messages are written, the protected branches | Only the issue expression |
 | `.git/gittan/commands.toml` | Your own commands for this repository, never committed | No |
 
 The Config section at the bottom of the sidebar lists every one of these files, the personal file included, and opens them in the editor. On the Commands page, Edit… or Create… opens a commands file and writes a commented example into it the first time.
@@ -17,7 +17,7 @@ All the files are [TOML](https://toml.io). A file that is not valid TOML gives n
 
 A command file can make a shortcut on your computer run anything. A file that came with a clone could do just that, so the commands in `.gittan/commands.toml` and `.gittan/commands/` stay off, dimmed under a card on the Commands page, until you press Trust Commands. Gittan remembers the exact content you trusted. If any of the files changes, even by one character, or a file is added, it asks again.
 
-`repo.toml` only describes the repository and runs nothing, so it works as soon as it is there. Your personal file lives inside `.git`, which no clone or pull can write to, so it needs no trust either.
+`repo.toml` only describes the repository and runs nothing, so it works as soon as it is there, with one exception: the issue tracker's expression. Gittan runs it on every line of a commit's message, and a badly written expression such as `(a+)+b` can take hours on a line, so a banner offers it and Gittan uses it once you choose Use It. A changed expression asks again. Your personal file lives inside `.git`, which no clone or pull can write to, so it needs no trust either.
 
 ## Commands: .gittan/commands.toml
 

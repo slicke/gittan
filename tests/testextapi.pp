@@ -52,8 +52,10 @@ type
     procedure TestPromiseAfterUnload;
     procedure TestExecWithoutData;
     procedure TestRunInput;
+    procedure TestRunLimits;
     procedure TestStorage;
     procedure TestSettings;
+    procedure TestSettingsTooDeep;
     procedure TestPermissionsShape;
     procedure TestUiNatives;
     procedure TestUiMessage;
@@ -331,10 +333,17 @@ begin
   finally
     Free;
   end;
-  Info := Load('async', 'Promise.all([Gittan.repo.diffAsync("a.txt"), Gittan.repo.diffAsync(),' +
-    'Gittan.repo.blameAsync("a.txt", "HEAD"), Gittan.repo.fileTextAsync("a.txt", "HEAD"),' +
-    'Gittan.repo.fileTextAsync("../outside.txt"), Gittan.repo.blameAsync("nope.txt")])' +
-    '.then(function (r) { globalThis.r = r; globalThis.done = true; });', AllPerms);
+  { One after the other: git on Haiku now and then fails or hangs with
+    several at once ("pthread_join failed", a read back empty). }
+  Info := Load('async', 'var reads = [function () { return Gittan.repo.diffAsync("a.txt"); },' +
+    'function () { return Gittan.repo.diffAsync(); },' +
+    'function () { return Gittan.repo.blameAsync("a.txt", "HEAD"); },' +
+    'function () { return Gittan.repo.fileTextAsync("a.txt", "HEAD"); },' +
+    'function () { return Gittan.repo.fileTextAsync("../outside.txt"); },' +
+    'function () { return Gittan.repo.blameAsync("nope.txt"); }];' +
+    'var r = [];' +
+    'reads.reduce(function (p, f) { return p.then(f).then(function (x) { r.push(x); }); },' +
+    '  Promise.resolve()).then(function () { globalThis.r = r; globalThis.done = true; });', AllPerms);
   WaitFor(Info^.Ctx, 'globalThis.done');
   AssertEquals('the file diff', 'true', EvalIn(Info^.Ctx, 'String(r[0].indexOf("+three") >= 0)'));
   AssertEquals('the whole diff', 'true', EvalIn(Info^.Ctx, 'String(r[1].indexOf("+three") >= 0)'));
@@ -354,17 +363,29 @@ begin
     'globalThis.out = r.ok + ":" + r.stdout.trim(); });' +
     'Gittan.git.run(["nonsense-command"]).then(function (r) { globalThis.bad = r.ok + ":" + (r.stderr.length > 0); });' +
     'Gittan.git.run(["rev-parse", "--verify", "no-such-ref"]).then(function (r) {' +
-    'globalThis.code = r.status; globalThis.codeErr = r.stderr; }, function (e) { globalThis.code = "rejected: " + e; });',
+    'globalThis.code = r.status; globalThis.codeErr = r.stderr; }, function (e) { globalThis.code = "rejected: " + e; });' +
+    'Gittan.git.run(["log", "--output\u0000", "x"]).then(function (r) { globalThis.nul = "ran: " + r.ok; },' +
+    'function (e) { globalThis.nul = "rejected: " + e; });' +
+    'Gittan.git.run(["log", "-n", "1", "--fixed-strings", "--grep=\\u0000"]).then(function (r) { globalThis.text = "ran: " + r.ok; },' +
+    'function (e) { globalThis.text = "rejected: " + e; });',
     AllPerms);
   { Each set at all, not truthy: a status of 0 is a wrong answer to show,
     not a wait that never ends. }
   WaitFor(Info^.Ctx, 'globalThis.out !== undefined && globalThis.bad !== undefined && ' +
-    'globalThis.code !== undefined',
-    'JSON.stringify({out: globalThis.out, bad: globalThis.bad, code: globalThis.code})');
+    'globalThis.code !== undefined && globalThis.nul !== undefined && globalThis.text !== undefined',
+    'JSON.stringify({out: globalThis.out, bad: globalThis.bad, code: globalThis.code, nul: globalThis.nul})');
   AssertEquals('the subject', 'true:first', EvalIn(Info^.Ctx, 'globalThis.out'));
   AssertEquals('a failure', 'false:true', EvalIn(Info^.Ctx, 'globalThis.bad'));
   AssertEquals('git''s own exit status (' + EvalIn(Info^.Ctx, 'String(globalThis.codeErr)') + ')',
     '128', EvalIn(Info^.Ctx, 'String(globalThis.code)'));
+  { A NUL would end the C string: git would get --output, not what was
+    passed. }
+  AssertTrue('a NUL refused: ' + EvalIn(Info^.Ctx, 'globalThis.nul'),
+    Pos('rejected: ', EvalIn(Info^.Ctx, 'globalThis.nul')) = 1);
+  { The text \u0000, a backslash and five characters, is no NUL. As a
+    fixed string: FreeBSD's regcomp refuses \u as an escape it does not
+    know, so git failed there. }
+  AssertEquals('the text of an escape is no NUL', 'ran: true', EvalIn(Info^.Ctx, 'globalThis.text'));
 end;
 
 { exec without data: git.run, exec.run and gh.run run in the shown
@@ -374,10 +395,12 @@ procedure TExtApiTest.TestExecWithoutData;
 var
   Info: PExtContextInfo;
 begin
+  { One after the other: git on Haiku now and then fails or hangs with
+    several at once. }
   Info := Load('execonly', 'Gittan.git.run(["log", "--format=%s", "-n", "1"]).then(function (r) {' +
     'globalThis.out = r.ok + ":" + r.stdout.trim(); globalThis.err = r.status + " " + r.stderr; },' +
-    ' function (e) { globalThis.out = "rejected:" + String(e); });' +
-    'Gittan.exec.run("git", ["rev-parse", "--is-inside-work-tree"]).then(function (r) {' +
+    ' function (e) { globalThis.out = "rejected:" + String(e); }).then(function () {' +
+    'return Gittan.exec.run("git", ["rev-parse", "--is-inside-work-tree"]); }).then(function (r) {' +
     'globalThis.inside = r.stdout.trim(); }, function (e) { globalThis.inside = "rejected:" + String(e); });',
     PermBaseline + [epExec]);
   WaitFor(Info^.Ctx, 'globalThis.out && globalThis.inside');
@@ -415,6 +438,39 @@ begin
   AssertEquals('an input not read', 'true:git version', EvalIn(Info^.Ctx, 'globalThis.unread'));
 end;
 
+{ A program that writes without end, or does not end, is stopped with
+  a reason, past the output cap and the time limit. The two run one
+  after the other, the talkative one with a long time limit: a slow
+  machine (the Haiku CI) did not write 1 MB within the short one. }
+procedure TExtApiTest.TestRunLimits;
+{$IFDEF UNIX}
+var
+  Info: PExtContextInfo;
+begin
+  ExtToolOutputLimit := 1 shl 20;
+  ExtToolTimeLimitMs := 120000;
+  try
+    Info := Load('limits', 'Gittan.exec.run("sh", ["-c", "yes"]).then(function (r) {' +
+      'globalThis.chatty = r.ok + ":" + r.status + ":" + r.stdout.length + ":" + r.stderr; });', AllPerms);
+    WaitFor(Info^.Ctx, 'globalThis.chatty');
+    AssertEquals('the talkative one', 'false:-1:0:The program was stopped, as it wrote more than 1 MB.',
+      EvalIn(Info^.Ctx, 'globalThis.chatty'));
+    ExtToolTimeLimitMs := 1500;
+    EvalIn(Info^.Ctx, 'Gittan.exec.run("sleep", ["30"]).then(function (r) {' +
+      'globalThis.hung = r.ok + ":" + r.status + ":" + r.stderr; }), ""');
+    WaitFor(Info^.Ctx, 'globalThis.hung');
+    AssertEquals('the hung one', 'false:-1:The program was stopped after 1 seconds.',
+      EvalIn(Info^.Ctx, 'globalThis.hung'));
+  finally
+    ExtToolOutputLimit := 32 shl 20;
+    ExtToolTimeLimitMs := 10 * 60 * 1000;
+  end;
+end;
+{$ELSE}
+begin
+end;
+{$ENDIF}
+
 procedure TExtApiTest.TestExecRun;
 var
   Info: PExtContextInfo;
@@ -432,7 +488,8 @@ end;
   the promise threads; one that finishes later (a slow fetch or command)
   found the shutdown flag cleared again and settled its promise on the
   freed context. The task keeps the context's generation and leaves a
-  promise of a context that is gone alone. }
+  promise of a context that is gone alone; the unload now also ends the
+  program, so the task is done within the wait. }
 procedure TExtApiTest.TestPromiseAfterUnload;
 {$IFDEF UNIX}
 var
@@ -459,7 +516,6 @@ begin
   AssertTrue('the command started', FileExists(Marker));
   FEngine.UnloadExtensions;
   AssertEquals('a freed one has none', 0, ExtContextGeneration(Ctx));
-  AssertEquals('still running after the capped wait', 1, ActiveAsyncTaskCount);
   GiveUpAt := GetTickCount64 + 10000;
   while (ActiveAsyncTaskCount > 0) and (GetTickCount64 < GiveUpAt) do
   begin
@@ -528,6 +584,28 @@ begin
   AssertTrue('bool kind', Defs[1].Kind = skBool);
   AssertEquals('note', 'a note', Defs[1].Note);
   AssertEquals('options', 2, Length(Defs[2].Options));
+end;
+
+{ The raw natives stay reachable and take a string past the facade's
+  JSON.stringify; 50 000 levels end a process in fpjson. The JSON is
+  valid, so without the guard the parser goes down all of it and the
+  runner ends here; the natives' own error does not say why. }
+procedure TExtApiTest.TestSettingsTooDeep;
+var
+  Info: PExtContextInfo;
+begin
+  Info := Load('deep', '', AllPerms);
+  AssertEquals('raw native there', 'function', EvalIn(Info^.Ctx, 'typeof Gittan._settingsDefine'));
+  AssertEquals('raw message there', 'function', EvalIn(Info^.Ctx, 'typeof Gittan._message'));
+  { Valid JSON, so its syntax is not what refuses it; the message's
+    nesting beside valid text. }
+  AssertEquals('refused', 'thrown', EvalIn(Info^.Ctx,
+    'try { Gittan._settingsDefine("[".repeat(50000) + "]".repeat(50000)); "taken" } ' +
+    'catch (e) { "thrown" }'));
+  AssertEquals('nothing declared', 0, Length(FEngine.Registry.SettingsOf('deep')));
+  AssertEquals('a message too', 'thrown', EvalIn(Info^.Ctx,
+    'try { Gittan._message(''{"text": "hi", "x": '' + "[".repeat(50000) + "]".repeat(50000) + ' +
+    '''}''); "taken" } catch (e) { "thrown" }'));
 end;
 
 procedure TExtApiTest.TestPermissionsShape;

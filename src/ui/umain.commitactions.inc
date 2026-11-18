@@ -538,9 +538,17 @@ end;
 { A reset to AHash (AShort) with AMode after ResetAsk, from the commit
   menu and the reflog. True when it was done. }
 function TRepoFrame.ResetToAsk(const AHash, AShort: string; AMode: TGittanResetMode): boolean;
+var
+  Head, Branch: string;
 begin
   Result := False;
-  if RepoBusy or not ResetAsk(AHash, AShort, AMode) then
+  if RepoBusy then
+    Exit;
+  Head := FRepo.CommitId('HEAD');
+  Branch := FRepo.Branch;
+  { The question said what moves and what is kept; a branch moved or
+    switched meanwhile would lose other commits than those. }
+  if not ResetAsk(AHash, AShort, AMode) or MovedWhileAsked(Head, Branch, rsCaResetMoved) then
     Exit;
   StopWatcher;
   try
@@ -636,7 +644,8 @@ begin
 end;
 
 { Shows AFile selected in Finder, Explorer or, where neither is, its
-  folder in the file manager. }
+  folder in the file manager: Tracker through open on Haiku, which has
+  no xdg-open. }
 procedure TRepoFrame.RevealFile(const AFile: string);
 begin
   {$IFDEF DARWIN}
@@ -645,7 +654,11 @@ begin
   {$IFDEF WINDOWS}
   RunDetached('explorer.exe', ['/select,' + AFile]);
   {$ELSE}
+  {$IFDEF HAIKU}
+  RunDetached('/bin/open', [ExtractFileDir(AFile)]);
+  {$ELSE}
   RunDetached('xdg-open', [ExtractFileDir(AFile)]);
+  {$ENDIF}
   {$ENDIF}
   {$ENDIF}
 end;

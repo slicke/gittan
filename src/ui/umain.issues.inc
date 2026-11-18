@@ -8,7 +8,9 @@
   a message refers to one. The snapshot reads them (IssueTrackerIn) and
   ApplySnapshot hands them to the summary (UpdateIssueTracker), or,
   when the config names none, the [issues] of .gittan/repo.toml
-  (EffectiveIssueTracker); without
+  (EffectiveIssueTracker) once its expression is trusted (OfferRepoIssues:
+  it runs on every line of the card, and TRegExpr has no step limit, so
+  a clone's (a+)+b could hang Gittan); without
   a tracker a forge's issues are still linked as #<number>
   (DefaultIssueRegex), opened on the forge. Repository > Issue Tracker...
   asks for the address and the expression (one, or one for the
@@ -23,12 +25,46 @@
 function TRepoFrame.EffectiveIssueTracker: TGittanIssueTracker;
 begin
   Result := FIssueTracker;
-  if IssueTrackerEmpty(Result) and not IssueTrackerEmpty(FRepoConfig.Issues) then
+  if IssueTrackerEmpty(Result) and not IssueTrackerEmpty(FRepoConfig.Issues) and
+    App.Settings.IssueRegexTrusted(FRepo.Root, FRepoConfig.Issues.LogRegex) then
   begin
     Result := FRepoConfig.Issues;
     if Trim(FIssueTracker.Url) <> '' then
       Result.Url := FIssueTracker.Url;
   end;
+end;
+
+{ When git config names no tracker and repo.toml's expression is not
+  trusted yet, a banner offers it, once per root and expression. It
+  stays until answered, as it is not offered again, and an earlier
+  offer goes: its Use It would trust the expression of now, which it
+  did not offer. }
+procedure TRepoFrame.OfferRepoIssues;
+var
+  Key: string;
+begin
+  if (FRepo.Root = '') or not IssueTrackerEmpty(FIssueTracker) or
+    IssueTrackerEmpty(FRepoConfig.Issues) or
+    App.Settings.IssueRegexTrusted(FRepo.Root, FRepoConfig.Issues.LogRegex) then
+    Exit;
+  Key := FRepo.Root + #0 + FRepoConfig.Issues.LogRegex;
+  if Key = FIssuesOffered then
+    Exit;
+  FIssuesOffered := Key;
+  FBanner.CloseAction(@RepoIssuesTrustClick);
+  FBanner.AddAction(rsRepoIssuesUntrusted, rsRepoIssuesUntrustedDetail, bkInfo,
+    0, rsRepoIssuesUse, @RepoIssuesTrustClick);
+end;
+
+{ Trusts the expression the banner was about, if it is still the
+  file's. }
+procedure TRepoFrame.RepoIssuesTrustClick(Sender: TObject);
+begin
+  if (FRepo.Root = '') or (FIssuesOffered <> FRepo.Root + #0 + FRepoConfig.Issues.LogRegex) then
+    Exit;
+  App.Settings.TrustIssueRegex(FRepo.Root, FRepoConfig.Issues.LogRegex);
+  App.Settings.Save;
+  UpdateIssueTracker;
 end;
 
 procedure TRepoFrame.UpdateIssueTracker;
@@ -102,7 +138,8 @@ begin
   { The tracker repo.toml names stays when these are emptied: the note
     says so, rather than the fields' promise to take it out. }
   Note := rsIssueTrackerNote;
-  if not IssueTrackerEmpty(FRepoConfig.Issues) then
+  if not IssueTrackerEmpty(FRepoConfig.Issues) and
+    App.Settings.IssueRegexTrusted(FRepo.Root, FRepoConfig.Issues.LogRegex) then
     if FRepoConfig.Issues.Url <> '' then
       Note := Note + Format(rsIssueTrackerRepoNote, [FRepoConfig.Issues.Url])
     else

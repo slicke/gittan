@@ -21,7 +21,7 @@ begin
       P.Parameters.Add(S);
     P.Options := [poNoConsole];
     try
-      P.Execute;
+      SpawnProcess(P);
     except
       { The command is missing; nothing else to do. }
     end;
@@ -625,6 +625,10 @@ begin
         App.Settings.ClearExtPerm(V.ExtResetPerms[i]);
         ExtChanged := True;
       end;
+      { To disk at once, not at the window's close: an extension turned
+        off or its permissions taken back holds for a Gittan started
+        meanwhile, and Save merges with what another one wrote. }
+      App.Settings.Save;
       if ExtChanged then
         App.Extensions.Reload;
     end
@@ -1573,11 +1577,23 @@ begin
   ShowBranchList(blSwitch, AScreenRect);
 end;
 
+{ Whether ABranch is checked out in one of ATrees. }
+function BranchInWorktree(const ATrees: TGittanWorktrees; const ABranch: string): boolean;
+var
+  i: integer;
+begin
+  for i := 0 to High(ATrees) do
+    if ATrees[i].Branch = ABranch then
+      Exit(True);
+  Result := False;
+end;
+
 procedure TRepoFrame.ShowBranchList(AMode: TGittanBranchListMode; const AScreenRect: TRect);
 var
-  Local, Remote, Gone: TStringList;
-  i, Slash: integer;
-  Short, Detail: string;
+  Local, Remote, Gone, Remotes: TStringList;
+  Trees: TGittanWorktrees;
+  i: integer;
+  Short, Detail, RemoteName, TreesError: string;
   HasRemoteHeader: boolean;
 begin
   if FRepo.Root = '' then
@@ -1587,6 +1603,7 @@ begin
   Local := TStringList.Create;
   Remote := TStringList.Create;
   Gone := TStringList.Create;
+  Remotes := TStringList.Create;
   try
     if not FRepo.Branches(Local, Remote) then
     begin
@@ -1594,6 +1611,7 @@ begin
       Exit;
     end;
     FRepo.GoneBranches(Gone);
+    FRepo.Remotes(Remotes);
     { What the remotes said, which a stale remote-tracking ref hides
       from git. }
     for i := 0 to FGoneBranches.Count - 1 do
@@ -1603,8 +1621,13 @@ begin
     FBranchNames.Clear;
     FBranchRefs.Clear;
     FGoneToDelete.Clear;
+    { Nor one checked out in another worktree, which git will not
+      delete; its row still says its upstream is gone. }
+    if not ListWorktrees(FRepo.Root, Trees, TreesError) then
+      Trees := nil;
     for i := 0 to Local.Count - 1 do
-      if (Gone.IndexOf(Local[i]) >= 0) and (Local[i] <> FBranch) then
+      if (Gone.IndexOf(Local[i]) >= 0) and (Local[i] <> FBranch) and
+        not BranchInWorktree(Trees, Local[i]) then
         FGoneToDelete.Add(Local[i]);
     if (AMode = blSwitch) and (FOperation = '') then
     begin
@@ -1642,9 +1665,10 @@ begin
     end;
     for i := 0 to Remote.Count - 1 do
     begin
-      Slash := Pos('/', Remote[i]);
-      Short := Copy(Remote[i], Slash + 1, MaxInt);
-      if (Slash = 0) or (Local.IndexOf(Short) >= 0) then
+      { By the remotes, so one with a slash in its name gives the right
+        branch name. }
+      Short := RemoteRefBranch(Remote[i], Remotes, RemoteName);
+      if (Short = '') or (Local.IndexOf(Short) >= 0) then
         Continue;
       if not HasRemoteHeader then
       begin
@@ -1661,12 +1685,14 @@ begin
     Local.Free;
     Remote.Free;
     Gone.Free;
+    Remotes.Free;
   end;
   FBranchPopup.Popup(AScreenRect);
 end;
 
 { A remote row goes by its remote-tracking ref for anything but a
-  switch, which makes the local branch from it. }
+  switch, which makes the local branch from it and tracks that very
+  ref, whichever other remote has a branch of the same name. }
 procedure TRepoFrame.BranchPopupPick(Sender: TObject; AIndex: integer);
 var
   Ref: string;
@@ -1686,7 +1712,7 @@ begin
     blBranchSince: CompareSince(Ref);
     blCurrentSince: CompareCurrentSince(Ref);
     else
-      SwitchBranch(FBranchNames[AIndex]);
+      SwitchBranch(FBranchNames[AIndex], False, FBranchRefs[AIndex]);
   end;
 end;
 
@@ -1697,8 +1723,10 @@ end;
   into the branch's version (`git switch --merge`, which may leave
   conflicts); any other refusal is shown with git's whole message.
   With ADetach ABranch is a tag (or any commit) and HEAD is left on it
-  without a branch. }
-procedure TRepoFrame.SwitchBranch(const ABranch: string; ADetach: boolean);
+  without a branch; with ATrack, a remote-tracking branch, ABranch is
+  made from it. }
+procedure TRepoFrame.SwitchBranch(const ABranch: string; ADetach: boolean;
+  const ATrack: string);
 var
   Files: TStringList;
   Shown, Switch: string;
@@ -1723,7 +1751,7 @@ begin
   try
     Files := TStringList.Create;
     try
-      if FRepo.Switch(ABranch, False, ADetach) then
+      if FRepo.Switch(ABranch, False, ADetach, ATrack) then
         Switched(Format(Switch, [ABranch]))
       else if SwitchBlockedFiles(FRepo.Error, Files) then
       begin
@@ -1738,7 +1766,7 @@ begin
           mrYes:
             if not FRepo.Stash(Format(rsStashMessage, [ABranch])) then
               BannerError(rsStashFailed, FRepo.Error)
-            else if FRepo.Switch(ABranch, False, ADetach) then
+            else if FRepo.Switch(ABranch, False, ADetach, ATrack) then
               Switched(Format(rsStashedSwitched, [ABranch]))
             else
             begin
@@ -1747,7 +1775,7 @@ begin
                 LineEnding + rsStashKept);
             end;
           mrNo:
-            if FRepo.Switch(ABranch, True, ADetach) then
+            if FRepo.Switch(ABranch, True, ADetach, ATrack) then
               Switched(Format(rsSwitchedAlong, [ABranch]))
             else
               BannerError(Format(rsSwitchFailed, [ABranch]), FRepo.Error);
@@ -1779,15 +1807,7 @@ procedure TRepoFrame.MenuRevealClick(Sender: TObject);
 begin
   if FContextPath = '' then
     Exit;
-  {$IFDEF DARWIN}
-  RunDetached('open', ['-R', ContextFullPath]);
-  {$ELSE}
-  {$IFDEF WINDOWS}
-  RunDetached('explorer.exe', ['/select,' + ContextFullPath]);
-  {$ELSE}
-  RunDetached('xdg-open', [ExtractFileDir(ContextFullPath)]);
-  {$ENDIF}
-  {$ENDIF}
+  RevealFile(ContextFullPath);
 end;
 
 { ---------------------------------------------------------------------------
@@ -2137,8 +2157,10 @@ begin
     FGraph.Tip := ''
   else
     FGraph.Tip := Format(rsGraphDragTip, [FBranch]);
+  { Read to the search's limit already, which GraphMore would read
+    again. }
   FGraph.Popup(Commits, Length(Commits) >= Limit, FBranch, FAhead, FBehind,
-    FHasUpstream, Filter, Keep);
+    FHasUpstream, Filter, Keep, Limit >= GraphSearchLimit);
   if FGraph.Visible then
   begin
     FSideNav.Selected := navGraph;
@@ -2722,7 +2744,11 @@ end;
   xfce4-terminal, and -e for the rest (x-terminal-emulator takes -e as
   xterm does, whichever terminal it is). }
 procedure TRepoFrame.OpenTerminalIn(const ARoot, ACommand: string);
-{$IF not defined(DARWIN) and not defined(WINDOWS)}
+{$IFDEF HAIKU}
+const
+  HaikuTerminal = '/boot/system/apps/Terminal';
+{$ENDIF}
+{$IF not defined(DARWIN) and not defined(WINDOWS) and not defined(HAIKU)}
 const
   Terminals: array[0..4] of string = ('x-terminal-emulator', 'gnome-terminal',
     'konsole', 'xfce4-terminal', 'xterm');
@@ -2771,6 +2797,14 @@ begin
   else
     RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe', '/K', ACommand], ARoot);
   {$ELSE}
+  {$IFDEF HAIKU}
+  { Haiku's own Terminal, which is not on PATH and takes the folder with
+    -w and the command after it. }
+  if ACommand = '' then
+    RunDetached(HaikuTerminal, ['-w', ARoot], ARoot)
+  else
+    RunDetached(HaikuTerminal, ['-w', ARoot, 'sh', '-c', ShellLineIn(ARoot, ACommand)], ARoot);
+  {$ELSE}
   for T in Terminals do
     if FindDefaultExecutablePath(T) <> '' then
     begin
@@ -2787,6 +2821,7 @@ begin
           ARoot);
       Exit;
     end;
+  {$ENDIF}
   {$ENDIF}
   {$ENDIF}
 end;
@@ -2905,14 +2940,15 @@ begin
   SetBase(TMenuItem(Sender).Hint, TMenuItem(Sender).Tag = 1);
 end;
 
-{ A commit git can find; a range (a..b, a...b) is left to SetBase. }
+{ A commit git can find, or a range (a..b, a...b) of them; nothing
+  that starts with a dash, which git would take for an option. }
 function TRepoFrame.CheckCompareRef(const AValues: array of string): string;
 var
   Ref: string;
 begin
   Result := '';
   Ref := Trim(AValues[0]);
-  if (Pos('..', Ref) = 0) and not FRepo.HasCommit(Ref) then
+  if not FRepo.IsCompareRef(Ref) then
     Result := Format(rsAskNoSuchRef, [Ref]);
 end;
 

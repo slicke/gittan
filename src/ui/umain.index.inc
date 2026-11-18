@@ -301,6 +301,24 @@ begin
   end;
 end;
 
+{ The paths of the tree's file rows, in tree order; the caller frees
+  the list. Taken before FileSymbols is called on them, which pumps
+  messages while a file loads or parses, where the tree may be filled
+  again (the filter, a refresh) and a node held across it freed. }
+function TRepoFrame.TreeFilePaths: TStringList;
+var
+  Node: TTreeNode;
+begin
+  Result := TStringList.Create;
+  Node := FileTree.Items.GetFirstNode;
+  while Node <> nil do
+  begin
+    if Node.Data <> nil then
+      Result.Add(Node.GetTextPath);
+    Node := Node.GetNext;
+  end;
+end;
+
 { The definition of AWord in the repository outside the shown file: the
   changed files first, in tree order, parsed on demand, then the rest
   of the index as far as it has got. }
@@ -308,9 +326,8 @@ function TRepoFrame.FindInRepo(const AWord: string; out APath: string;
   out ASymbol: TGittanSymbol): boolean;
 var
   Shown, Path: string;
-  Node: TTreeNode;
   Symbols: TGittanSymbols;
-  Seen: TStringList;
+  Seen, Paths: TStringList;
   E: TGittanIndexEntry;
   i, j: integer;
 begin
@@ -319,33 +336,27 @@ begin
   if FRepo.Root = '' then
     Exit;
   Shown := ShownRelPath;
+  Paths := nil;
   Seen := TStringList.Create;
   try
     Seen.CaseSensitive := True;
     Seen.Sorted := True;
     Seen.Duplicates := dupIgnore;
     Seen.Add(Shown);
-    Node := FileTree.Items.GetFirstNode;
-    while Node <> nil do
-    begin
-      if Node.Data <> nil then
+    Paths := TreeFilePaths;
+    for Path in Paths do
+      if Seen.IndexOf(Path) < 0 then
       begin
-        Path := Node.GetTextPath;
-        if Seen.IndexOf(Path) < 0 then
+        Seen.Add(Path);
+        Symbols := FileSymbols(Path);
+        j := BestSymbol(Symbols, AWord, -1);
+        if j >= 0 then
         begin
-          Seen.Add(Path);
-          Symbols := FileSymbols(Path);
-          j := BestSymbol(Symbols, AWord, -1);
-          if j >= 0 then
-          begin
-            APath := Path;
-            ASymbol := Symbols[j];
-            Exit(True);
-          end;
+          APath := Path;
+          ASymbol := Symbols[j];
+          Exit(True);
         end;
       end;
-      Node := Node.GetNext;
-    end;
     for i := 0 to FIndex.Count - 1 do
     begin
       E := FIndex[i];
@@ -360,6 +371,7 @@ begin
       end;
     end;
   finally
+    Paths.Free;
     Seen.Free;
   end;
 end;

@@ -141,6 +141,7 @@ end;
 procedure TRepoFrame.IncludeBlockAt(ABlock: integer);
 var
   Pairs: TGittanKeepArray;
+  Blocks: TGittanKeepArrays;
   b, k, i, Line: integer;
   Drop: array of boolean;
 begin
@@ -148,10 +149,11 @@ begin
   if not CommitChosen(i) then
   begin
     FLeftOut.Clear(FCurrentPath);
+    Blocks := BlockPairsOf(FChangeLines, FBlockStarts);
     for b := 0 to High(FBlockStarts) do
       if b <> ABlock then
       begin
-        Pairs := BlockPairs(FChangeLines, FBlockStarts[b]);
+        Pairs := Blocks[b];
         for k := 0 to High(Pairs) do
           FLeftOut.Add(FCurrentPath, Pairs[k]);
       end;
@@ -292,6 +294,7 @@ function TRepoFrame.SelectedPairs(out APairs: TGittanKeepArray;
 var
   Sel: array of boolean;
   Pairs: TGittanKeepArray;
+  Blocks: TGittanKeepArrays;
   i, r, X1, Y1, X2, Y2, b, k, s, Old, OldIdx, NewIdx: integer;
   HasSel, Hit, AllOut: boolean;
 
@@ -340,10 +343,11 @@ begin
   if not Hit then
     Exit;
   AllOut := True;
+  Blocks := BlockPairsOf(FChangeLines, FBlockStarts);
   for b := 0 to High(FBlockStarts) do
   begin
     s := FBlockStarts[b];
-    Pairs := BlockPairs(FChangeLines, s);
+    Pairs := Blocks[b];
     Old := 0;
     while (s + Old < FChangeLines.Count) and (FChangeLines[s + Old][1] = '-') do
       Inc(Old);
@@ -374,6 +378,7 @@ end;
 procedure TRepoFrame.ToggleLeaveOutSelection;
 var
   Pairs, All, Items: TGittanKeepArray;
+  Blocks: TGittanKeepArrays;
   Including, Picked: boolean;
   b, k, j, i: integer;
 
@@ -392,9 +397,10 @@ begin
   if Including and not CommitChosen(i) then
   begin
     FLeftOut.Clear(FCurrentPath);
+    Blocks := BlockPairsOf(FChangeLines, FBlockStarts);
     for b := 0 to High(FBlockStarts) do
     begin
-      All := BlockPairs(FChangeLines, FBlockStarts[b]);
+      All := Blocks[b];
       for k := 0 to High(All) do
       begin
         Picked := False;

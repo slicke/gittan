@@ -70,7 +70,7 @@ function ParseCargoInfo(const AText: string): TCargoInfo;
 implementation
 
 uses
-  gittan.textfile;
+  gittan.textfile, gittan.git;
 
 resourcestring
   rsCargoLockUntracked = 'Cargo.lock is not committed. A crate with a binary commits it so ' +
@@ -363,7 +363,11 @@ begin
     AddFact(Facts, rsPackage, Info.Name, psStrong);
   AddFact(Facts, rsEdition, Info.Edition);
   AddFact(Facts, rsRustVersion, Info.RustVersion);
-  AddFact(Facts, rsRepository, Info.Repository, psLink, Info.Repository);
+  { A link only to a web page: the value is the repository's to set. }
+  if IsWebUrl(Info.Repository) then
+    AddFact(Facts, rsRepository, Info.Repository, psLink, Info.Repository)
+  else
+    AddFact(Facts, rsRepository, Info.Repository);
   AddFact(Facts, rsMembers, string.Join(', ', Info.Members));
   AddBlock(Result, Facts);
   { The binaries, each with a button that runs it. }

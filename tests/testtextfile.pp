@@ -8,8 +8,8 @@ unit testtextfile;
 interface
 
 uses
-  Classes, SysUtils, {$IFDEF UNIX}BaseUnix, {$ENDIF}fpcunit, testregistry, testhelpers,
-  gittan.textfile;
+  Classes, SysUtils, StrUtils, {$IFDEF UNIX}BaseUnix, {$ENDIF}fpcunit, testregistry,
+  fpjson, testhelpers, gittan.textfile;
 
 type
   TTextFileTest = class(TTestCase)
@@ -20,8 +20,10 @@ type
     procedure TestNextLine;
     procedure TestUnescapeC;
     procedure TestJsonTooDeep;
+    procedure TestGetJSONLimited;
     procedure TestUtf8Clean;
     procedure TestTomlTooDeep;
+    procedure TestXmlTooDeep;
     procedure TestWriteThroughLink;
     procedure TestTempFileNamePrivate;
   end;
@@ -160,6 +162,14 @@ begin
   AssertTrue('an escaped quote does not end it',
     JsonTooDeep('["\"", ' + StringOfChar('[', 500)));
   AssertFalse('closers do not go below none', JsonTooDeep(StringOfChar(']', 500) + '[1]'));
+  { GetJSON reads a string in single quotes too, where a double quote
+    is a character and hides nothing. }
+  AssertTrue('a double quote in a single-quoted string',
+    JsonTooDeep('[''"'', ' + StringOfChar('[', 500)));
+  AssertFalse('brackets in a single-quoted string',
+    JsonTooDeep('[''' + StringOfChar('[', 500) + ''']'));
+  AssertTrue('a single quote in a string',
+    JsonTooDeep('["''", ' + StringOfChar('[', 500)));
 end;
 
 procedure TTextFileTest.TestTomlTooDeep;
@@ -180,6 +190,67 @@ begin
   AssertTrue('quotes before the closing three', TomlTooDeep('x = """a""""'#10'y = ' + Deep));
   AssertTrue('a quote in a comment', TomlTooDeep('# "'#10'y = ' + Deep));
   AssertTrue('a string not closed ends at its line', TomlTooDeep('x = "a'#10'y = ' + Deep));
+  { A dotted key or header makes a table of each part. }
+  AssertFalse('a dotted key at the limit', TomlTooDeep(DupeString('a.', MaxNesting) + 'c = 1'));
+  AssertTrue('a dotted key', TomlTooDeep(DupeString('a.', MaxNesting + 1) + 'c = 1'));
+  AssertTrue(TomlTooDeep(DupeString('a.', 45000) + 'c = 1'));
+  AssertTrue('a header', TomlTooDeep('[' + DupeString('a.', 45000) + 'c]'#10'x = 1'));
+  AssertTrue('quoted parts', TomlTooDeep(DupeString('"a".', 45000) + 'c = 1'));
+  AssertTrue('dots through inline tables',
+    TomlTooDeep('x = ' + DupeString('{' + DupeString('a.', 99) + 'a = ', 3) + '1}}}'));
+  AssertFalse('lines start again', TomlTooDeep(DupeString(DupeString('a.', 150) + 'c = 1'#10, 3)));
+  AssertFalse('floats in a long array',
+    TomlTooDeep('x = [' + DupeString('1.5, ', 1000) + '2.5]'));
+  AssertFalse('dots in a string key', TomlTooDeep('"' + DupeString('a.', 500) + '" = 1'));
+end;
+
+procedure TTextFileTest.TestGetJSONLimited;
+var
+  Data: TJSONData;
+  Raised: boolean;
+begin
+  Data := GetJSONLimited('{"a": [1, 2]}');
+  try
+    AssertEquals(2, TJSONObject(Data).Arrays['a'].Count);
+  finally
+    Data.Free;
+  end;
+  Raised := False;
+  try
+    GetJSONLimited(StringOfChar('[', 50000)).Free;
+  except
+    on E: EJSON do
+      Raised := Pos('Nested deeper', E.Message) > 0;
+  end;
+  AssertTrue('too deep', Raised);
+end;
+
+procedure TTextFileTest.TestXmlTooDeep;
+var
+  Deep, Wide: string;
+  i: integer;
+begin
+  Deep := DupeString('<a>', MaxNesting + 1);
+  AssertFalse(XmlTooDeep('<?xml version="1.0"?><CONFIG><A><B Value="1"/></A></CONFIG>'));
+  AssertFalse('at the limit', XmlTooDeep(DupeString('<a>', MaxNesting) +
+    DupeString('</a>', MaxNesting)));
+  AssertTrue('one deeper', XmlTooDeep(Deep));
+  AssertTrue(XmlTooDeep(DupeString('<a x="1">', 30000)));
+  AssertFalse('empty elements', XmlTooDeep('<r>' + DupeString('<a/>', 500) + '</r>'));
+  AssertFalse('closed ones', XmlTooDeep(DupeString('<a></a>', 500)));
+  AssertFalse('in a comment', XmlTooDeep('<r><!-- ' + Deep + ' --></r>'));
+  AssertFalse('in CDATA', XmlTooDeep('<r><![CDATA[' + Deep + ']]></r>'));
+  AssertFalse('in an instruction', XmlTooDeep('<?p ' + Deep + '?><r/>'));
+  { What would hide the nesting if the scan took these the wrong way. }
+  AssertTrue('a > in a value', XmlTooDeep('<r v="a>b/">' + Deep));
+  AssertTrue('/> in a value', XmlTooDeep(DupeString('<a v="/>">', MaxNesting + 1)));
+  { UTF-16, where U+0122 has a byte that reads as a quote and would hide
+    the elements after it from a scan of bytes. }
+  Wide := #$FF#$FE;
+  for i := 1 to Length(Deep) do
+    Wide := Wide + Deep[i] + #0;
+  AssertTrue('UTF-16', XmlTooDeep(#$FF#$FE'<'#0'r'#0' '#0'v'#0'='#0'"'#0#$22#$01'"'#0'>'#0 +
+    Copy(Wide, 3, MaxInt)));
 end;
 
 procedure TTextFileTest.TestUnescapeC;

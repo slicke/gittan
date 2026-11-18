@@ -171,7 +171,9 @@ begin
   FBlameCache.Clear;
 end;
 
-procedure TRepoFrame.StopBlame;
+{ Gives up the jobs StopBlame waits for, without waiting: their done
+  events no longer come. }
+procedure TRepoFrame.AbandonBlameJobs;
 begin
   ClearBlameCache;
   AbandonHistoryJob;
@@ -185,6 +187,11 @@ begin
     FTrustJob := nil;
   end;
   AbandonRepoInfoJob;
+end;
+
+procedure TRepoFrame.StopBlame;
+begin
+  AbandonBlameJobs;
   FreeAndNil(FHistory);
   FreeAndNil(FTimelapse);
   { Waits for the jobs given up. }

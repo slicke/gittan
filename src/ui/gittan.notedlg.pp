@@ -55,32 +55,32 @@ begin
   Caption := ATitle;
   BorderStyle := bsSizeable;
   Position := poMainFormCenter;
-  Width := Scale96ToScreen(520);
-  Height := Scale96ToScreen(360);
-  Constraints.MinWidth := Scale96ToScreen(360);
-  Constraints.MinHeight := Scale96ToScreen(240);
+  Width := Scale96ToForm(520);
+  Height := Scale96ToForm(360);
+  Constraints.MinWidth := Scale96ToForm(360);
+  Constraints.MinHeight := Scale96ToForm(240);
 
   Lbl := TLabel.Create(Self);
   Lbl.WordWrap := True;
   Lbl.Align := alTop;
   Lbl.Caption := rsNoteHint;
-  Lbl.BorderSpacing.Around := Scale96ToScreen(Margin);
+  Lbl.BorderSpacing.Around := Scale96ToForm(Margin);
   Lbl.Parent := Self;
 
   Row := TPanel.Create(Self);
   Row.BevelOuter := bvNone;
   Row.AutoSize := True;
   Row.Align := alBottom;
-  Row.BorderSpacing.Left := Scale96ToScreen(Margin);
-  Row.BorderSpacing.Right := Scale96ToScreen(Margin);
-  Row.BorderSpacing.Bottom := Scale96ToScreen(Margin);
+  Row.BorderSpacing.Left := Scale96ToForm(Margin);
+  Row.BorderSpacing.Right := Scale96ToForm(Margin);
+  Row.BorderSpacing.Bottom := Scale96ToForm(Margin);
   Row.Parent := Self;
   FOkButton := TButton.Create(Self);
   FOkButton.Caption := rsNoteSave;
   FOkButton.ModalResult := mrOK;
   FOkButton.Default := True;
   FOkButton.AutoSize := True;
-  FOkButton.Constraints.MinWidth := Scale96ToScreen(84);
+  FOkButton.Constraints.MinWidth := Scale96ToForm(84);
   FOkButton.Align := alRight;
   FOkButton.Parent := Row;
   Cancel := TButton.Create(Self);
@@ -88,7 +88,7 @@ begin
   Cancel.ModalResult := mrCancel;
   Cancel.Cancel := True;
   Cancel.AutoSize := True;
-  Cancel.Constraints.MinWidth := Scale96ToScreen(84);
+  Cancel.Constraints.MinWidth := Scale96ToForm(84);
   Cancel.Align := alRight;
   Cancel.Parent := Row;
   { The default button on the right on macOS, Cancel on the right
@@ -100,17 +100,17 @@ begin
   FOkButton.Left := 0;
   Cancel.Left := 1000;
   {$ENDIF}
-  Cancel.BorderSpacing.Left := Scale96ToScreen(8);
-  FOkButton.BorderSpacing.Left := Scale96ToScreen(8);
+  Cancel.BorderSpacing.Left := Scale96ToForm(8);
+  FOkButton.BorderSpacing.Left := Scale96ToForm(8);
 
   FMemo := TMemo.Create(Self);
   FMemo.Align := alClient;
   FMemo.ScrollBars := ssAutoVertical;
   FMemo.WantReturns := True;
   FMemo.WantTabs := False;
-  FMemo.BorderSpacing.Left := Scale96ToScreen(Margin);
-  FMemo.BorderSpacing.Right := Scale96ToScreen(Margin);
-  FMemo.BorderSpacing.Bottom := Scale96ToScreen(Margin);
+  FMemo.BorderSpacing.Left := Scale96ToForm(Margin);
+  FMemo.BorderSpacing.Right := Scale96ToForm(Margin);
+  FMemo.BorderSpacing.Bottom := Scale96ToForm(Margin);
   FMemo.OnKeyDown := @MemoKeyDown;
   FMemo.Parent := Self;
 end;

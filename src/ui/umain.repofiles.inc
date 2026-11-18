@@ -401,6 +401,10 @@ begin
   begin
     FileName := FExcludePath;
     Shown := ExcludeShown;
+    { The info folder is the git directory's, and a link there would
+      take the write elsewhere, as a link at the file itself would. }
+    if (FileName <> '') and not ReachedWithoutLink(FRepo.GitDir, ExcludeFile) then
+      FileName := '';
   end
   else
   begin
@@ -524,20 +528,24 @@ end;
   and the header says when the file changed on disk behind it. }
 
 { Whether AFileName, a full name, is one of the repository's own files:
-  the exclude file, or a file under the root that IsRepoFile accepts. }
+  the exclude file or the personal commands file in the git directory,
+  neither a link nor in a folder that is one, or a file under the root
+  that IsRepoFile accepts and that is reached through no link. }
 function TRepoFrame.RepoFileName(const AFileName: string): boolean;
 var
   Root, Rel: string;
 begin
   if (AFileName <> '') and ((AFileName = FExcludePath) or (AFileName = FPersonalPath)) then
-    Exit(True);
+    Exit(not IsLinkPath(AFileName) and not IsLinkPath(ExtractFileDir(AFileName)));
   if FRepo.Root = '' then
     Exit(False);
   Root := IncludeTrailingPathDelimiter(FRepo.Root);
   if Copy(AFileName, 1, Length(Root)) <> Root then
     Exit(False);
-  Rel := Copy(AFileName, Length(Root) + 1, MaxInt);
-  Result := IsRepoFile(StringReplace(Rel, PathDelim, '/', [rfReplaceAll]));
+  Rel := StringReplace(Copy(AFileName, Length(Root) + 1, MaxInt), PathDelim, '/', [rfReplaceAll]);
+  { A committed link (.gitignore -> .git/config) is not edited: a save
+    would write where it points. }
+  Result := IsRepoFile(Rel) and ReachedWithoutLink(FRepo.Root, Rel);
 end;
 
 { Opens the loaded file AFileName to edits. }
@@ -623,6 +631,13 @@ begin
   if FEditPath = '' then
     Exit;
   Shown := ExtractFileName(FEditPath);
+  { Checked again: a pull may have made the file a link since it was
+    opened, and the save would write where it points. }
+  if not RepoFileName(FEditPath) then
+  begin
+    StatusNote(Format(rsSaveFailed, [Shown, rsSaveNotRepoFile]), True);
+    Exit;
+  end;
   try
     Edit.SaveToFile(FEditPath);
   except
@@ -693,14 +708,15 @@ begin
     MergeHeaderAction(AIndex);
     Exit;
   end;
-  if ConflictHeaderAction(AIndex) then
-    Exit;
-  { Download, the one pill of an image or binary file in Git LFS. }
-  if (FView in [gvImage, gvBinary]) and (FLfsSides <> nil) then
+  { Download, of an image or binary file in Git LFS: its own pill, after
+    the conflict's when the file is in conflict. }
+  if (FView in [gvImage, gvBinary]) and (FLfsSides <> nil) and (AIndex = FLfsPill) then
   begin
     StartLfsDownload(FCurrentPath, FLfsSides);
     Exit;
   end;
+  if ConflictHeaderAction(AIndex) then
+    Exit;
   if FView = gvSubmodule then
   begin
     if AIndex = FSubUpdatePill then

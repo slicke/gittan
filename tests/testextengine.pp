@@ -13,7 +13,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, gittan.ext.quickjs, gittan.ext.engine,
-  gittan.ext.host, gittan.ext.registry, gittan.ext.perm, gittan.reviews;
+  gittan.ext.functions, gittan.ext.promise, gittan.ext.host, gittan.ext.registry, gittan.ext.perm, gittan.reviews;
 
 type
 
@@ -31,6 +31,9 @@ type
     ViewForge: string;
     Status, Cleared: string;
     ConfirmAnswer, PermissionAnswer: boolean;
+    { How long Confirm and ShowLog take, as the user would, in
+      milliseconds. }
+    ConfirmDelay: integer;
     PromptAnswer: string;
     SelectAnswer, Changed: integer;
     { What Message answers, and each message as
@@ -39,6 +42,8 @@ type
     Messages: TStringList;
     { Run as a permission is asked, while the real host's dialog is up. }
     OnAsk: procedure of object;
+    { Run as the engine lets the message loop run while it waits. }
+    OnPump: procedure of object;
     constructor Create;
     destructor Destroy; override;
     procedure Alert(const AName, AText: string); override;
@@ -51,6 +56,7 @@ type
     procedure ReportError(const ATitle, ADetail: string); override;
     function AskPermission(const AName, AFile, AAuthor: string;
       const ARequested: TExtPermSet): boolean; override;
+    procedure Pump; override;
     procedure AddCard(const ARoot: string; const ACard: TGittanReviewThread); override;
     procedure ClearCards(const ARoot, AExtId: string); override;
     procedure SetStatus(const ARoot, AText: string; ASeconds: integer); override;
@@ -73,6 +79,8 @@ type
     { The result of a load is the script's last value; an error starts
       with Error:. }
     procedure AssertLoaded(const AMsg, AResult: string);
+    function SlowTask(const ctx: PJSContext; const func: string;
+      const params: JSParameters; out res: JSValueVal): boolean;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -98,6 +106,14 @@ type
     procedure TestNoExceptionLeftPending;
     procedure TestConsoleLinesCut;
     procedure TestDialogTextFromChangingToString;
+    procedure TestWatchdogStopsNativeLoop;
+    procedure TestRunawayChainEnded;
+    procedure TestTimerPumpsCountForChain;
+    procedure TestNestedWaitCountedOnce;
+    procedure TestUnloadWithPromisePending;
+    procedure TestLogGoesToConsole;
+    procedure TestNoExceptionCrossesExtensions;
+    procedure TestTasksCapped;
   end;
 
 implementation
@@ -145,6 +161,8 @@ end;
 function TFakeExtHost.Confirm(const AName, AText: string): boolean;
 begin
   Alerts.Add('confirm:' + AText);
+  if ConfirmDelay > 0 then
+    Sleep(ConfirmDelay);
   Result := ConfirmAnswer;
 end;
 
@@ -183,6 +201,8 @@ end;
 procedure TFakeExtHost.ShowLog(const AName, ATitle, AText: string);
 begin
   Logs.Add(AName + ' · ' + ATitle + ': ' + AText);
+  if ConfirmDelay > 0 then
+    Sleep(ConfirmDelay);
 end;
 
 procedure TFakeExtHost.ReportError(const ATitle, ADetail: string);
@@ -197,6 +217,13 @@ begin
   if Assigned(OnAsk) then
     OnAsk();
   Result := PermissionAnswer;
+end;
+
+procedure TFakeExtHost.Pump;
+begin
+  if Assigned(OnPump) then
+    OnPump();
+  inherited Pump;
 end;
 
 procedure TFakeExtHost.AddCard(const ARoot: string; const ACard: TGittanReviewThread);
@@ -427,10 +454,27 @@ var
 begin
   AssertLoaded('loads', LoadResult('broken',
     'Gittan.on("commit.before", function () { throw new Error("oops"); });'));
-  FEngine.ClearOutput;
+  FHost.Errors.Clear;
   AssertTrue('a throw does not cancel', FEngine.Fire('commit.before', '{}', Msg));
-  AssertTrue('the throw is in the output: ' + string(FEngine.Output),
-    Pos('oops', string(FEngine.Output)) > 0);
+  AssertEquals('reported', 1, FHost.Errors.Count);
+  AssertTrue('the throw is reported under the extension''s name: ' + FHost.Errors[0],
+    (Pos('broken', FHost.Errors[0]) > 0) and (Pos('oops', FHost.Errors[0]) > 0));
+end;
+
+{ Gittan.log goes to the console console.pop shows, which keeps its
+  newest lines only, however much is logged. }
+procedure TExtEngineTest.TestLogGoesToConsole;
+var
+  Info: PExtContextInfo;
+begin
+  Info := Load('logger', 'Gittan.log("first", 2);' +
+    'for (var i = 0; i < 5000; i++) Gittan.log("x".repeat(1000));' +
+    'Gittan.log("last"); console.pop();', PermBaseline);
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  AssertEquals('one log shown', 1, FHost.Logs.Count);
+  AssertTrue('the newest kept', Pos('[logger] last', FHost.Logs[0]) > 0);
+  AssertEquals('the oldest gone', 0, Pos('first2', FHost.Logs[0]));
+  AssertTrue('capped', Length(FHost.Logs[0]) < 3000000);
 end;
 
 procedure TExtEngineTest.TestOff;
@@ -511,6 +555,238 @@ begin
   AssertEquals('confirm has the second', 'confirm:' + StringOfChar('x', 32),
     FHost.Alerts[1]);
   AssertEquals('toString called once each', '2', EvalIn(Info^.Ctx, 'String(globalThis.n)'));
+end;
+
+{ A loop whose body sits in a native (a split of a long text) is polled
+  seldom, with gaps far over half a second between polls: the watchdog
+  still stops it once its budget, counted from the load, is spent. The
+  loop ends by itself after 30 s, so a broken watchdog fails the test
+  rather than hang it. A dialog's wait is not the script's. }
+procedure TExtEngineTest.TestWatchdogStopsNativeLoop;
+var
+  Res: string;
+  T: QWord;
+begin
+  ExtWatchdogMs := 1000;
+  try
+    T := GetTickCount64;
+    Res := LoadResult('splitloop',
+      'var text = "line of text\n".repeat(8000), end = Date.now() + 30000;' +
+      'while (Date.now() < end) text.split("\n"); "ran to the end";');
+    T := GetTickCount64 - T;
+    AssertTrue('stopped: ' + Res, Pos('Error:', Res) = 1);
+    AssertTrue('in its budget, not 30 s: ' + IntToStr(T), T < 15000);
+    FHost.ConfirmDelay := 1500;
+    Res := LoadResult('asks',
+      'function busy(ms) { var e = Date.now() + ms; while (Date.now() < e); }' +
+      'busy(300); Gittan.confirm("go on?"); busy(300); "done";');
+    AssertEquals('the wait for the user is not counted', 'done', Res);
+    Res := LoadResult('logs',
+      'function busy(ms) { var e = Date.now() + ms; while (Date.now() < e); }' +
+      'busy(300); console.log("read me"); busy(300); "done";');
+    AssertEquals('nor the time the log is read', 'done', Res);
+  finally
+    FHost.ConfirmDelay := 0;
+    ExtWatchdogMs := 10000;
+  end;
+end;
+
+{ A reaction that queues the next and returns runs each job well inside
+  the watchdog's budget and never empties the queue, so no rejection was
+  reported again: the timer's pumps that leave jobs queued count up, and
+  past the budget the chain is stopped. A finite one runs to its end. }
+procedure TExtEngineTest.TestRunawayChainEnded;
+var
+  Fin, Chain: PExtContextInfo;
+  GiveUpAt: QWord;
+  Drained: boolean;
+  Runs: string;
+begin
+  ExtWatchdogMs := 300;
+  try
+    Fin := Load('finite', 'globalThis.left = 20000; function step() {' +
+      ' if (--globalThis.left > 0) Promise.resolve().then(step); } step(); "loaded";', PermBaseline);
+    AssertLoaded('finite', string(FEngine.ExtExecuteFile(Fin)));
+    GiveUpAt := GetTickCount64 + 5000;
+    while (EvalIn(Fin^.Ctx, 'String(globalThis.left)') <> '0') and (GetTickCount64 < GiveUpAt) do
+      FEngine.OnJSTimer(nil);
+    AssertEquals('a finite chain runs to its end', '0', EvalIn(Fin^.Ctx, 'String(globalThis.left)'));
+    Chain := Load('chain', 'globalThis.runs = 0; function again() { globalThis.runs++;' +
+      ' Promise.resolve().then(again); } again(); "loaded";', PermBaseline);
+    AssertLoaded('chain', string(FEngine.ExtExecuteFile(Chain)));
+    Drained := False;
+    GiveUpAt := GetTickCount64 + 5000;
+    while not Drained and (GetTickCount64 < GiveUpAt) do
+    begin
+      FEngine.OnJSTimer(nil);
+      Drained := FEngine.PumpJobs;
+    end;
+    AssertTrue('the chain was stopped', Drained);
+    Runs := EvalIn(Chain^.Ctx, 'String(globalThis.runs)');
+    FEngine.OnJSTimer(nil);
+    AssertEquals('and stays stopped', Runs, EvalIn(Chain^.Ctx, 'String(globalThis.runs)'));
+    FHost.Alerts.Clear;
+    LoadResult('rejecter', 'Promise.reject(new Error("seen")); "loaded";');
+    FEngine.OnJSTimer(nil);
+    AssertTrue('a rejection is reported again: ' + FHost.Alerts.Text, Pos('seen', FHost.Alerts.Text) > 0);
+  finally
+    ExtWatchdogMs := 10000;
+  end;
+end;
+
+{ The pumps after each due timer count toward a runaway chain, and the
+  pump that empties the queue ends the stop, whichever pump it is. With
+  twenty intervals a tick ran twenty pumps of 50 ms and only the timer's
+  own one was counted, and a stop that a pump outside the timer emptied
+  stayed on and stopped the next reaction long enough to reach a poll. }
+procedure TExtEngineTest.TestTimerPumpsCountForChain;
+var
+  Chain: PExtContextInfo;
+  Began, GiveUpAt: QWord;
+  Drained: boolean;
+begin
+  ExtWatchdogMs := 300;
+  try
+    Chain := Load('timers', 'for (var i = 0; i < 20; i++) setInterval(function () {}, 0);' +
+      ' globalThis.runs = 0; function again() { globalThis.runs++;' +
+      ' Promise.resolve().then(again); } again(); "loaded";', PermBaseline);
+    Began := GetTickCount64;
+    AssertLoaded('timers', string(FEngine.ExtExecuteFile(Chain)));
+    Drained := False;
+    GiveUpAt := Began + 6000;
+    while not Drained and (GetTickCount64 < GiveUpAt) do
+    begin
+      FEngine.OnJSTimer(nil);
+      Drained := FEngine.PumpJobs;
+    end;
+    AssertTrue('the chain was stopped', Drained);
+    AssertTrue('within its budget and a tick: ' + IntToStr(GetTickCount64 - Began) + ' ms',
+      GetTickCount64 - Began < 2500);
+    AssertEquals('queued', 'queued', EvalIn(Chain^.Ctx,
+      'Promise.resolve().then(function () { for (var i = 0, n = 0; i < 200000; i++) n += i;' +
+      ' globalThis.after = "ran"; }); "queued"'));
+    FEngine.PumpJobs;
+    AssertEquals('a reaction after it runs', 'ran', EvalIn(Chain^.Ctx, 'String(globalThis.after)'));
+  finally
+    ExtWatchdogMs := 10000;
+  end;
+end;
+
+{ A wait inside another is left out as soon as it ends, so a pump run in
+  the outer dialog does not count the inner dialog as its own time; the
+  outer one adds only the rest. }
+procedure TExtEngineTest.TestNestedWaitCountedOnce;
+var
+  Outer, Inner: TJSWait;
+  Before, AtInner: QWord;
+begin
+  Before := JSWaitedMs;
+  Outer := JSWaitBegin;
+  Sleep(50);
+  Inner := JSWaitBegin;
+  Sleep(200);
+  JSWaitEnd(Inner);
+  AtInner := JSWaitedMs - Before;
+  AssertTrue('the inner wait counted when it ended: ' + IntToStr(AtInner), AtInner >= 190);
+  Sleep(50);
+  JSWaitEnd(Outer);
+  AssertTrue('the outer one adds the rest: ' + IntToStr(JSWaitedMs - Before),
+    (JSWaitedMs - Before >= 290) and (JSWaitedMs - Before < 400));
+end;
+
+{ A threaded promise native that takes a while, as a git or a fetch would. }
+function TExtEngineTest.SlowTask(const ctx: PJSContext; const func: string;
+  const params: JSParameters; out res: JSValueVal): boolean;
+begin
+  Sleep(200);
+  res := StringToValueVal('done');
+  Result := True;
+end;
+
+{ An extension unloaded while a promise of it is pending lets its heap
+  go: the resolve and reject the task held kept the freed context alive,
+  so six reloads of one that holds some 12 MB ran into the 64 MB cap. }
+procedure TExtEngineTest.TestUnloadWithPromisePending;
+var
+  Info: PExtContextInfo;
+  Round: integer;
+  Res: string;
+begin
+  for Round := 1 to 10 do
+  begin
+    Info := Load('heavy', '', PermBaseline);
+    FEngine.BeginRegistration(Info);
+    try
+      FEngine.AddPromise('slowTask', @SlowTask, 0, 0, True);
+    finally
+      FEngine.EndRegistration;
+    end;
+    Res := string(FEngine.ExtExecuteFile(Info));
+    Res := EvalIn(Info^.Ctx, 'globalThis.big = new Array(400000).fill(0.5);' +
+      'slowTask().then(function () { globalThis.done = true; }); "started"');
+    AssertEquals('round ' + IntToStr(Round), 'started', Res);
+    FEngine.UnloadExtensions;
+  end;
+end;
+
+{ A job stopped by the watchdog, or a rejection whose reason throws as
+  it is shown, left its exception pending on the runtime, and the next
+  native another extension called threw it after doing its work. }
+procedure TExtEngineTest.TestNoExceptionCrossesExtensions;
+var
+  Res: string;
+begin
+  ExtWatchdogMs := 300;
+  try
+    LoadResult('spinner', 'Promise.resolve().then(function () { for (;;); }); "a";');
+  finally
+    ExtWatchdogMs := 10000;
+  end;
+  FHost.Alerts.Clear;
+  Res := LoadResult('after1', 'alert("one"); "b";');
+  AssertEquals('the next extension''s native works', 'b', Res);
+  LoadResult('rejecter', 'Promise.reject(Object.create(null)); "c";');
+  Res := LoadResult('after2', 'alert("two"); "d";');
+  AssertEquals('after a reason that cannot be shown', 'd', Res);
+  AssertEquals('both alerts shown', 'one,two', FHost.Alerts.CommaText);
+end;
+
+{ An extension that starts many calls at once gets MaxAsyncTasksPerContext
+  of them run and the rest rejected, and every one counted out again. }
+procedure TExtEngineTest.TestTasksCapped;
+var
+  Info: PExtContextInfo;
+  GiveUpAt: QWord;
+begin
+  Info := Load('many', '', PermBaseline);
+  FEngine.BeginRegistration(Info);
+  try
+    FEngine.AddPromise('slowTask', @SlowTask, 0, 0, True);
+  finally
+    FEngine.EndRegistration;
+  end;
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  EvalIn(Info^.Ctx, 'globalThis.ok = 0; globalThis.no = 0; globalThis.why = "";' +
+    'for (var i = 0; i < 100; i++) slowTask().then(function () { globalThis.ok++; },' +
+    '  function (e) { globalThis.no++; globalThis.why = String(e); });');
+  AssertEquals('the cap of them under way', MaxAsyncTasksPerContext, AsyncTasksOf(Info^.Ctx));
+  GiveUpAt := GetTickCount64 + 10000;
+  while (EvalIn(Info^.Ctx, 'String(globalThis.ok + globalThis.no)') <> '100') and
+    (GetTickCount64 < GiveUpAt) do
+  begin
+    CheckSynchronize(10);
+    FEngine.PumpJobs;
+  end;
+  AssertEquals('run', IntToStr(MaxAsyncTasksPerContext), EvalIn(Info^.Ctx, 'String(globalThis.ok)'));
+  AssertEquals('rejected', IntToStr(100 - MaxAsyncTasksPerContext),
+    EvalIn(Info^.Ctx, 'String(globalThis.no)'));
+  AssertTrue(EvalIn(Info^.Ctx, 'globalThis.why'),
+    Pos('under way at once', EvalIn(Info^.Ctx, 'globalThis.why')) > 0);
+  GiveUpAt := GetTickCount64 + 5000;
+  while (ActiveAsyncTaskCount > 0) and (GetTickCount64 < GiveUpAt) do
+    CheckSynchronize(10);
+  AssertEquals('counted out', 0, AsyncTasksOf(Info^.Ctx));
+  AssertEquals('none left', 0, ActiveAsyncTaskCount);
 end;
 
 procedure TExtEngineTest.TestPermissionGate;
@@ -616,9 +892,11 @@ begin
     '  if (c.repo === "/bad") throw new Error("boom");' +
     '  if (c.repo === "/loop") { var o = {}; o.self = o; return o; }' +
     '  return c.repo + "!"; }});' +
-    'globalThis.typeOk = typeof Gittan._deliver;', PermBaseline + [epExec]);
+    'globalThis.typeOk = typeof Gittan._deliver + typeof Gittan.registerBatch +' +
+    '  typeof Gittan.registerForgeTab;', PermBaseline + [epExec]);
   AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
-  AssertEquals('deliver out of reach', 'undefined', EvalIn(Info^.Ctx, 'globalThis.typeOk'));
+  AssertEquals('deliver and the raw natives out of reach', 'undefinedundefinedundefined',
+    EvalIn(Info^.Ctx, 'globalThis.typeOk'));
   AssertEquals('three', 3, FEngine.Registry.CommandCount);
   Tabs := FEngine.Registry.CommandsIn(cwForgeTab);
   AssertEquals('one tab', 1, Length(Tabs));
@@ -700,6 +978,20 @@ begin
   end;
   AssertTrue(EvalIn(Info^.Ctx, 'globalThis.inner'),
     Pos('More than 1000 timers', EvalIn(Info^.Ctx, 'globalThis.inner')) > 0);
+  { A timer that throws is reported under its extension's name. }
+  FHost.Errors.Clear;
+  Info := Load('ticker', 'setTimeout(function () { throw new Error("tick failed"); }, 0);',
+    PermBaseline);
+  AssertLoaded('ticker', string(FEngine.ExtExecuteFile(Info)));
+  GiveUpAt := GetTickCount64 + 5000;
+  while (FHost.Errors.Count = 0) and (GetTickCount64 < GiveUpAt) do
+  begin
+    Sleep(5);
+    FEngine.OnJSTimer(nil);
+  end;
+  AssertEquals('the throw reported', 1, FHost.Errors.Count);
+  AssertTrue(FHost.Errors[0], (Pos('ticker', FHost.Errors[0]) > 0) and
+    (Pos('tick failed', FHost.Errors[0]) > 0));
 end;
 
 { An exception raised while a native read its argument (a toString that

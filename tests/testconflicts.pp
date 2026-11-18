@@ -25,6 +25,7 @@ type
     procedure TestMerge;
     procedure TestDiff3;
     procedure TestNotMarkers;
+    procedure TestMarkerSize;
     procedure TestOpenAtEnd;
     procedure TestStarts;
     procedure TestEnds;
@@ -132,6 +133,30 @@ begin
     ">>>>>>>" outside a conflict, and a deleted marker. }
   AssertEquals('00000', Roles(['+<<<<<<', '+<<<<<<<x', '+=======', '+>>>>>>> a', '-<<<<<<< HEAD'], n));
   AssertEquals(0, n);
+end;
+
+{ With conflict-marker-size=10 the markers are ten long, and seven are
+  a line like any other. }
+procedure TConflictsTest.TestMarkerSize;
+var
+  S: TIntegerDynArray;
+  R: TIntegerDynArray;
+  Ours, Theirs: string;
+begin
+  Fill([' a', '+<<<<<<<<<< HEAD', '+=======', ' B', '+==========', '+C',
+    '+>>>>>>>>>> other', ' c']);
+  R := ConflictRoles(FLines, 10);
+  S := ConflictStarts(R, FLines);
+  AssertEquals(1, Length(S));
+  AssertEquals(1, S[0]);
+  AssertEquals('seven = signs are ours', crOurs, R[2]);
+  AssertEquals(crMarker, R[4]);
+  AssertEquals(6, ConflictEnd(FLines, R, 1));
+  ConflictSides(FLines, R, 1, Ours, Theirs);
+  AssertEquals('HEAD', Ours);
+  AssertEquals('other', Theirs);
+  AssertEquals('the default size finds none', 0,
+    ConflictCount(ConflictRoles(FLines), FLines));
 end;
 
 procedure TConflictsTest.TestOpenAtEnd;

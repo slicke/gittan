@@ -32,11 +32,13 @@ type
     procedure TestCoAuthors;
     procedure TestBatchOperationIndex;
     procedure TestDamagedFileGivesDefaults;
+    procedure TestBomAndUnreadable;
     procedure TestWrongTypesSaved;
     procedure TestDraftUnknownKept;
     procedure TestExtValueList;
     procedure TestDefaultFontSize;
     procedure TestTrust;
+    procedure TestTwoProcesses;
     procedure TestProjectKinds;
     procedure TestForgeValues;
     procedure TestExtensions;
@@ -109,7 +111,7 @@ begin
     AssertTrue('the sidebar''s rows start shown', S.NavOpen);
     AssertFalse('all of the graph''s parents', S.GraphFirstParent);
     AssertFalse('the graph''s merges', S.GraphNoMerges);
-    AssertEquals('', S.CommitDraft);
+    AssertEquals('', S.CommitDraftFor('/a'));
     AssertEquals('no tab width picked', 0, S.TabSize);
     AssertEquals('', S.GitPath);
     AssertEquals('', S.ForgeCliPath('GitHub'));
@@ -157,8 +159,8 @@ begin
     S.GraphFirstParent := True;
     S.GraphNoMerges := True;
     S.CommitOpen := False;
-    S.CommitDraft := 'Subject = x'#10#10'C:\new\nope\\'#10;
-    S.CommitDraftRepo := '/tmp/a';
+    S.SetCommitDraft('/tmp/a', 'Subject = x'#10#10'C:\new\nope\\'#10);
+    S.SetCommitDraft('/tmp/b', 'another tab''s');
     S.FontName := 'Menlo';
     S.FontSize := 13;
     S.Zoom := 120;
@@ -219,8 +221,9 @@ begin
     AssertTrue(S.GraphFirstParent);
     AssertTrue(S.GraphNoMerges);
     AssertFalse(S.CommitOpen);
-    AssertEquals('Subject = x'#10#10'C:\new\nope\\'#10, S.CommitDraft);
-    AssertEquals('/tmp/a', S.CommitDraftRepo);
+    AssertEquals('Subject = x'#10#10'C:\new\nope\\'#10, S.CommitDraftFor('/tmp/a'));
+    AssertEquals('one per repository', 'another tab''s', S.CommitDraftFor('/tmp/b'));
+    AssertEquals('', S.CommitDraftFor('/tmp/c'));
     AssertEquals('Menlo', S.FontName);
     AssertEquals(13, S.FontSize);
     AssertEquals(120, S.Zoom);
@@ -282,8 +285,7 @@ begin
   try
     S.EditorCommand := '"C:\Program Files\Code\Code.exe"';
     S.TerminalCommand := '"wt.exe" -d';
-    S.CommitDraft := '"Quoted subject"'#13#10#13#10'body\n'#9'åäö 🙂'#10;
-    S.CommitDraftRepo := '  /tmp/a ';
+    S.SetCommitDraft('  /tmp/a ', '"Quoted subject"'#13#10#13#10'body\n'#9'åäö 🙂'#10);
     S.GitPath := '"';
     S.SetForgeCliPath('GitHub', '""');
     S.FontName := 'Menlo';
@@ -296,8 +298,8 @@ begin
     S.Load;
     AssertEquals('"C:\Program Files\Code\Code.exe"', S.EditorCommand);
     AssertEquals('"wt.exe" -d', S.TerminalCommand);
-    AssertEquals('"Quoted subject"'#13#10#13#10'body\n'#9'åäö 🙂'#10, S.CommitDraft);
-    AssertEquals('  /tmp/a ', S.CommitDraftRepo);
+    AssertEquals('"Quoted subject"'#13#10#13#10'body\n'#9'åäö 🙂'#10,
+      S.CommitDraftFor('  /tmp/a '));
     AssertEquals('"', S.GitPath);
     AssertEquals('""', S.ForgeCliPath('GitHub'));
     AssertEquals('Menlo', S.FontName);
@@ -357,7 +359,7 @@ begin
     Back := TGittanSettings.Create(FDir);
     try
       Back.Load;
-      Back.CommitDraft := 'newer';
+      Back.SetCommitDraft('/repo/a', 'newer');
       Back.Width := 1234;
       Back.Save;
     finally
@@ -374,8 +376,27 @@ begin
     AssertEquals(1, Back.Recent.Count);
     AssertEquals('/repo/a', Back.Recent[0]);
     AssertEquals('the rest untouched', '/usr/bin/editor', Back.EditorCommand);
-    AssertEquals('the other instance''s draft kept', 'newer', Back.CommitDraft);
+    AssertEquals('the other instance''s draft kept', 'newer', Back.CommitDraftFor('/repo/a'));
     AssertEquals('and its width', 1234, Back.Width);
+  finally
+    Back.Free;
+  end;
+  { Removed and written, then opened again: the next Save keeps it. }
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    S.RemoveRecent('/repo/a');
+    S.SaveRecent;
+    S.AddRecent('/repo/a');
+    S.Save;
+  finally
+    S.Free;
+  end;
+  Back := TGittanSettings.Create(FDir);
+  try
+    Back.Load;
+    AssertEquals('opened again', 1, Back.Recent.Count);
+    AssertEquals('/repo/a', Back.Recent[0]);
   finally
     Back.Free;
   end;
@@ -497,6 +518,50 @@ begin
   end;
 end;
 
+{ A file with a UTF-8 byte order mark is read; one that cannot be read
+  is never written over, by Save or SaveRecent. Root reads a file with
+  mode 0, so that half has nothing to show then. }
+procedure TSettingsTest.TestBomAndUnreadable;
+var
+  S: TGittanSettings;
+  Name: string;
+begin
+  Put('settings.json', #$EF#$BB#$BF'{"diff": {"contextLines": 5}}');
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertEquals('', S.DamagedFiles);
+    AssertEquals(5, S.ContextLines);
+  finally
+    S.Free;
+  end;
+  {$IFDEF UNIX}
+  if FpGeteuid = 0 then
+    Exit;
+  Name := IncludeTrailingPathDelimiter(FDir) + 'settings.json';
+  Put('settings.json', '{"diff": {"contextLines": 9}}');
+  Put('state.json', '{"recent": ["/a"]}');
+  FpChmod(Name, 0);
+  FpChmod(IncludeTrailingPathDelimiter(FDir) + 'state.json', 0);
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    AssertEquals(3, S.ContextLines);
+    S.ContextLines := 4;
+    S.Save;
+    S.SaveRecent;
+  finally
+    S.Free;
+    FpChmod(Name, &600);
+    FpChmod(IncludeTrailingPathDelimiter(FDir) + 'state.json', &600);
+  end;
+  AssertEquals('{"diff": {"contextLines": 9}}', string(ReadFileBytes(Name)));
+  AssertEquals('{"recent": ["/a"]}', string(ReadFileBytes(
+    IncludeTrailingPathDelimiter(FDir) + 'state.json')));
+  AssertFalse(FileExists(Name + DamagedSuffix));
+  {$ENDIF}
+end;
+
 procedure TSettingsTest.TestDamagedFileGivesDefaults;
 var
   S: TGittanSettings;
@@ -598,7 +663,7 @@ begin
     AssertEquals('in place of a string', 'sonnet', S.ClaudeModel);
     AssertEquals(0, S.Width);
     AssertEquals(500, S.Height);
-    AssertEquals('', S.CommitDraft);
+    AssertEquals('', S.CommitDraftFor('/a'));
   finally
     S.Free;
   end;
@@ -611,8 +676,8 @@ begin
   end;
 end;
 
-{ With no draft, the draft's text and repository go, a member of a newer
-  build's stays. }
+{ The one draft of the earlier builds becomes its repository's: the old
+  text and repository go, a member of a newer build's stays. }
 procedure TSettingsTest.TestDraftUnknownKept;
 var
   S: TGittanSettings;
@@ -622,8 +687,8 @@ begin
   S := TGittanSettings.Create(FDir);
   try
     S.Load;
-    AssertEquals('wip', S.CommitDraft);
-    S.CommitDraft := '';
+    AssertEquals('wip', S.CommitDraftFor('/a'));
+    AssertEquals('', S.CommitDraftFor('/b'));
     S.Save;
   finally
     S.Free;
@@ -633,6 +698,26 @@ begin
     AssertNull('no text', Doc.FindPath('commitDraft.text'));
     AssertNull('no repo', Doc.FindPath('commitDraft.repo'));
     AssertEquals('kept', 1, Doc.FindPath('commitDraft.later').AsInteger);
+    AssertEquals('the repository''s now', 'wip', Doc.FindPath('commitDrafts./a').AsString);
+  finally
+    Doc.Free;
+  end;
+  { Cleared (committed) before the first save: the file still has the
+    old draft then, which the merge did not take for this process's. }
+  Put('state.json', '{"commitDraft": {"text": "wip", "repo": "/a"}}');
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    S.SetCommitDraft('/a', '');
+    S.Save;
+    AssertEquals('cleared here', '', S.CommitDraftFor('/a'));
+  finally
+    S.Free;
+  end;
+  Doc := ReadJson('state.json');
+  try
+    AssertNull('not migrated again', Doc.FindPath('commitDrafts./a'));
+    AssertNull('the old one gone', Doc.Find('commitDraft'));
   finally
     Doc.Free;
   end;
@@ -689,6 +774,163 @@ begin
   AssertEquals(DefaultFontSize(1080) + 2, DefaultFontSize(2160));
 end;
 
+{ Two Gittan processes load the same files; each one's save keeps what
+  the other changed, a permission taken back and a key trusted among
+  it, and what neither touched. }
+procedure TSettingsTest.TestTwoProcesses;
+var
+  A, B, C: TGittanSettings;
+  Path: string;
+begin
+  A := TGittanSettings.Create(FDir);
+  try
+    A.SetExtPerm('ext.b', 'Hash', 'abc');
+    A.SetExtValue('ext.c', 'k', 'v');
+    A.AddTrustedKey('OLD'#31'github.com'#31'old'#31'old@x');
+    A.Save;
+  finally
+    A.Free;
+  end;
+  A := TGittanSettings.Create(FDir);
+  B := TGittanSettings.Create(FDir);
+  try
+    A.Load;
+    B.Load;
+    A.SetExtEnabled('ext.a', False);
+    A.ClearExtPerm('ext.b');
+    A.TrustCommands('/repo', 'h1');
+    A.AddTrustedKey('AAAA'#31'github.com'#31'ada'#31'ada@x');
+    A.Save;
+    B.FontSize := 14;
+    B.AddTrustedKey('BBBB'#31'github.com'#31'bob'#31'bob@x');
+    B.Save;
+    AssertEquals('B sees A''s key after its save', 3, B.TrustedKeys.Count);
+    AssertTrue('and A''s trust', B.CommandsTrusted('/repo', 'h1'));
+  finally
+    A.Free;
+    B.Free;
+  end;
+  C := TGittanSettings.Create(FDir);
+  try
+    C.Load;
+    AssertEquals('B''s change', 14, C.FontSize);
+    AssertFalse('A turned the extension off', C.ExtEnabled('ext.a'));
+    AssertFalse('A took the permissions back', C.HasExtPerm('ext.b'));
+    AssertTrue('A trusted the commands file', C.CommandsTrusted('/repo', 'h1'));
+    AssertEquals('every key kept', 3, C.TrustedKeys.Count);
+    AssertEquals('what neither touched', 'v', C.ExtValue('ext.c', 'k'));
+  finally
+    C.Free;
+  end;
+
+  { A key one process drops stays dropped though the other saves later. }
+  A := TGittanSettings.Create(FDir);
+  B := TGittanSettings.Create(FDir);
+  try
+    A.Load;
+    B.Load;
+    A.TrustedKeys.Delete(0);
+    A.Zoom := 120;
+    A.Save;
+    B.Width := 800;
+    B.Save;
+    AssertEquals('B did not touch the zoom', 120, B.Zoom);
+  finally
+    A.Free;
+    B.Free;
+  end;
+  C := TGittanSettings.Create(FDir);
+  try
+    C.Load;
+    AssertEquals(2, C.TrustedKeys.Count);
+    AssertEquals(120, C.Zoom);
+    AssertEquals(800, C.Width);
+  finally
+    C.Free;
+  end;
+
+  { A file emptied meanwhile is no file that dropped every setting. }
+  A := TGittanSettings.Create(FDir);
+  try
+    A.Load;
+    Put('settings.json', '');
+    A.Width := 900;
+    A.Save;
+  finally
+    A.Free;
+  end;
+  C := TGittanSettings.Create(FDir);
+  try
+    C.Load;
+    AssertEquals('the zoom kept', 120, C.Zoom);
+    AssertFalse('the extension still off', C.ExtEnabled('ext.a'));
+    AssertEquals(900, C.Width);
+  finally
+    C.Free;
+  end;
+
+  { A change whose write failed is still a change at the next save,
+    though the file has the old value again. }
+  Path := IncludeTrailingPathDelimiter(FDir) + 'settings.json';
+  A := TGittanSettings.Create(FDir);
+  try
+    A.Load;
+    A.Zoom := 130;
+    AssertTrue(RenameFile(Path, Path + '.kept'));
+    AssertTrue(CreateDir(Path));
+    A.Save;
+    AssertTrue(RemoveDir(Path));
+    AssertTrue(RenameFile(Path + '.kept', Path));
+    A.Save;
+  finally
+    A.Free;
+  end;
+  C := TGittanSettings.Create(FDir);
+  try
+    C.Load;
+    AssertEquals('written at the second save', 130, C.Zoom);
+  finally
+    C.Free;
+  end;
+
+  { What a failed save merged in from another process is not this one's
+    change at the next save: a third write since stays. }
+  {$IFDEF UNIX}
+  if FpGeteuid = 0 then
+    Exit;
+  A := TGittanSettings.Create(FDir);
+  B := TGittanSettings.Create(FDir);
+  try
+    A.Load;
+    B.Load;
+    B.Zoom := 125;
+    B.Save;
+    A.Width := 700;
+    FpChmod(FDir, &555);
+    try
+      A.Save;
+    finally
+      FpChmod(FDir, &755);
+    end;
+    AssertEquals('the fields keep their own', 130, A.Zoom);
+    B.Zoom := 135;
+    B.Save;
+    A.Save;
+  finally
+    A.Free;
+    B.Free;
+  end;
+  C := TGittanSettings.Create(FDir);
+  try
+    C.Load;
+    AssertEquals('the third write kept', 135, C.Zoom);
+    AssertEquals('A''s change written', 700, C.Width);
+  finally
+    C.Free;
+  end;
+  {$ENDIF}
+end;
+
 procedure TSettingsTest.TestTrust;
 var
   S: TGittanSettings;
@@ -703,6 +945,13 @@ begin
     AssertFalse('another root', S.CommandsTrusted('/tmp/b', 'abc'));
     S.TrustCommands('/tmp/a', 'def');
     S.TrustCommands('/tmp/b', '');
+    AssertTrue('no expression needs no trust', S.IssueRegexTrusted('/tmp/a', ''));
+    AssertFalse(S.IssueRegexTrusted('/tmp/a', '(a+)+b'));
+    S.TrustIssueRegex('/tmp/a', '#(\d+)');
+    AssertTrue(S.IssueRegexTrusted('/tmp/a', '#(\d+)'));
+    AssertFalse('another expression asks again', S.IssueRegexTrusted('/tmp/a', '(a+)+b'));
+    AssertFalse('another root', S.IssueRegexTrusted('/tmp/b', '#(\d+)'));
+    AssertFalse('the commands trust is not this one', S.CommandsTrusted('/tmp/a', '#(\d+)'));
     S.Save;
   finally
     S.Free;
@@ -713,6 +962,7 @@ begin
     AssertTrue('the newest hash is kept', S.CommandsTrusted('/tmp/a', 'def'));
     AssertFalse(S.CommandsTrusted('/tmp/a', 'abc'));
     AssertFalse('an empty hash trusts nothing', S.CommandsTrusted('/tmp/b', 'x'));
+    AssertTrue('the expression trusted is kept', S.IssueRegexTrusted('/tmp/a', '#(\d+)'));
   finally
     S.Free;
   end;

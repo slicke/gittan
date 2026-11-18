@@ -105,6 +105,13 @@ function FixupTarget(const ASubject: string; out AAction: TGittanRebaseAction): 
   it is, a pick. The actions of the steps not moved stay. }
 procedure AutosquashSteps(var ASteps: TGittanRebaseSteps);
 
+{** Moves each step whose id is AFixups[i] right after the step whose id
+  is ATargets[i] and the fixups and squashes already after it, as
+  raFixup: what Absorb committed, by the ids it knows, whatever the
+  subject became (a prepare-commit-msg hook may prefix it). A fixup or a
+  target not among the steps is left as it is. }
+procedure PlaceFixups(var ASteps: TGittanRebaseSteps; const AFixups, ATargets: array of string);
+
 implementation
 
 function RebaseActionName(AAction: TGittanRebaseAction): string;
@@ -323,6 +330,41 @@ begin
       end;
   end;
   ASteps := Done;
+end;
+
+procedure PlaceFixups(var ASteps: TGittanRebaseSteps; const AFixups, ATargets: array of string);
+
+  function IndexOfId(const AId: string): integer;
+  begin
+    for Result := 0 to High(ASteps) do
+      if ASteps[Result].Hash = AId then
+        Exit;
+    Result := -1;
+  end;
+
+var
+  i, f, t, k: integer;
+  Step: TGittanRebaseStep;
+begin
+  for i := 0 to High(AFixups) do
+  begin
+    if i > High(ATargets) then
+      Break;
+    f := IndexOfId(AFixups[i]);
+    if (f < 0) or (IndexOfId(ATargets[i]) < 0) then
+      Continue;
+    Step := ASteps[f];
+    Step.Action := raFixup;
+    for k := f to High(ASteps) - 1 do
+      ASteps[k] := ASteps[k + 1];
+    t := IndexOfId(ATargets[i]);
+    k := t + 1;
+    while (k < High(ASteps)) and (ASteps[k].Action in [raFixup, raSquash]) do
+      Inc(k);
+    for f := High(ASteps) downto k + 1 do
+      ASteps[f] := ASteps[f - 1];
+    ASteps[k] := Step;
+  end;
 end;
 
 { A step's line: the command, the id and the subject, which git shows

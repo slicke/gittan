@@ -141,13 +141,15 @@ end;
   Create Tag Here... in the commit graph asks. }
 procedure TRepoFrame.NewTagAsk;
 var
-  Short: string;
+  Head: string;
 begin
   if FRepo.Root = '' then
     Exit;
-  Short := Copy(FRepo.CommitId('HEAD'), 1, 7);
-  if Short <> '' then
-    TagAtAsk(Short, 'HEAD');
+  { The commit the question names, not HEAD once it is answered, which
+    a commit meanwhile would have moved. }
+  Head := FRepo.CommitId('HEAD');
+  if Head <> '' then
+    TagAtAsk(Copy(Head, 1, 7), Head);
 end;
 
 function TRepoFrame.CheckTagName(const AValues: array of string): string;

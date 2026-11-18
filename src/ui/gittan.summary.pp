@@ -905,9 +905,9 @@ begin
   end;
   Words := TStringList.Create;
   try
-    Words.Delimiter := ' ';
-    Words.StrictDelimiter := True;
-    Words.DelimitedText := AText;
+    { Split, not DelimitedText, which takes a " as a quote: it dropped
+      those of Revert "..." and swallowed the rest after a lone one. }
+    Words.AddStrings(AText.Split([' ']));
     Line := '';
     for w := 0 to Words.Count - 1 do
     begin
