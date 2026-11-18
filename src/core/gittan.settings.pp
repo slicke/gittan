@@ -545,6 +545,31 @@ begin
     AObj.Delete(i);
 end;
 
+{ The one draft of the builds before a draft per repository
+  (commitDraft's text and repo) moved into commitDrafts, unless that
+  repository has one there already; a key of a newer build's stays in
+  commitDraft. Done to the state file as Load reads it and as Save
+  merges with it, so the merge sees the draft where this process keeps
+  it: a migrated draft cleared before the first save stays cleared, one
+  left alone stays. }
+procedure MoveLegacyDraft(ADoc: TJSONObject);
+var
+  O: TJSONObject;
+  Text, Repo: string;
+begin
+  O := ObjOf(ADoc, 'commitDraft');
+  if O = nil then
+    Exit;
+  Text := StrOf(O, 'text');
+  Repo := StrOf(O, 'repo');
+  if (Text <> '') and (Repo <> '') and (StrOf(ObjOf(ADoc, 'commitDrafts'), Repo) = '') then
+    ChildOf(ADoc, 'commitDrafts').Strings[Repo] := Text;
+  DropKey(O, 'text');
+  DropKey(O, 'repo');
+  if O.Count = 0 then
+    DropKey(ADoc, 'commitDraft');
+end;
+
 { AValue under AName in AObj, or no AName for an empty AValue; AObj
   goes from AParent under AObjName once it is empty. }
 procedure PutOrDrop(AParent: TJSONObject; const AObjName: string; AObj: TJSONObject;
@@ -741,6 +766,7 @@ begin
   if Damaged then
     FDamagedFiles := SettingsFileName;
   FStateDoc := ReadDoc(StateFile, Damaged, Unreadable);
+  MoveLegacyDraft(FStateDoc);
   if Damaged and (FDamagedFiles <> '') then
     FDamagedFiles := FDamagedFiles + ', ' + StateFileName
   else if Damaged then
@@ -832,11 +858,6 @@ begin
   O := ObjOf(FStateDoc, 'tips');
   TickHintHidden := BoolOf(O, 'tickHintHidden', False);
   GraphTipHidden := BoolOf(O, 'graphTipHidden', False);
-  { The one draft of the builds before a draft per repository. }
-  O := ObjOf(FStateDoc, 'commitDraft');
-  if (StrOf(O, 'text') <> '') and (StrOf(O, 'repo') <> '') and
-    (CommitDraftFor(StrOf(O, 'repo')) = '') then
-    SetCommitDraft(StrOf(O, 'repo'), StrOf(O, 'text'));
   UpdateSnoozedUntil := ReadDay(StrOf(ObjOf(FStateDoc, 'update'), 'snoozedUntil'));
   ListOf(FStateDoc, 'recent', FRecent, MaxRecent);
   ListOf(FStateDoc, 'paletteRecent', FPaletteRecent, MaxPaletteRecent);
@@ -932,13 +953,6 @@ begin
   O := ChildOf(FStateDoc, 'tips');
   O.Booleans['tickHintHidden'] := TickHintHidden;
   O.Booleans['graphTipHidden'] := GraphTipHidden;
-  { The one draft of the earlier builds is in commitDrafts now: its
-    members go, a key of a newer build's stays. }
-  O := ObjOf(FStateDoc, 'commitDraft');
-  DropKey(O, 'text');
-  DropKey(O, 'repo');
-  if (O <> nil) and (O.Count = 0) then
-    DropKey(FStateDoc, 'commitDraft');
   if UpdateSnoozedUntil > 0 then
     ChildOf(FStateDoc, 'update').Strings['snoozedUntil'] :=
       FormatDateTime('yyyy"-"mm"-"dd', UpdateSnoozedUntil)
@@ -1081,7 +1095,7 @@ end;
   taken as the base, so what was never changed here is kept. One that
   is there but cannot be read is AUnreadable, and must not be written. }
 function MergedWithFile(const AFileName: string; ABase, ADoc: TJSONObject;
-  ATrustedKeys: boolean; out AUnreadable: boolean): TJSONObject;
+  ATrustedKeys, ALegacyDraft: boolean; out AUnreadable: boolean): TJSONObject;
 var
   Theirs: TJSONObject;
   Damaged: boolean;
@@ -1099,6 +1113,8 @@ begin
     Theirs.Free;
     Theirs := TJSONObject(ABase.Clone);
   end;
+  if ALegacyDraft then
+    MoveLegacyDraft(Theirs);
   try
     Result := MergeDocs(ABase, ADoc, Theirs);
     if ATrustedKeys then
@@ -1121,7 +1137,7 @@ begin
       PutState;
       { A file that is there but cannot be read now is left as it is: the
         defaults merged into nothing would replace everything in it. }
-      Doc := MergedWithFile(SettingsFile, FSettingsBase, FSettingsDoc, True, SettingsUnreadable);
+      Doc := MergedWithFile(SettingsFile, FSettingsBase, FSettingsDoc, True, False, SettingsUnreadable);
       if SettingsUnreadable then
         Doc.Free
       else
@@ -1129,7 +1145,7 @@ begin
         OldSettings := FSettingsDoc;
         FSettingsDoc := Doc;
       end;
-      Doc := MergedWithFile(StateFile, FStateBase, FStateDoc, False, StateUnreadable);
+      Doc := MergedWithFile(StateFile, FStateBase, FStateDoc, False, True, StateUnreadable);
       if StateUnreadable then
         Doc.Free
       else

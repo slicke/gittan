@@ -683,6 +683,25 @@ begin
   finally
     Doc.Free;
   end;
+  { Cleared (committed) before the first save: the file still has the
+    old draft then, which the merge did not take for this process's. }
+  Put('state.json', '{"commitDraft": {"text": "wip", "repo": "/a"}}');
+  S := TGittanSettings.Create(FDir);
+  try
+    S.Load;
+    S.SetCommitDraft('/a', '');
+    S.Save;
+    AssertEquals('cleared here', '', S.CommitDraftFor('/a'));
+  finally
+    S.Free;
+  end;
+  Doc := ReadJson('state.json');
+  try
+    AssertNull('not migrated again', Doc.FindPath('commitDrafts./a'));
+    AssertNull('the old one gone', Doc.Find('commitDraft'));
+  finally
+    Doc.Free;
+  end;
 end;
 
 { The settings dialog's list of values: a key with an = and keys that
