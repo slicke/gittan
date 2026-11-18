@@ -189,7 +189,7 @@ private
   { A chain of jobs that requeue themselves (a reaction that queues
     another and returns) runs each job in the watchdog's budget and never
     empties the queue, so the rejections would never be reported again:
-    the time of the timer's pumps that left jobs queued, waits for the
+    the time of the pumps that left jobs queued, waits for the
     user left out (FChainSpent), and once it is past ExtWatchdogMs the
     jobs run in a pump are stopped (FChainAbort) until the queue empties.
     FPumping is set while PumpJobs runs them. }
@@ -2599,6 +2599,9 @@ begin
         JS_JobDone(tmpCtx, r);
         Inc(timeoutCounter);
       end;
+      // What is left of a chain goes with its context.
+      FChainSpent := 0;
+      FChainAbort := False;
       JS_RunGC(FRuntime);
     end;
 
@@ -3515,25 +3518,46 @@ end;
     why the drain is bounded. }
 function TGittanExtEngine.PumpJobs: boolean;
 var
-  WasPumping: boolean;
+  WasPumping, Outer: boolean;
+  Began, Waited, Spent: QWord;
 begin
   Result := true;
   if IsExtShuttingDown or (FRuntime = nil) then
     Exit;
   WasPumping := FPumping;
   FPumping := True;
+  Outer := JSPumpDepth = 0;
+  Inc(JSPumpDepth);
+  Began := GetTickCount64;
+  Waited := JSWaitedMs;
   try
     Result := DrainPendingJobs(FContext);
   finally
+    Dec(JSPumpDepth);
     FPumping := WasPumping;
+  end;
+  { A pump inside another adds nothing: its time is the outer one's, and
+    an empty queue there does not end the chain the outer job may still
+    add to. A pump in a dialog opened by a job is outermost again. }
+  if not Outer then
+    Exit;
+  if Result then
+  begin
+    FChainSpent := 0;
+    FChainAbort := False;
+  end
+  else
+  begin
+    Spent := GetTickCount64 - Began;
+    if JSWaitedMs - Waited < Spent then
+      Inc(FChainSpent, Spent - (JSWaitedMs - Waited));
+    if FChainSpent > ExtWatchdogMs then
+      FChainAbort := True;
   end;
 end;
 
 {** Pump the QuickJS job queue (Promises/microtasks) on each timer tick. }
 procedure TGittanExtEngine.OnJSTimer(Sender: TObject);
-var
-  Began, Waited, Spent: QWord;
-  Drained: boolean;
 begin
   if IsExtShuttingDown or (FRuntime = nil) then
     Exit;
@@ -3552,23 +3576,10 @@ begin
   // watchdog, which times each job alone: its pumps are added up here, and
   // past ExtWatchdogMs its jobs are stopped, after which the queue empties
   // and reporting resumes. A finite chain within that time runs to its end.
-  Began := GetTickCount64;
-  Waited := JSWaitedMs;
-  Drained := PumpJobs;
-  if Drained then
-  begin
-    FChainSpent := 0;
-    FChainAbort := False;
+  // PumpJobs keeps that count, for every pump: the ones RunDueTimers ran
+  // after each callback above too.
+  if PumpJobs then
     FlushPendingRejections;
-  end
-  else
-  begin
-    Spent := GetTickCount64 - Began;
-    if JSWaitedMs - Waited < Spent then
-      Inc(FChainSpent, Spent - (JSWaitedMs - Waited));
-    if FChainSpent > ExtWatchdogMs then
-      FChainAbort := True;
-  end;
 end;
 
 procedure TGittanExtEngine.NoteRejection(key: UInt64; const msg: string);

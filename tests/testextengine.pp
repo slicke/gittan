@@ -108,6 +108,8 @@ type
     procedure TestDialogTextFromChangingToString;
     procedure TestWatchdogStopsNativeLoop;
     procedure TestRunawayChainEnded;
+    procedure TestTimerPumpsCountForChain;
+    procedure TestNestedWaitCountedOnce;
     procedure TestUnloadWithPromisePending;
     procedure TestLogGoesToConsole;
     procedure TestNoExceptionCrossesExtensions;
@@ -630,6 +632,66 @@ begin
   finally
     ExtWatchdogMs := 10000;
   end;
+end;
+
+{ The pumps after each due timer count toward a runaway chain, and the
+  pump that empties the queue ends the stop, whichever pump it is. With
+  twenty intervals a tick ran twenty pumps of 50 ms and only the timer's
+  own one was counted, and a stop that a pump outside the timer emptied
+  stayed on and stopped the next reaction long enough to reach a poll. }
+procedure TExtEngineTest.TestTimerPumpsCountForChain;
+var
+  Chain: PExtContextInfo;
+  Began, GiveUpAt: QWord;
+  Drained: boolean;
+begin
+  ExtWatchdogMs := 300;
+  try
+    Chain := Load('timers', 'for (var i = 0; i < 20; i++) setInterval(function () {}, 0);' +
+      ' globalThis.runs = 0; function again() { globalThis.runs++;' +
+      ' Promise.resolve().then(again); } again(); "loaded";', PermBaseline);
+    Began := GetTickCount64;
+    AssertLoaded('timers', string(FEngine.ExtExecuteFile(Chain)));
+    Drained := False;
+    GiveUpAt := Began + 6000;
+    while not Drained and (GetTickCount64 < GiveUpAt) do
+    begin
+      FEngine.OnJSTimer(nil);
+      Drained := FEngine.PumpJobs;
+    end;
+    AssertTrue('the chain was stopped', Drained);
+    AssertTrue('within its budget and a tick: ' + IntToStr(GetTickCount64 - Began) + ' ms',
+      GetTickCount64 - Began < 2500);
+    AssertEquals('queued', 'queued', EvalIn(Chain^.Ctx,
+      'Promise.resolve().then(function () { for (var i = 0, n = 0; i < 200000; i++) n += i;' +
+      ' globalThis.after = "ran"; }); "queued"'));
+    FEngine.PumpJobs;
+    AssertEquals('a reaction after it runs', 'ran', EvalIn(Chain^.Ctx, 'String(globalThis.after)'));
+  finally
+    ExtWatchdogMs := 10000;
+  end;
+end;
+
+{ A wait inside another is left out as soon as it ends, so a pump run in
+  the outer dialog does not count the inner dialog as its own time; the
+  outer one adds only the rest. }
+procedure TExtEngineTest.TestNestedWaitCountedOnce;
+var
+  Outer, Inner: TJSWait;
+  Before, AtInner: QWord;
+begin
+  Before := JSWaitedMs;
+  Outer := JSWaitBegin;
+  Sleep(50);
+  Inner := JSWaitBegin;
+  Sleep(200);
+  JSWaitEnd(Inner);
+  AtInner := JSWaitedMs - Before;
+  AssertTrue('the inner wait counted when it ended: ' + IntToStr(AtInner), AtInner >= 190);
+  Sleep(50);
+  JSWaitEnd(Outer);
+  AssertTrue('the outer one adds the rest: ' + IntToStr(JSWaitedMs - Before),
+    (JSWaitedMs - Before >= 290) and (JSWaitedMs - Before < 400));
 end;
 
 { A threaded promise native that takes a while, as a git or a fetch would. }

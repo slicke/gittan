@@ -460,8 +460,8 @@ procedure JS_JobDone(ctx: JSContext; AResult: integer);
 type
   {** What JSWaitBegin put aside of the watchdog's clock. }
   TJSWait = record
-    Depth: integer;
-    Start, Began: QWord;
+    Depth, PumpDepth: integer;
+    Start, Began, Waited: QWord;
   end;
 
 var
@@ -474,10 +474,13 @@ var
   JSEntryDepth: integer = 0;
   JSEntryStart: QWord = 0;
   {** Milliseconds spent in waits for the user (JSWaitBegin to JSWaitEnd)
-      so far, a wait inside another counted once, for a budget that runs
-      over several calls and leaves them out. }
+      so far, for a budget that runs over several calls and leaves them
+      out. A wait is added when it ends, one inside another too, and the
+      outer one adds only what the inner ones did not. }
   JSWaitedMs: QWord = 0;
-  JSWaitNest: integer = 0;
+  {** The engine's job pumps running since the innermost wait began, so a
+      pump knows whether it runs inside another of the same wait. }
+  JSPumpDepth: integer = 0;
 
 {** For a native that waits for the user (a dialog): the time until
     JSWaitEnd is not the script's. JS run meanwhile (a timer while a
@@ -837,18 +840,21 @@ begin
   Result.Depth := JSEntryDepth;
   Result.Start := JSEntryStart;
   Result.Began := GetTickCount64;
+  Result.Waited := JSWaitedMs;
+  Result.PumpDepth := JSPumpDepth;
   JSEntryDepth := 0;
-  Inc(JSWaitNest);
+  JSPumpDepth := 0;
 end;
 
 procedure JSWaitEnd(const AWait: TJSWait);
+var
+  Elapsed, Inner: QWord;
 begin
-  Dec(JSWaitNest);
-  if JSWaitNest <= 0 then
-  begin
-    JSWaitNest := 0;
-    Inc(JSWaitedMs, GetTickCount64 - AWait.Began);
-  end;
+  Elapsed := GetTickCount64 - AWait.Began;
+  Inner := JSWaitedMs - AWait.Waited;
+  if Elapsed > Inner then
+    Inc(JSWaitedMs, Elapsed - Inner);
+  JSPumpDepth := AWait.PumpDepth;
   JSEntryDepth := AWait.Depth;
   JSEntryStart := AWait.Start + (GetTickCount64 - AWait.Began);
 end;
