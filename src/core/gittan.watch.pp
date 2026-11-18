@@ -31,6 +31,8 @@ type
     FInterval: integer;
     FLast: string;
     FFailed: boolean;
+    { Polls in a row that took SlowPollMs or more and found nothing new. }
+    FSlowPolls: integer;
     FSnapshot: TGittanRepoSnapshot;
     FOnChange: TNotifyEvent;
     procedure Notify;
@@ -158,9 +160,16 @@ end;
   snapshot that fails: its fingerprint is not kept, and the form hears
   of the failure once, not on every tick it goes on failing. }
 procedure TGittanWatcher.Execute;
+const
+  { A poll this slow with nothing new, twice in a row, has git status
+    reading files whose times changed but not their content (a code
+    generator, unzip, rsync, a sync client): 20 000 such files took
+    half a second a poll, 27 ms once the index knew their times. }
+  SlowPollMs = 300;
 var
   Fingerprint: string;
   Ok: boolean;
+  Started: QWord;
 begin
   if not FRepo.Open(FRoot) then
     Exit;
@@ -174,9 +183,17 @@ begin
     if Terminated then
       Break;
     try
+      Started := GetTickCount64;
       Fingerprint := FRepo.Fingerprint;
       if Terminated then
         Break;
+      if (Fingerprint = FLast) and (GetTickCount64 - Started >= SlowPollMs) then
+        Inc(FSlowPolls)
+      else
+        FSlowPolls := 0;
+      { Once, until the polls are quick again. }
+      if FSlowPolls = 2 then
+        FRepo.RefreshIndex;
       if Fingerprint <> FLast then
       begin
         Ok := FRepo.Snapshot(FSnapshot);

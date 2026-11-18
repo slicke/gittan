@@ -66,6 +66,7 @@
 - An image or binary file in Git LFS that is in conflict and not downloaded keeps Use Mine, Use Theirs and Mark Resolved beside Download; before, Download took their place, and a click on it asked whether to resolve with Mine.
 - A clone that finishes while another tab is in front opens in the tab it was started in, which stays behind; before, it opened a new tab that took the front, and the clone's tab stayed empty.
 - Keep and Unkeep in the change view leave the caret, the scroll and the hidden lines you opened where they were; before, they moved by as many lines as the keep took out or put back.
+- A repository whose files were touched without being changed (by a code generator, unzip, rsync or a sync client) no longer keeps Gittan's background check slow: once two checks in a row are slow, Gittan refreshes git's index, so later checks no longer read every such file again.
 
 ## 0.21 (build-146, 2026-11-17)
 

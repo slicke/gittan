@@ -1185,6 +1185,12 @@ type
       when git does not know it. }
     function CommitDetails(const AHash: string; out ACommit: TGittanCommitLine;
       out ABody: string): boolean;
+    {** Brings the index's record of the files' times and sizes up to
+      date (`git update-index -q --refresh`), so a status after it need
+      not read files touched but not changed again; every other git
+      Gittan runs takes no optional lock and never does it. False with
+      nothing run while index.lock is there, another git at work. }
+    function RefreshIndex: boolean;
     {** A text that changes whenever the branch, the set of changed files
       or the content of a changed file changes: the branch, the commit ids
       of HEAD and Base, the status of every changed file, the size and
@@ -3116,6 +3122,18 @@ end;
 
 { The repository's index file: in the git dir of the work tree (a linked
   work tree has one of its own). }
+function TGittanRepo.RefreshIndex: boolean;
+var
+  Output: string;
+begin
+  Result := False;
+  if (FRoot = '') or FileExists(IndexPath + '.lock') then
+    Exit;
+  { Files that differ are listed, and git exits with 1: no failure. }
+  RunGit(FRoot, ['update-index', '-q', '--refresh'], Output);
+  Result := not FileExists(IndexPath + '.lock');
+end;
+
 function TGittanRepo.IndexPath: string;
 var
   Dir: string;

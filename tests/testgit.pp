@@ -60,6 +60,7 @@ type
     procedure TestInputClosed;
     procedure TestInputHeldElsewhere;
     procedure TestSpawnCloseOnExec;
+    procedure TestRefreshIndex;
     procedure TestConflictCrlf;
     procedure TestCommitRange;
     procedure TestLineHistory;
@@ -1030,6 +1031,32 @@ begin
     P.Free;
   end;
   {$ENDIF}
+end;
+
+{ A file touched but not changed: the index's time is old, which
+  diff-files reports, until RefreshIndex; not while index.lock is
+  there. }
+procedure TGitRepoTest.TestRefreshIndex;
+var
+  Lock: string;
+begin
+  MakeHistory;
+  AssertTrue(FRepo.Open(FDir));
+  Git(['update-index', '-q', '--refresh']);
+  AssertEquals('', Trim(Git(['diff-files', '--name-only'])));
+  FileSetDate(IncludeTrailingPathDelimiter(FDir) + 'a.txt',
+    DateTimeToFileDate(Now - 1));
+  AssertEquals('stale', 'a.txt', Trim(Git(['diff-files', '--name-only'])));
+  Lock := IncludeTrailingPathDelimiter(FDir) + '.git' + PathDelim + 'index.lock';
+  WriteFile('.git' + PathDelim + 'index.lock', '');
+  try
+    AssertFalse('not while locked', FRepo.RefreshIndex);
+    AssertEquals('still stale', 'a.txt', Trim(Git(['diff-files', '--name-only'])));
+  finally
+    DeleteFile(Lock);
+  end;
+  AssertTrue(FRepo.RefreshIndex);
+  AssertEquals('known again', '', Trim(Git(['diff-files', '--name-only'])));
 end;
 
 { The range of a commit runs from its parent; a root commit, which has
