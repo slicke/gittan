@@ -68,6 +68,7 @@
 - Keep and Unkeep in the change view leave the caret, the scroll and the hidden lines you opened where they were; before, they moved by as many lines as the keep took out or put back.
 - A repository whose files were touched without being changed (by a code generator, unzip, rsync or a sync client) no longer keeps Gittan's background check slow: once two checks in a row are slow, Gittan refreshes git's index, so later checks no longer read every such file again.
 - On macOS, tabs that no longer fit in the window no longer slide under the GitHub globe: the strip shows as many as fit, always with the shown one among them, and "+N" after them, which brings in the next hidden tab when clicked.
+- Changing the syntax while resolving a conflict in the merge editor no longer marks the result as edited by hand, which dimmed the panes, stopped the picks and asked to save on leaving.
 
 ## 0.21 (build-146, 2026-11-17)
 

@@ -492,11 +492,12 @@ begin
   FAdapterTheirs.Lexer := ALexer;
   FAdapterResult.Lexer := ALexer;
   { Assigning a lexer parses nothing yet; a change from line 0 starts
-    the adapter's parse. }
+    the adapter's parse. Without OnChange: the result's would take the
+    new colors for an edit by hand (ResultChange). }
   for Ed in [FEditMine, FEditBase, FEditTheirs, FEditResult] do
   begin
     if ALexer <> nil then
-      Ed.DoEventChange(0);
+      Ed.DoEventChange(0, False);
     Ed.Update;
   end;
 end;
