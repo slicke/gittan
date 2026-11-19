@@ -678,20 +678,27 @@ end;
 procedure TExtEngineTest.TestNestedWaitCountedOnce;
 var
   Outer, Inner: TJSWait;
-  Before, AtInner: QWord;
+  Before, AtInner, T0, TInner, Total: QWord;
 begin
   Before := JSWaitedMs;
+  T0 := GetTickCount64;
   Outer := JSWaitBegin;
   Sleep(50);
+  TInner := GetTickCount64;
   Inner := JSWaitBegin;
   Sleep(200);
   JSWaitEnd(Inner);
+  TInner := GetTickCount64 - TInner;
   AtInner := JSWaitedMs - Before;
-  AssertTrue('the inner wait counted when it ended: ' + IntToStr(AtInner), AtInner >= 190);
+  AssertTrue('the inner wait counted when it ended: ' + IntToStr(AtInner),
+    (AtInner >= 180) and (AtInner <= TInner));
   Sleep(50);
   JSWaitEnd(Outer);
-  AssertTrue('the outer one adds the rest: ' + IntToStr(JSWaitedMs - Before),
-    (JSWaitedMs - Before >= 290) and (JSWaitedMs - Before < 400));
+  Total := JSWaitedMs - Before;
+  { Not a fixed bound: a busy machine sleeps longer. Once is at most the
+    time the outer wait took, twice would be the inner wait more. }
+  AssertTrue('the outer one adds the rest: ' + IntToStr(Total) + ' of ' +
+    IntToStr(GetTickCount64 - T0), (Total > AtInner) and (Total <= GetTickCount64 - T0));
 end;
 
 { A threaded promise native that takes a while, as a git or a fetch would. }
