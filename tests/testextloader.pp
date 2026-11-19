@@ -122,19 +122,26 @@ procedure TExtLoaderTest.TestQueuedImportRunsWhatWasRead;
 var
   GiveUpAt: QWord;
 begin
-  { Jobs of a millisecond each: a pump stops after 50 ms of them. }
-  Put('a.js', '/* @name Ay */ globalThis.n = 0; for (var i = 0; i < 2000; i++)' +
-    ' Promise.resolve().then(function () { var e = Date.now() + 1; while (Date.now() < e);' +
-    ' if (++globalThis.n == 2000) Gittan.alert("a done"); });');
-  Put('b.js', '/* @name Bee */ export {}; Gittan.alert("b");');
-  FLoader.OnProvision := @SwapFiles;
-  FLoader.Load;
-  AssertEquals('the import is still queued', '', FHost.Alerts.CommaText);
-  GiveUpAt := GetTickCount64 + 20000;
-  while (FHost.Alerts.Count < 2) and (GetTickCount64 < GiveUpAt) do
-    TGittanExtEngine.Instance.PumpJobs;
-  AssertEquals('both ran', 2, FHost.Alerts.Count);
-  AssertEquals('what was read ran', 'b', FHost.Alerts[1]);
+  { Jobs of a millisecond each: a pump stops after 50 ms of them. Windows's
+    clock makes each some 15 ms, past the time a chain gets, which this
+    test is not about. }
+  ExtWatchdogMs := 60000;
+  try
+    Put('a.js', '/* @name Ay */ globalThis.n = 0; for (var i = 0; i < 2000; i++)' +
+      ' Promise.resolve().then(function () { var e = Date.now() + 1; while (Date.now() < e);' +
+      ' if (++globalThis.n == 2000) Gittan.alert("a done"); });');
+    Put('b.js', '/* @name Bee */ export {}; Gittan.alert("b");');
+    FLoader.OnProvision := @SwapFiles;
+    FLoader.Load;
+    AssertEquals('the import is still queued', '', FHost.Alerts.CommaText);
+    GiveUpAt := GetTickCount64 + 60000;
+    while (FHost.Alerts.Count < 2) and (GetTickCount64 < GiveUpAt) do
+      TGittanExtEngine.Instance.PumpJobs;
+    AssertEquals('both ran', 2, FHost.Alerts.Count);
+    AssertEquals('what was read ran', 'b', FHost.Alerts[1]);
+  finally
+    ExtWatchdogMs := 10000;
+  end;
 end;
 
 procedure TExtLoaderTest.AddSlowTask(AEngine: TGittanExtEngine; AExt: PExtContextInfo);

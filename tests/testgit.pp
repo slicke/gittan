@@ -679,7 +679,7 @@ end;
 procedure TGitRepoTest.TestFingerprint;
 
 var
-  A, B: string;
+  A, B, Id: string;
   Stamp: TDateTime;
 begin
   MakeHistory;
@@ -716,6 +716,35 @@ begin
   A := FRepo.Fingerprint;
   AssertTrue('an operation begun seen', A <> B);
   Git(['bisect', 'reset']);
+  A := FRepo.Fingerprint;
+  { A stash made, and one dropped from under the top, which leaves the
+    tip as it was. }
+  Id := Trim(Git(['stash', 'create']));
+  AssertEquals('a stash commit', 40, Length(Id));
+  Git(['stash', 'store', '-m', 'one', Trim(Git(['commit-tree', Id + '^{tree}', '-p', Id + '^1',
+    '-p', Id + '^2', '-m', 'another stash']))]);
+  Git(['stash', 'store', '-m', 'two', Id]);
+  B := FRepo.Fingerprint;
+  AssertTrue('a stash seen', A <> B);
+  Git(['stash', 'drop', '-q', 'stash@{1}']);
+  A := FRepo.Fingerprint;
+  AssertTrue('a stash dropped under the top seen', A <> B);
+  { HEAD detached, on no branch for-each-ref could mark, and moved there
+    to a commit of the same tree. }
+  Git(['checkout', '-q', '--detach']);
+  B := FRepo.Fingerprint;
+  AssertTrue('a detached HEAD seen', A <> B);
+  Git(['update-ref', '--no-deref', 'HEAD', Trim(Git(['commit-tree', 'HEAD^{tree}', '-p', 'HEAD',
+    '-m', 'detached'])), 'HEAD']);
+  A := FRepo.Fingerprint;
+  AssertTrue('a detached HEAD moved seen', A <> B);
+  Git(['checkout', '-q', '-']);
+  B := FRepo.Fingerprint;
+  AssertTrue('back on the branch seen', A <> B);
+  { A tag made in a terminal. }
+  Git(['tag', 'seen']);
+  A := FRepo.Fingerprint;
+  AssertTrue('a tag seen', A <> B);
   { A remote added outside, which the forge is found by. }
   A := FRepo.Fingerprint;
   Git(['remote', 'add', 'origin', 'https://github.com/o/r.git']);
@@ -2469,7 +2498,7 @@ procedure TGitRepoTest.TestToolSearchPath;
 var
   Dirs: TStringList;
   Paths: TStringList;
-  Own, Id, Text: string;
+  Own, Id, Text, Err: string;
   Code: integer;
 begin
   Own := EnvironmentVariable('PATH');
@@ -2495,6 +2524,25 @@ begin
   AssertEquals('/no/such/git', GitExe);
   SetGitExe('');
   AssertEquals('back to the git found', FindTool('git'), GitExe);
+  { Apple's /usr/bin/git stands in for the developer folder's: that one
+    is started, with what xcrun gives a tool (SDKROOT) for git's hooks
+    and aliases. }
+  {$ifdef darwin}
+  if (GitExe = '/usr/bin/git') and (GitRunExe <> GitExe) then
+  begin
+    AssertTrue('the git behind /usr/bin/git: ' + GitRunExe, FileExists(GitRunExe));
+    AssertTrue(RunGitIn(FDir, ['-c', 'alias.sdk=!echo "sdk=$SDKROOT"', 'sdk'], Text, Err));
+    AssertTrue('SDKROOT as xcrun gives it: ' + Text, Length(Trim(Text)) > Length('sdk='));
+    { The same path set again asks xcrun again and keeps what it finds. }
+    Text := GitRunExe;
+    SetGitExe('');
+    AssertEquals('found again', Text, GitRunExe);
+  end
+  else
+    AssertEquals('git is started as named', GitExe, GitRunExe);
+  {$else}
+  AssertEquals('git is started as named', GitExe, GitRunExe);
+  {$endif}
   {$ifdef UNIX}
   MakeHistory;
   Git(['config', 'user.name', 'Gittan Test']);

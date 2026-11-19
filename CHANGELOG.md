@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Gittan is quicker on a Mac that uses Apple's git (`/usr/bin/git`): each of the many git calls behind opening a repository and watching it for changes took 6 ms and now takes 2.5, and the watching itself makes two calls every other second where it made seven.
 - Reload Extensions clicked again while extensions are still being loaded or unloaded is ignored, instead of unloading them a second time while the first reload is under way.
 - An extension can have at most 64 calls such as `git.run` or `fetch` under way at once; more are rejected. Before, thousands at once could use up the threads, after which every reload waited a second and quitting two seconds for tasks that did not exist.
 - An extension file removed or changed while Gittan loads it no longer stops the extensions after it from loading with an error dialog, and the code that runs is the code whose permissions you approved, not the file read again.
