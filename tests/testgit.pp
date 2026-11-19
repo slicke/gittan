@@ -716,6 +716,7 @@ begin
   A := FRepo.Fingerprint;
   AssertTrue('an operation begun seen', A <> B);
   Git(['bisect', 'reset']);
+  A := FRepo.Fingerprint;
   { A stash made, and one dropped from under the top, which leaves the
     tip as it was. }
   Id := Trim(Git(['stash', 'create']));
@@ -2532,6 +2533,10 @@ begin
     AssertTrue('the git behind /usr/bin/git: ' + GitRunExe, FileExists(GitRunExe));
     AssertTrue(RunGitIn(FDir, ['-c', 'alias.sdk=!echo "sdk=$SDKROOT"', 'sdk'], Text, Err));
     AssertTrue('SDKROOT as xcrun gives it: ' + Text, Length(Trim(Text)) > Length('sdk='));
+    { The same path set again asks xcrun again and keeps what it finds. }
+    Text := GitRunExe;
+    SetGitExe('');
+    AssertEquals('found again', Text, GitRunExe);
   end
   else
     AssertEquals('git is started as named', GitExe, GitRunExe);

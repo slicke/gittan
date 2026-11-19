@@ -1911,8 +1911,24 @@ begin
     Exe := FindTool('git');
   if Exe = '' then
     Exe := 'git';
+  Run := nil;
   if Exe = GGitExe then
+  begin
+    { The same path may start another git by now: the developer folder
+      /usr/bin/git stands in for was switched (xcode-select), or the
+      tools were installed since. Asked again, and nothing more done
+      when the answer is the same. }
+    {$ifdef darwin}
+    Run := MakeGitRun(Exe);
+    if (Run.Exe = GGitRun.Exe) and (string.Join(#0, Run.Env) = string.Join(#0, GGitRun.Env)) then
+    begin
+      Run.Free;
+      Exit;
+    end;
+    {$else}
     Exit;
+    {$endif}
+  end;
   GMergeTree := -1;
   GConflictStyle := 0;
   EnterCriticalSection(GConflictLock);
@@ -1931,7 +1947,8 @@ begin
     GGitExe := GOldGitExes[i]
   else
     GGitExe := Exe;
-  Run := MakeGitRun(Exe);
+  if Run = nil then
+    Run := MakeGitRun(Exe);
   GGitRuns.Add(Run);
   GGitRun := Run;
 end;
