@@ -347,8 +347,8 @@ type
     function RunDiff(const AArgs: array of string; out AOutput: string): boolean;
     function StashClashed: boolean;
     function FullPath(const APath: string): string;
-    function RefGroup(const AGroup: string; AList: TStrings;
-      AFullName: boolean = False): boolean;
+    function RefGroups(const AGroups: array of string; const ALists: array of TStrings;
+      AFullName: boolean): boolean;
   public
     {** Opens the repository that contains ADir. Returns false, with the git
       message in Error, when ADir is not inside a work tree. }
@@ -1282,6 +1282,11 @@ procedure SetGitExe(const APath: string);
 {** The path git runs by. }
 function GitExe: string;
 
+{** The git that is started: GitExe, or on macOS, when that is Apple's
+  /usr/bin/git, the git of the active developer folder it stands in
+  for. }
+function GitRunExe: string;
+
 const
   {** The oldest git Gittan supports: 2.30, the first with
     `push --force-if-includes`. }
@@ -1725,6 +1730,14 @@ begin
 end;
 {$endif}
 
+type
+  { The executable git is started by and what its environment gets
+    besides (NAME=value). }
+  TGitRun = class
+    Exe: string;
+    Env: TStringArray;
+  end;
+
 var
   GToolPath: string;
   GGitExe: string;
@@ -1732,6 +1745,11 @@ var
     starting git while the main thread changes the path copies a string
     that is not freed. }
   GOldGitExes: TStringList;
+  { What git is started by, for GGitExe (TGitRun); the earlier ones are
+    kept in GGitRuns as the paths are, so a thread starting git reads
+    one that is never freed under it. }
+  GGitRun: TGitRun;
+  GGitRuns: TList;
   { GitHasMergeTree's answer for GGitExe: -1 not asked yet, else 0 or 1.
     An integer, so a watcher thread asking while the main thread sets
     another git at most asks twice. }
@@ -1836,10 +1854,57 @@ begin
     (Pos('invalid active developer path', AError) > 0);
 end;
 
+{ What starts the git at AExe. Apple's /usr/bin/git is no git: it finds
+  the git of the active developer folder (Xcode's or the Command Line
+  Tools') and starts that, every time, which took 6 ms a call where the
+  git it found took 2.5, and Gittan makes tens of calls to show a
+  repository and several at every poll. So that git is found once, as
+  xcrun finds it, and started itself, with the variables xcrun gives
+  what it starts (SDKROOT and the like, which a hook that compiles may
+  count on). With no developer tools xcrun finds none and /usr/bin/git
+  stays, whose message says so (IsMissingDeveloperTools). }
+function MakeGitRun(const AExe: string): TGitRun;
+{$ifdef darwin}
+const
+  Shim = '/usr/bin/git';
+  Xcrun = '/usr/bin/xcrun';
+var
+  Found, Output, Err, Entry, Name: string;
+  Status, p: integer;
+{$endif}
+begin
+  Result := TGitRun.Create;
+  Result.Exe := AExe;
+  {$ifdef darwin}
+  if (AExe <> Shim) or not RunTool(Xcrun, GetTempDir, ['--find', 'git'], [], [],
+    Found, Err, Status, nil) or (Status <> 0) then
+    Exit;
+  Found := Trim(Found);
+  if (Found = '') or (Found = Shim) or not FileExists(Found) then
+    Exit;
+  if not RunTool(Xcrun, GetTempDir, ['/usr/bin/env', '-0'], [], [], Output, Err,
+    Status, nil) or (Status <> 0) then
+    Exit;
+  for Entry in Output.Split([#0]) do
+  begin
+    p := Pos('=', Entry);
+    if p < 2 then
+      Continue;
+    Name := Copy(Entry, 1, p - 1);
+    { PATH is RunTool's own, _ the shell's name of the command. }
+    if (Name <> 'PATH') and (Name <> '_') and
+      (EnvironmentVariable(Name) <> Copy(Entry, p + 1, MaxInt)) then
+      Result.Env := Concat(Result.Env, [Entry]);
+  end;
+  Result.Exe := Found;
+  {$endif}
+end;
+
 procedure SetGitExe(const APath: string);
 var
   Exe: string;
   i: integer;
+  Run: TGitRun;
 begin
   Exe := APath;
   if Exe = '' then
@@ -1866,11 +1931,28 @@ begin
     GGitExe := GOldGitExes[i]
   else
     GGitExe := Exe;
+  Run := MakeGitRun(Exe);
+  GGitRuns.Add(Run);
+  GGitRun := Run;
 end;
 
 function GitExe: string;
 begin
   Result := GGitExe;
+end;
+
+function GitRunExe: string;
+begin
+  Result := GGitRun.Exe;
+end;
+
+procedure FreeGitRuns;
+var
+  i: integer;
+begin
+  for i := 0 to GGitRuns.Count - 1 do
+    TObject(GGitRuns[i]).Free;
+  GGitRuns.Free;
 end;
 
 { Whether the folder name A ("v24.21.0") is a newer node version than
@@ -2600,7 +2682,10 @@ function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
 var
   Args, Env: array of string;
   Status, i: integer;
+  Run: TGitRun;
+  Entry: string;
 begin
+  Run := GGitRun;
   SetLength(Args, 6 + Length(AArgs));
   Args[0] := '-c';
   Args[1] := 'core.quotepath=false';
@@ -2638,8 +2723,11 @@ begin
     Env := Concat(Env, ['GIT_EDITOR=:']);
   if not HasEnvName(AEnv, 'GIT_SEQUENCE_EDITOR') then
     Env := Concat(Env, ['GIT_SEQUENCE_EDITOR=:']);
+  for Entry in Run.Env do
+    if not HasEnvName(AEnv, Copy(Entry, 1, Pos('=', Entry) - 1)) then
+      Env := Concat(Env, [Entry]);
   { The user's own GIT_INDEX_FILE goes even when none is given. }
-  if not RunTool(GGitExe, ADir, Args, ['GIT_INDEX_FILE='], Env, AOutput, AError,
+  if not RunTool(Run.Exe, ADir, Args, ['GIT_INDEX_FILE='], Env, AOutput, AError,
     Status, AOnOutput, AInput, ACancel) then
   begin
     if Assigned(ACancel) and ACancel() then
@@ -3856,48 +3944,65 @@ begin
   RunDiff(['--no-color', '--no-ext-diff'], Result);
 end;
 
-{ Appends the refs under AGroup (refs/heads, refs/remotes or refs/tags),
-  newest first, to AList: by creatordate, the commit's date for a branch
-  or a lightweight tag and the tagger's for an annotated one, which has
-  no committerdate and sorted last. A symbolic ref such as
-  origin/HEAD (short name "origin") is skipped: it only points at
-  another one in the list. }
+{ Appends the refs under each of AGroups (refs/heads, refs/remotes or
+  refs/tags) to the list of ALists at its place, newest first: by
+  creatordate, the commit's date for a branch or a lightweight tag and
+  the tagger's for an annotated one, which has no committerdate and
+  sorted last. A symbolic ref such as origin/HEAD (short name "origin")
+  is skipped: it only points at another one in the list. One
+  for-each-ref for all the groups, which sorts them as one list; each
+  group takes its own refs out of it in that order. }
 { refname:short gives heads/foo for a branch foo beside a tag foo, which
   git switch does not take, so AFullName gives the name under the group
   whole (lstrip=2: foo, origin/foo). }
-function TGittanRepo.RefGroup(const AGroup: string; AList: TStrings;
-  AFullName: boolean): boolean;
+function TGittanRepo.RefGroups(const AGroups: array of string;
+  const ALists: array of TStrings; AFullName: boolean): boolean;
 var
-  Output, Line, Name, Fmt: string;
+  Output, Line, Name, Prefix: string;
+  Args: array of string;
+  Fields: TStringArray;
   Raw, Seen: TStringList;
-  Tab: integer;
+  g: integer;
 begin
+  SetLength(Args, 3 + Length(AGroups));
+  Args[0] := 'for-each-ref';
   if AFullName then
-    Fmt := '--format=%(refname:lstrip=2)%09%(symref)'
+    Args[1] := '--format=%(refname)%09%(refname:lstrip=2)%09%(symref)'
   else
-    Fmt := '--format=%(refname:short)%09%(symref)';
-  Result := RunGit(FRoot, ['for-each-ref', Fmt, '--sort=-creatordate', AGroup], Output);
+    Args[1] := '--format=%(refname)%09%(refname:short)%09%(symref)';
+  Args[2] := '--sort=-creatordate';
+  for g := 0 to High(AGroups) do
+    Args[3 + g] := AGroups[g];
+  Result := RunGit(FRoot, Args, Output);
   if not Result then
     Exit;
   Raw := TStringList.Create;
   Seen := TStringList.Create;
   try
     { Fix and fix are two branches (on a file system that tells them
-      apart): the names are compared as they are, whatever AList does. }
+      apart): the names are compared as they are, whatever the list
+      does. }
     Seen.CaseSensitive := True;
     Seen.Sorted := True;
-    Seen.AddStrings(AList);
     Raw.Text := Output;
-    for Line in Raw do
+    for g := 0 to High(AGroups) do
     begin
-      Tab := Pos(#9, Line);
-      if (Tab = 0) or (Tab < Length(Line)) then
-        Continue;
-      Name := Copy(Line, 1, Tab - 1);
-      if (Name <> '') and (Seen.IndexOf(Name) < 0) then
+      Prefix := AGroups[g] + '/';
+      Seen.Clear;
+      Seen.AddStrings(ALists[g]);
+      for Line in Raw do
       begin
-        Seen.Add(Name);
-        AList.Add(Name);
+        if Copy(Line, 1, Length(Prefix)) <> Prefix then
+          Continue;
+        Fields := Line.Split([#9]);
+        if (Length(Fields) <> 3) or (Fields[2] <> '') then
+          Continue;
+        Name := Fields[1];
+        if (Name <> '') and (Seen.IndexOf(Name) < 0) then
+        begin
+          Seen.Add(Name);
+          ALists[g].Add(Name);
+        end;
       end;
     end;
   finally
@@ -3906,15 +4011,13 @@ begin
   end;
 end;
 
-{ for-each-ref sorts within each group, so the groups are asked for one
-  by one: local branches, remote branches, tags. }
 function TGittanRepo.Refs(AList: TStrings): boolean;
 begin
   AList.Clear;
   if FRoot = '' then
     Exit(False);
-  Result := RefGroup('refs/heads', AList) and RefGroup('refs/remotes', AList) and
-    RefGroup('refs/tags', AList);
+  { Local branches, remote branches, tags. }
+  Result := RefGroups(['refs/heads', 'refs/remotes', 'refs/tags'], [AList, AList, AList], False);
 end;
 
 function TGittanRepo.Branches(ALocal, ARemote: TStrings): boolean;
@@ -3923,7 +4026,7 @@ begin
   ARemote.Clear;
   if FRoot = '' then
     Exit(False);
-  Result := RefGroup('refs/heads', ALocal, True) and RefGroup('refs/remotes', ARemote, True);
+  Result := RefGroups(['refs/heads', 'refs/remotes'], [ALocal, ARemote], True);
 end;
 
 function TGittanRepo.GoneBranches(AList: TStrings): boolean;
@@ -8693,7 +8796,7 @@ var
   Paths, Keys: TStringList;
   Values: TStringArray;
   Info: TSearchRec;
-  FileName, Id, Left, Right, Stamp, Hash, Cached, Mark: string;
+  FileName, Id, Left, Right, Stamp, Hash, Cached, Mark, RefText: string;
   i, k: integer;
   Settled: boolean;
 
@@ -8724,9 +8827,38 @@ begin
   try
     if not ChangedPaths(Paths) then
       Exit;
-    Result := Branch + #10;
-    if RunGit(FRoot, ['rev-parse', '--verify', '-q', 'HEAD'], Id) then
-      Result := Result + Trim(Id);
+    { Every ref in one call: the branches, where a branch made, deleted
+      or moved without touching HEAD shows alone, and Undo follows; the
+      tags and the remote branches, which the snapshot lists as well and
+      a tag made or a fetch run in a terminal changes alone; the stash's
+      tip. The branch HEAD is on is marked (%(HEAD)) and its tip is
+      HEAD's commit, so symbolic-ref and rev-parse are asked only when
+      none is, HEAD detached or before the first commit (as
+      ReadRefState). The upstream is named on the branch's line and its
+      commit is on its own, so a fetch that moves it alone shows, and
+      the ahead and behind counts follow. Each call starts a git, and
+      the poll made six of them for this every other second. }
+    if not RunGit(FRoot, ['for-each-ref',
+      '--format=%(objectname) %(refname) %(HEAD) %(upstream)', 'refs/heads', 'refs/tags',
+      'refs/remotes', 'refs/stash'], RefText) then
+      RefText := '';
+    { No ref name has a space or an asterisk in it. }
+    k := Pos(' * ', RefText);
+    if k > 0 then
+    begin
+      i := k;
+      while (i > 1) and (RefText[i - 1] <> #10) do
+        Dec(i);
+      Id := Copy(RefText, i, k - i);
+      Result := Copy(Id, Pos(' ', Id) + 1 + Length('refs/heads/'), MaxInt) + #10 +
+        Copy(Id, 1, Pos(' ', Id) - 1);
+    end
+    else
+    begin
+      Result := Branch + #10;
+      if RunGit(FRoot, ['rev-parse', '--verify', '-q', 'HEAD'], Id) then
+        Result := Result + Trim(Id);
+    end;
     if IsRange then
     begin
       SplitRange(Left, Right);
@@ -8739,25 +8871,26 @@ begin
       FBase + '^{commit}'], Id) then
       Result := Result + ' ' + Trim(Id);
     Result := Result + #10;
-    { The upstream, which a fetch moves alone and the ahead and behind
-      counts follow, and what git is in the middle of, which a bisect
-      started on a clean tree changes alone. }
-    if RunGit(FRoot, ['rev-parse', '--verify', '-q', '@{upstream}'], Id) then
-      Result := Result + 'upstream ' + Trim(Id) + #10;
+    { What git is in the middle of, which a bisect started on a clean
+      tree changes alone. }
     Result := Result + 'operation ' + Operation + #10;
-    { The local branches, which a branch made, deleted or moved without
-      touching HEAD changes alone, and Undo follows. }
-    if RunGit(FRoot, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads'], Id) then
-      Result := Result + Trim(Id) + #10;
-    { The tags and the remote branches, which the snapshot lists as well:
-      a tag made or a fetch run in a terminal changes them alone. A hash,
-      as a repository may have thousands. }
-    if RunGit(FRoot, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/tags',
-      'refs/remotes'], Id) then
-      Result := Result + 'refs ' + MD5Print(MD5String(Id)) + #10;
-    { The stashes, which the status bar counts and lists. }
-    if RunGit(FRoot, ['stash', 'list', '--format=%H'], Id) then
-      Result := Result + 'stash ' + StringReplace(Trim(Id), #10, ' ', [rfReplaceAll]) + #10;
+    { A hash, as a repository may have thousands of refs. }
+    Result := Result + 'refs ' + MD5Print(MD5String(RefText)) + #10;
+    { The stashes, which the status bar counts and lists: with none there
+      is no refs/stash. One dropped from under the top leaves the tip as
+      it was, but not the stash's reflog, a file whose size and time say
+      it; where the refs are kept without one (reftable) git lists
+      them. }
+    if Pos(' refs/stash ', RefText) > 0 then
+      if (FGitDir <> '') and StatExact(IncludeTrailingPathDelimiter(CommonDir) + 'logs' +
+        PathDelim + 'refs' + PathDelim + 'stash', Info) then
+      begin
+        Result := Result + 'stash ' + FormatDateTime('yyyymmddhhnnsszzz', Info.TimeStamp) +
+          ' ' + IntToStr(Info.Size) + #10;
+        FindClose(Info);
+      end
+      else if RunGit(FRoot, ['stash', 'list', '--format=%H'], Id) then
+        Result := Result + 'stash ' + StringReplace(Trim(Id), #10, ' ', [rfReplaceAll]) + #10;
     { The repository's config, where `git remote add` and `set-url` write
       the remotes the forge is found by. }
     if (FGitDir <> '') and StatExact(IncludeTrailingPathDelimiter(CommonDir) + 'config', Info) then
@@ -9384,9 +9517,11 @@ initialization
   InitCriticalSection(GConflictLock);
   GToolPath := MakeToolPath;
   GOldGitExes := TStringList.Create;
+  GGitRuns := TList.Create;
   SetGitExe('');
 
 finalization
+  FreeGitRuns;
   GOldGitExes.Free;
   DoneCriticalSection(GConflictLock);
   {$ifdef unix}
