@@ -65,6 +65,7 @@ type
     procedure TestReportPython;
     procedure TestReportRenamed;
     procedure TestResolveVersions;
+    procedure TestResolvedPastAsked;
     procedure TestPickedChecks;
     procedure TestTextOfUnreadable;
     procedure TestChoice;
@@ -679,6 +680,41 @@ begin
   AssertTrue(Ch[0].Kind = dcChanged);
   AssertEquals('3.2.0', Ch[0].OldVersion);
   AssertEquals('3.4.0', Ch[0].NewVersion);
+end;
+
+procedure TProjectTest.TestResolvedPastAsked;
+var
+  D: TGittanDependencies;
+  T: TGittanProjectBlock;
+begin
+  AssertTrue('past the caret''s floor', ResolvedPastAsked('^4.17.0', '4.21.2', True));
+  AssertFalse('at the floor', ResolvedPastAsked('^4.17.0', '4.17.0', True));
+  AssertTrue('a bare version', ResolvedPastAsked('1.0', '1.0.210', True));
+  AssertTrue(ResolvedPastAsked('~1.2', '1.2.9', True));
+  AssertTrue(ResolvedPastAsked('>=2.0', '2.32.3', False));
+  AssertTrue('npm''s v', ResolvedPastAsked('^v1.2.0', '1.3.0', True));
+  AssertFalse('the release is not past itself', ResolvedPastAsked('=1.2.3', '1.2.3', True));
+  AssertTrue('past a pre-release', ResolvedPastAsked('^2.0.0-beta.1', '2.0.0', True));
+  AssertFalse('a range has no one floor', ResolvedPastAsked('>=1.0, <2', '1.5.0', True));
+  AssertFalse(ResolvedPastAsked('>=1.0 <2', '1.5.0', True));
+  AssertFalse(ResolvedPastAsked('^1 || ^2', '2.5.0', True));
+  AssertFalse('a wildcard', ResolvedPastAsked('1.2.x', '1.2.9', True));
+  AssertFalse(ResolvedPastAsked('*', '1.2.9', True));
+  AssertFalse('a tag', ResolvedPastAsked('latest', '1.2.9', True));
+  AssertFalse('a URL', ResolvedPastAsked('github:a/b#v1.0.0', '1.2.9', True));
+  AssertFalse(ResolvedPastAsked('workspace:^1.0.0', '1.2.9', True));
+  AssertFalse('an upper bound', ResolvedPastAsked('<2', '1.2.9', True));
+  AssertFalse('nothing locked', ResolvedPastAsked('^1.0.0', '', True));
+  { The table marks the one past what is asked for. }
+  D := nil;
+  AddDependency(D, 'past', '^4.17.0', '4.21.2', '');
+  AddDependency(D, 'floor', '^4.17.0', '4.17.0', '');
+  T := DependencyTable(TGittanProjectKind, '', D, nil);
+  AssertTrue('a badge', T.Rows[0].Cells[2].Style = psBadge);
+  AssertEquals('4.21.2', T.Rows[0].Cells[2].Text);
+  AssertTrue('a hint', T.Rows[0].Cells[2].Hint <> '');
+  AssertTrue('plain at the floor', T.Rows[1].Cells[2].Style = psText);
+  AssertEquals('4.17.0', T.Rows[1].Cells[2].Text);
 end;
 
 procedure TProjectTest.TestResolveVersions;

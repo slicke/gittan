@@ -46,9 +46,11 @@ type
   TGittanProjectChecks = array of TGittanProjectCheck;
 
   {** How the page paints a cell: plain text, dimmed, bold, in the link
-    color, in the ok, warning or error color, or as a button (with a
-    Command; the page runs it as the Commands page would). }
-  TGittanProjectStyle = (psText, psDim, psStrong, psLink, psOk, psWarn, psError, psButton);
+    color, in the ok, warning or error color, as a button (with a
+    Command; the page runs it as the Commands page would), or as a
+    badge: the text on a rounded fill. }
+  TGittanProjectStyle = (psText, psDim, psStrong, psLink, psOk, psWarn, psError, psButton,
+    psBadge);
 
   {** A cell of a table or a fact's value. Url makes it a link that
     opens in the browser, Command a button that runs the shell line
@@ -314,10 +316,16 @@ function DependencyChanges(const AOld, ANew: TGittanDependencies;
 function ReadDependencies(AKind: TGittanProjectKindClass; AContext: TGittanProjectContext;
   out ADependencies: TGittanDependencies; out AChanges: TGittanDependencyChanges): boolean;
 
+{** Whether the lock file's AResolved is past the version AAsked names:
+  4.21.2 for "^4.17.0". Only for a single constraint with a floor ("^",
+  "~", "~=", ">=", "=", "==" or none before a version); a range, a
+  wildcard, a tag or a URL names no one version to be past. }
+function ResolvedPastAsked(const AAsked, AResolved: string; ASemver: boolean): boolean;
+
 {** The table of dependencies: the name (a link to the registry), what
-  is asked for, what is resolved, and the change since the tag at the
-  right; the groups under subheadings, the removed ones at their group's
-  end. }
+  is asked for, what is resolved (a badge when it is past what is asked
+  for, ResolvedPastAsked), and the change since the tag at the right;
+  the groups under subheadings, the removed ones at their group's end. }
 function DependencyTable(AKind: TGittanProjectKindClass; const ASince: string;
   const ADependencies: TGittanDependencies; const AChanges: TGittanDependencyChanges):
   TGittanProjectBlock;
@@ -364,6 +372,7 @@ resourcestring
   rsRemoved = 'removed';
   rsChangedHint = '%s was %s at %s';
   rsAddedHint = '%s is new since %s';
+  rsPastAskedHint = '%s is locked at %s, past the %s asked for';
   rsRemovedHint = '%s was %s at %s and is gone';
   rsGroupDev = 'Development';
   rsGroupBuild = 'Build';
@@ -1036,6 +1045,34 @@ begin
   Result := Length(Alternatives) = 0;
 end;
 
+function ResolvedPastAsked(const AAsked, AResolved: string; ASemver: boolean): boolean;
+var
+  Text, Op: string;
+  i: integer;
+begin
+  Result := False;
+  Text := Trim(AAsked);
+  if (AResolved = '') or (Text = '') then
+    Exit;
+  for i := 1 to Length(Text) do
+    if Text[i] in [' ', ',', '|', '*', ':', '/', '<'] then
+      Exit;
+  i := 1;
+  while (i <= Length(Text)) and (Text[i] in ['>', '=', '!', '~', '^']) do
+    Inc(i);
+  Op := Copy(Text, 1, i - 1);
+  if (Op <> '') and (Op <> '^') and (Op <> '~') and (Op <> '~=') and (Op <> '>=') and
+    (Op <> '=') and (Op <> '==') then
+    Exit;
+  { npm's "v1.2". }
+  if (i <= Length(Text)) and (Text[i] = 'v') then
+    Inc(i);
+  Text := Copy(Text, i, MaxInt);
+  if (Text = '') or not (Text[1] in ['0'..'9']) or (Pos('.x', LowerCase(Text)) > 0) then
+    Exit;
+  Result := CompareVersions(AResolved, Text, ASemver) > 0;
+end;
+
 function KeyOf(AKind: TGittanProjectKindClass; const AName: string): string;
 begin
   if AKind = nil then
@@ -1227,8 +1264,8 @@ var
   Groups: TStringArray;
   g, i, k: integer;
   D: TGittanDependency;
-  Note: TGittanProjectCell;
-  Resolved, Url: string;
+  Note, Locked: TGittanProjectCell;
+  Url: string;
 
   procedure AddGroup(const AGroup: string);
   var
@@ -1273,13 +1310,16 @@ begin
           end;
       { The resolved version when it differs from what is asked for
         (go.mod asks for the exact one). }
-      if D.Resolved <> D.Version then
-        Resolved := D.Resolved
+      if D.Resolved = D.Version then
+        Locked := ProjectCell('')
+      else if ResolvedPastAsked(D.Version, D.Resolved, AKind.SemverRanges) then
+        Locked := ProjectCell(D.Resolved, psBadge, Format(rsPastAskedHint, [D.Name, D.Resolved,
+          D.Version]))
       else
-        Resolved := '';
+        Locked := ProjectCell(D.Resolved);
       Url := AKind.PackageUrl(D.Name);
       AddRow(Result, ProjectRow([ProjectCell(D.Name, psStrong, Url, Url),
-        ProjectCell(D.Version, psDim), ProjectCell(Resolved), Note]));
+        ProjectCell(D.Version, psDim), Locked, Note]));
     end;
     for i := 0 to High(AChanges) do
       if (AChanges[i].Kind = dcRemoved) and (AChanges[i].Group = Groups[g]) then

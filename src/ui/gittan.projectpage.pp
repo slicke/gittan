@@ -10,7 +10,8 @@ unit gittan.projectpage;
   table (column headers when it has them, subheading rows, the last
   column at the right end when it asks), the checks in a card with Add
   to .gitignore, or a dim note. A cell with a Url is a link, one with a
-  Command a button that runs it, and its Hint is the tooltip.
+  Command a button that runs it, a badge has a rounded fill behind it,
+  and a cell's Hint is the tooltip.
 
   At the right of the title, a chip names the kinds shown, and says
   whether the files told them or the user picked them; a click asks
@@ -155,6 +156,7 @@ const
   ButtonPadX = 10;
   ButtonPadY = 1;
   ButtonRadius = 10;
+  BadgePadX = 7;
   ChipPadX = 10;
   ChipPadY = 3;
   { The checks' card: its padding, its corner radius, the warning
@@ -375,7 +377,7 @@ begin
 end;
 
 { The width ACell's text needs: bold for a strong one, a button's
-  padding. }
+  padding, a badge's at its right. }
 function TGittanProjectPage.CellWidth(const ACell: TGittanProjectCell): integer;
 begin
   FC.Font := Font;
@@ -383,7 +385,9 @@ begin
     FC.Font.Style := [fsBold];
   Result := FC.TextWidth(ACell.Text);
   if ACell.Style = psButton then
-    Inc(Result, 2 * Px(ButtonPadX));
+    Inc(Result, 2 * Px(ButtonPadX))
+  else if ACell.Style = psBadge then
+    Inc(Result, Px(BadgePadX));
   FC.Font.Style := [];
 end;
 
@@ -423,6 +427,28 @@ begin
       FC.Font.Color := FLink;
     FC.TextOut(R.Left + Px(ButtonPadX), R.Top + Px(ButtonPadY),
       FitTextRight(FC, ACell.Text, R.Right - R.Left - 2 * Px(ButtonPadX)));
+    Exit;
+  end;
+  if ACell.Style = psBadge then
+  begin
+    { The text stays where a plain cell's is, in line with the column:
+      the fill goes around it, into the gap at the left. }
+    Shown := FitTextRight(FC, ACell.Text, AWidth - Px(BadgePadX));
+    R := Rect(X - Px(BadgePadX), Y + Px(RowPadY) - Px(ButtonPadY),
+      X + FC.TextWidth(Shown) + Px(BadgePadX),
+      Y + Px(RowPadY) + TextH + Px(ButtonPadY));
+    FC.Pen.Style := psClear;
+    FC.Brush.Style := bsSolid;
+    FC.Brush.Color := FCard;
+    FC.RoundRect(R, Px(ButtonRadius), Px(ButtonRadius));
+    FC.Pen.Style := psSolid;
+    FC.Brush.Style := bsClear;
+    FC.Font.Color := FOk;
+    FC.TextOut(X, Y + Px(RowPadY), Shown);
+    if Shown <> ACell.Text then
+      AddLink(R, lkHint, '', '', ACell.Text + LineEnding + ACell.Hint)
+    else if ACell.Hint <> '' then
+      AddLink(R, lkHint, '', '', ACell.Hint);
     Exit;
   end;
   if ACell.Style = psStrong then
