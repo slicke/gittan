@@ -31,6 +31,7 @@ var
 begin
   Can := (FRepo <> nil) and (FRepo.Root <> '') and (FRemoteJob = nil) and
     (FCommitJob = nil);
+  HoldWatcher;
   { The status bar's buttons are dimmed while a job runs, from its start,
     which also moves what it says into their row. }
   UpdateStatusTransport;
@@ -116,6 +117,7 @@ begin
     FRemoteJob.Refs := FLfsRefs;
   FPushSilent := False;
   FPushStop := False;
+  HoldWatcher;
   FRemoteJob.Start;
   FPushTimer.Enabled := FRemoteJob.Stoppable;
   if FRemoteJob.Stoppable then

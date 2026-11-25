@@ -39,6 +39,7 @@ begin
   FRemoteJob.Submodules := ASubmodules;
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
+  HoldWatcher;
   FRemoteJob.Start;
   FStatus.ShowBusy(Format(rsCloning, [CloneFolderName(AUrl)]), HintDown);
   ShowRemoteNotice;

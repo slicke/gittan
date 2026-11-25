@@ -152,7 +152,8 @@ type
 implementation
 
 uses
-  Math, LCLIntf, BGRABitmap, BGRABitmapTypes, gittan.theme, gittan.dialogicon;
+  Math, LCLIntf, BGRABitmap, BGRABitmapTypes, gittan.theme, gittan.dialogicon,
+  gittan.reviews;
 
 type
   { The page of an answer, which the notice measures before it shows. }
@@ -201,6 +202,7 @@ begin
   FConsole.Parent := Self;
   FConsole.Visible := False;
   FPage := TNoticePage.Create(Self);
+  FPage.KeepHistory := False;
   FPage.Parent := Self;
   FPage.Visible := False;
   FPage.BorderStyle := bsNone;
@@ -353,8 +355,7 @@ begin
   FDetail := AValue;
   if FMarkdown then
   begin
-    FPage.LoadMarkdown(AValue);
-    FPage.ClearHistory;
+    FPage.LoadMarkdown(TameMarkdown(AValue));
   end
   else
     FConsole.Text := AValue;
@@ -414,8 +415,7 @@ begin
   FKind := nkNormal;
   FMarkdown := True;
   FPage.Font.Size := Font.Size;
-  FPage.LoadMarkdown(AMarkdown);
-  FPage.ClearHistory;
+  FPage.LoadMarkdown(TameMarkdown(AMarkdown));
   FPage.ScrollTo(0);
   Reveal;
 end;

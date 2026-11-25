@@ -100,6 +100,8 @@ type
     FBack, FText, FDim, FHover, FSelectedBack, FAdded, FDeleted, FLine, FLink: TColor;
     FNotesTitle: string;
     FNotes: TGittanPullNotes;
+    { The first of them that is shown. }
+    FNotesFirst: integer;
     FNoteBoxes: array of TGittanSummaryNoteBox;
     { Each note's parts (CommentParts) and their markup (MarkdownToInk,
       the paths linked), made once per SetNotes: a new width lays them
@@ -268,6 +270,7 @@ type
     procedure SetMoreHot(AValue: integer);
     procedure LayoutNotes;
     procedure PaintNotes(var Y: integer);
+    procedure UpdateCursor;
     procedure SetReviewHot(AValue: boolean);
     procedure LayoutReview;
     procedure PaintReview(var Y: integer);
@@ -449,7 +452,7 @@ function ReviewPullLine(const APull: TGittanPullRequest): string;
 implementation
 
 uses
-  Math, DateUtils, LazUTF8, StrUtils, InkMarkdown, gittan.textfit, gittan.theme, gittan.smooth, Forms,
+  LCLIntf, Math, DateUtils, LazUTF8, StrUtils, InkMarkdown, gittan.textfit, gittan.theme, gittan.smooth, Forms,
   gittan.signmark;
 
 resourcestring
@@ -480,6 +483,7 @@ resourcestring
   rsNoteApproved = 'approved';
   rsNoteChangesRequested = 'requested changes';
   rsNoteDismissed = 'review dismissed';
+  rsNotesEarlier = '%d earlier on %s';
   rsNoteLink = '%s ↗';
   rsNoteMore = 'Show more';
   rsNoteLess = 'Show less';
@@ -502,6 +506,8 @@ const
     control over 32767 px fails (on GTK the rows past it cannot be
     scrolled to). The rows that do not fit are left to the file tree. }
   MaxSummaryHeight = 32000;
+  { What the conversation may take of it. }
+  MaxNotesHeight = 20000;
   { The row bars take a share of the width, within these. }
   MinBarWidth = 96;
   MaxBarWidth = 200;
@@ -767,7 +773,7 @@ end;
 function TGittanSummary.ShownRows: integer;
 begin
   Result := Length(FStats);
-  if FRowsTop + (Result + 1) * Px(RowHeight) + Px(Pad) > MaxSummaryHeight then
+  if FRowsTop + Result * Px(RowHeight) + Px(Pad) > MaxSummaryHeight then
     Result := Max(0, (MaxSummaryHeight - FRowsTop - Px(Pad)) div Px(RowHeight) - 1);
 end;
 
@@ -959,7 +965,7 @@ end;
 procedure TGittanSummary.LayoutNotes;
 var
   C: TCanvas;
-  Inner, LineHeight, i, k, At, HideBelow: integer;
+  Inner, LineHeight, i, k, At, HideBelow, Room: integer;
   Box: TGittanSummaryNoteBox;
   Parts: TGittanCommentParts;
   Row: TGittanSummaryNoteRow;
@@ -969,6 +975,7 @@ begin
     Exit;
   FNotesWidth := Width;
   FNoteBoxes := nil;
+  FNotesFirst := 0;
   FNotesHeight := 0;
   if Length(FNotes) = 0 then
     Exit;
@@ -989,10 +996,10 @@ begin
       SetLength(FNoteMarkup[i], Length(Parts));
       for k := 0 to High(Parts) do
         if (Parts[k].Kind = cpText) and Assigned(FOnFileExists) then
-          FNoteMarkup[i][k] := MarkdownToInk(LinkFilePaths(Parts[k].Text, FOnFileExists),
-            [imoInlineHTML])
+          FNoteMarkup[i][k] := MarkdownToInk(LinkFilePaths(TameMarkdown(Parts[k].Text), FOnFileExists),
+            [imoInlineHTML, imoNoFootnotes])
         else
-          FNoteMarkup[i][k] := MarkdownToInk(Parts[k].Text, [imoInlineHTML]);
+          FNoteMarkup[i][k] := MarkdownToInk(TameMarkdown(Parts[k].Text), [imoInlineHTML, imoNoFootnotes]);
     end;
   end;
   SetLength(FNoteBoxes, Length(FNotes));
@@ -1038,6 +1045,8 @@ begin
     Box.Cut := Box.Long and (FNotesOpen.IndexOf(NoteDetailsKey(i, -1)) < 0);
     if Box.Cut then
       Box.TextHeight := NoteMaxLines * LineHeight;
+    { One too long for the summary ends there; its link leads on. }
+    Box.TextHeight := Min(Box.TextHeight, MaxNotesHeight div 2);
     Box.Top := At;
     { The header line, then the text under a little room. }
     Box.Height := 2 * Px(NotePadY) + LineHeight;
@@ -1047,6 +1056,24 @@ begin
       Inc(Box.Height, LineHeight);
     FNoteBoxes[i] := Box;
     Inc(At, Box.Height + Px(NoteGap));
+  end;
+  { The newest that fit, so the files below them keep their room; a line
+    under the heading says how many came before. }
+  FNotesFirst := High(FNoteBoxes);
+  Room := MaxNotesHeight - FNoteBoxes[FNotesFirst].Height;
+  while (FNotesFirst > 0) and (FNoteBoxes[FNotesFirst - 1].Height + Px(NoteGap) <= Room) do
+  begin
+    Dec(FNotesFirst);
+    Dec(Room, FNoteBoxes[FNotesFirst].Height + Px(NoteGap));
+  end;
+  if FNotesFirst > 0 then
+  begin
+    At := 2 * (LineHeight + Px(NoteGap));
+    for i := FNotesFirst to High(FNoteBoxes) do
+    begin
+      FNoteBoxes[i].Top := At;
+      Inc(At, FNoteBoxes[i].Height + Px(NoteGap));
+    end;
   end;
   FNotesHeight := At + Px(Pad) div 2;
 end;
@@ -1148,7 +1175,13 @@ begin
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Color := FDim;
   Canvas.TextOut(Px(Pad), Y, FNotesTitle);
-  for i := 0 to High(FNoteBoxes) do
+  if FNotesFirst > 0 then
+  begin
+    Canvas.Font.Style := [];
+    Canvas.TextOut(Px(Pad), Y + LineHeight + Px(NoteGap), Format(rsNotesEarlier, [FNotesFirst,
+      FForgeName]));
+  end;
+  for i := FNotesFirst to High(FNoteBoxes) do
   begin
     At := Y + FNoteBoxes[i].Top;
     Card := Rect(Px(Pad), At, Width - Px(Pad), At + FNoteBoxes[i].Height);
@@ -1225,8 +1258,12 @@ begin
     FNoteBoxes[i].TextRect := Rect(X, At, Card.Right - Px(NotePadX), At + FNoteBoxes[i].TextHeight);
     if FNoteBoxes[i].TextHeight > 0 then
     begin
-      Canvas.Clipping := True;
-      Canvas.ClipRect := FNoteBoxes[i].TextRect;
+      { Not through Clipping and ClipRect: on GTK 3 they reset cairo's
+        clip, and the rest would be painted over the control's
+        neighbours. }
+      Canvas.SaveHandleState;
+      R := FNoteBoxes[i].TextRect;
+      IntersectClipRect(Canvas.Handle, R.Left, R.Top, R.Right, R.Bottom);
       try
         for k := 0 to High(FNoteBoxes[i].Rows) do
         begin
@@ -1245,7 +1282,7 @@ begin
           HTMLDrawOpt(Canvas, R, [], FNoteBoxes[i].Rows[k].Markup, NoteInkOptions, FInk);
         end;
       finally
-        Canvas.Clipping := False;
+        Canvas.RestoreHandleState;
       end;
       Canvas.Font := Font;
       Canvas.Brush.Style := bsClear;
@@ -1305,10 +1342,7 @@ begin
   if FReviewHot = AValue then
     Exit;
   FReviewHot := AValue;
-  if AValue then
-    Cursor := crHandPoint
-  else
-    Cursor := crDefault;
+  UpdateCursor;
   Invalidate;
 end;
 
@@ -1891,10 +1925,7 @@ begin
   if FSyncHot = AValue then
     Exit;
   FSyncHot := AValue;
-  if AValue then
-    Cursor := crHandPoint
-  else
-    Cursor := crDefault;
+  UpdateCursor;
   Invalidate;
 end;
 
@@ -1904,15 +1935,10 @@ begin
     Exit;
   FActionLinkHot := AValue;
   if AValue then
-  begin
-    Cursor := crHandPoint;
-    Hint := FActionHint;
-  end
+    Hint := FActionHint
   else
-  begin
-    Cursor := crDefault;
     Hint := '';
-  end;
+  UpdateCursor;
   Invalidate;
 end;
 
@@ -1931,10 +1957,7 @@ begin
   if FTotalsHot = AValue then
     Exit;
   FTotalsHot := AValue;
-  if AValue then
-    Cursor := crHandPoint
-  else
-    Cursor := crDefault;
+  UpdateCursor;
   Invalidate;
 end;
 
@@ -1943,10 +1966,7 @@ begin
   if FBaseHot = AValue then
     Exit;
   FBaseHot := AValue;
-  if AValue then
-    Cursor := crHandPoint
-  else
-    Cursor := crDefault;
+  UpdateCursor;
   Invalidate;
 end;
 
@@ -1955,10 +1975,7 @@ begin
   if FBranchHot = AValue then
     Exit;
   FBranchHot := AValue;
-  if AValue then
-    Cursor := crHandPoint
-  else
-    Cursor := crDefault;
+  UpdateCursor;
   Invalidate;
 end;
 
@@ -2715,10 +2732,18 @@ begin
   SetCardLinkHot(CardLinkAt(X, Y));
   if Assigned(FOnBehindAction) then
     SetBehindHot(BehindAt(X, Y));
-  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or FTrustHot or (FStepHot >= 0) or (FBehindHot >= 0) or FTextLinkHot or
-    FDetailsHot or (FMoreHot >= 0) or (FCardLinkHot >= 0) then
+  UpdateCursor;
+end;
+
+{ The hand over anything a click does something to. Last in a mouse move,
+  so the parts set one after the other do not undo it. }
+procedure TGittanSummary.UpdateCursor;
+begin
+  if (FLinkHot >= 0) or (FActionHot >= 0) or FBackHot or FTrustHot or (FStepHot >= 0) or
+    (FBehindHot >= 0) or FTextLinkHot or FDetailsHot or (FMoreHot >= 0) or (FCardLinkHot >= 0) or
+    FBranchHot or FBaseHot or FSyncHot or FTotalsHot or FReviewHot or FActionLinkHot then
     Cursor := crHandPoint
-  else if not (FBranchHot or FBaseHot or FSyncHot or FTotalsHot or FReviewHot or FActionLinkHot) then
+  else
     Cursor := crDefault;
 end;
 
@@ -2743,6 +2768,7 @@ begin
   SetStepHot(-1);
   SetCardLinkHot(-1);
   SetBehindHot(-1);
+  UpdateCursor;
 end;
 
 procedure TGittanSummary.MouseUp(Button: TMouseButton; Shift: TShiftState;

@@ -85,6 +85,9 @@ begin
   FMoveUsedMemo := UsedMemo;
   FMoveBranch := NewName;
   FCommitJob.OnDone := @CommitJobDone;
+  { What an agent writes is for the files as they were before it. }
+  AbandonMessageJob;
+  HoldWatcher;
   FCommitJob.Start;
   FStatus.ShowBusy(Format(rsToBranchMoving, [NewName]));
   UpdateCommitState;

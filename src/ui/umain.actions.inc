@@ -1577,17 +1577,6 @@ begin
   ShowBranchList(blSwitch, AScreenRect);
 end;
 
-{ Whether ABranch is checked out in one of ATrees. }
-function BranchInWorktree(const ATrees: TGittanWorktrees; const ABranch: string): boolean;
-var
-  i: integer;
-begin
-  for i := 0 to High(ATrees) do
-    if ATrees[i].Branch = ABranch then
-      Exit(True);
-  Result := False;
-end;
-
 procedure TRepoFrame.ShowBranchList(AMode: TGittanBranchListMode; const AScreenRect: TRect);
 var
   Local, Remote, Gone, Remotes: TStringList;
@@ -3159,6 +3148,7 @@ begin
   FRemoteJob.PullRef := FForge.PullRef(ANumber);
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
+  HoldWatcher;
   FRemoteJob.Start;
   FStatus.ShowBusy(Format(rsFetchingPull, [ANumber]), HintFetch);
   FNoticeTimer.Enabled := True;

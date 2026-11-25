@@ -1110,6 +1110,9 @@ begin
     Paths.Free;
   end;
   FCommitJob.OnDone := @CommitJobDone;
+  { What an agent writes is for the files as they were before it. }
+  AbandonMessageJob;
+  HoldWatcher;
   FCommitJob.Start;
   FStatus.ShowBusy(rsCommitting);
   UpdateCommitState;
@@ -1166,6 +1169,9 @@ begin
   else
     FFixupParent := '';
   FCommitJob.OnDone := @CommitJobDone;
+  { What an agent writes is for the files as they were before it. }
+  AbandonMessageJob;
+  HoldWatcher;
   FCommitJob.Start;
   FStatus.ShowBusy(rsCommitting);
   UpdateCommitState;
@@ -1212,9 +1218,10 @@ begin
   Amended := FCommitAmend.Checked and not Moved;
   if Job.Ok then
   begin
-    Subject := FCommitMemo.Lines.Text;
-    if FCommitMemo.Lines.Count > 0 then
-      Subject := FCommitMemo.Lines[0];
+    { The job's: the field may have been changed since. }
+    Subject := Trim(Job.Message);
+    if Pos(#10, Subject) > 0 then
+      Subject := TrimRight(Copy(Subject, 1, Pos(#10, Subject) - 1));
     if not Fixup and (not Moved or FMoveUsedMemo) then
     begin
       { commit.template may have changed since the repository opened. }
@@ -1312,6 +1319,8 @@ begin
   end
   else
     StatusNote(Format(rsCommitted, [Copy(Job.Id, 1, 7), Subject]));
+  if Job.Ok and (Job.Note <> '') then
+    BannerError(rsCommitIndexStale, Job.Note);
   { A fetch, pull or push that waited for the background fetch and then
     for this commit; last, so its busy note is not written over. One
     that waits goes with a commit that failed, also when the background

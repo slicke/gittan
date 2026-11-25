@@ -363,6 +363,10 @@ type
     FFindJob: TGittanFindJob;
     FFindPopup: TGittanPopupList;
     FFoundFiles: TGittanFoundFiles;
+    { What they were the answer to; whether they, or the plan, wait for
+      the tab to be shown. }
+    FFindQuestion: string;
+    FFindWaiting, FPlanWaiting: boolean;
     FFoundPick: TGittanFoundFile;
     { A conflict resolved by the agent (umain.ai.inc): the job while it
       runs, and the item of the conflict list that starts or stops it
@@ -892,7 +896,7 @@ type
     FCommandsFiles: TGittanCommandsFiles;
     FCommandsHash: string;
     FCommandJob: TGittanCommandJob;
-    FCommandName, FCommandProject: string;
+    FCommandName, FCommandProject, FCommandLine: string;
     FCommandSource: TGittanCommandSource;
     FCommandRead: integer;
     { The Files page, in the box too (umain.files.inc): whether it
@@ -1366,6 +1370,7 @@ type
     procedure ShowSidebar(AShown: boolean);
     procedure StartWatcher;
     procedure StopWatcher;
+    procedure HoldWatcher;
     function WatchPace: integer;
     procedure AppActivate(Sender: TObject);
     procedure AppDeactivate(Sender: TObject);
@@ -1859,6 +1864,9 @@ type
     procedure FindPopupPick(Sender: TObject; AIndex: integer);
     procedure ShowFoundAsync(Data: PtrInt);
     procedure AbandonFindJob;
+    procedure ShowFound;
+    procedure ShowAnswers;
+    procedure ShowAnswersAsync(Data: PtrInt);
     {** Asks the agent to resolve conflict AIndex of the shown file; its
       lines are written over the conflict when they come
       (WriteConflictBlock). }
@@ -3060,7 +3068,7 @@ resourcestring
   rsPlanAgain = 'Plan Again';
   rsPlanTicked = 'Included the files of commit %d of %d: commit them, then Commit > Split ' +
     'Changes into Commits for the next';
-  rsPlanOne = '%s sees the changes as one commit: its message is in the field';
+  rsPlanOne = '%s sees the changes as one commit';
   rsFixLink = '✦ Fix';
   rsFixStopLink = 'Stop Fixing';
   rsFixing = '%s is fixing the finding at line %d of %s...';
@@ -3116,6 +3124,8 @@ resourcestring
   rsCommitTickHint = 'A file with a tick goes into the commit. Click its box or press ' +
     'Space to leave it out.';
   rsDontShowAgain = 'Don''t Show Again';
+  rsCommitIndexStale = 'Committed, but the index could not be updated, so the files may still ' +
+    'show as changed. git reset <files> brings it up to date.';
   rsCommitted = 'Committed %s: %s';
   rsCommittedTitle = 'Committed %s';
   rsCommittedBehind = '%s · pull the %d new commits on %s, then push';
@@ -4934,6 +4944,9 @@ begin
   { Remind Me Later may have been answered in another tab. }
   if App.UpdateOk then
     ShowUpdateBadge;
+  { After the click or the key that showed the tab is done with. }
+  if FFindWaiting or FPlanWaiting then
+    Application.QueueAsyncCall(@ShowAnswersAsync, 0);
 end;
 
 function TRepoFrame.IsBlank: boolean;
@@ -8180,7 +8193,17 @@ begin
     WatchPace);
   FWatcher.OnChange := @WatcherChange;
   FWatcher.IgnoreWhitespace := FRepo.IgnoreWhitespace;
+  HoldWatcher;
   FWatcher.Start;
+end;
+
+{ No refresh of the index by the watcher while a commit or a job of the
+  remote's runs: both want index.lock. Called before either starts and
+  when it is done (UpdateRemoteItems). }
+procedure TRepoFrame.HoldWatcher;
+begin
+  if FWatcher <> nil then
+    FWatcher.HoldIndex((FCommitJob <> nil) or (FRemoteJob <> nil));
 end;
 
 { The watcher is let go, not waited for: a poll under way (a status of a
@@ -8212,6 +8235,8 @@ end;
 
 procedure TRepoFrame.AppActivate(Sender: TObject);
 begin
+  if FFindWaiting or FPlanWaiting then
+    Application.QueueAsyncCall(@ShowAnswersAsync, 0);
   if FWatcher = nil then
     Exit;
   FWatcher.Interval := WatchInterval;

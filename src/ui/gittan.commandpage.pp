@@ -68,7 +68,7 @@ type
     FProjects: TGittanProjects;
     FFiles: TGittanCommandsFiles;
     FTrusted: boolean;
-    FRunName, FRunProject: string;
+    FRunName, FRunProject, FRunCommand: string;
     FRunSource: TGittanCommandSource;
     FHasRun, FRunning, FRunStarted, FRunKilled, FStopping, FPulse: boolean;
     FExitCode: integer;
@@ -144,7 +144,7 @@ type
       false when the shell could not start it, AKilled when Stop ended
       it. }
     procedure SetRun(const AName: string; ASource: TGittanCommandSource;
-      const AProject: string; ARunning: boolean; AExitCode: integer; AElapsedMs: int64;
+      const AProject, ACommand: string; ARunning: boolean; AExitCode: integer; AElapsedMs: int64;
       AStarted, AKilled: boolean);
     {** The palette: the background, the text, the dim text, the fill
       under the mouse, the dividers, the links, the ok state and the
@@ -349,7 +349,7 @@ begin
 end;
 
 procedure TGittanCommandPage.SetRun(const AName: string; ASource: TGittanCommandSource;
-  const AProject: string; ARunning: boolean; AExitCode: integer; AElapsedMs: int64;
+  const AProject, ACommand: string; ARunning: boolean; AExitCode: integer; AElapsedMs: int64;
   AStarted, AKilled: boolean);
 begin
   if ARunning and not FRunning then
@@ -357,6 +357,7 @@ begin
   FRunName := AName;
   FRunSource := ASource;
   FRunProject := AProject;
+  FRunCommand := ACommand;
   FHasRun := True;
   FRunning := ARunning;
   FStopping := False;
@@ -493,11 +494,13 @@ end;
 
 { Whether ACommand is the one that runs or ran last: by name, source
   and kind, so a reload that moves the indexes keeps it, and a kind's
-  test is told from a script's. }
+  test is told from a script's. A kind's also by its line: the Project
+  page runs some that have the name of another one. }
 function TGittanCommandPage.IsRun(const ACommand: TGittanRepoCommand): boolean;
 begin
   Result := (ACommand.Name = FRunName) and (ACommand.Source = FRunSource) and
-    (ACommand.Project = FRunProject);
+    (ACommand.Project = FRunProject) and ((FRunSource <> csProject) or
+    (ACommand.Command = FRunCommand));
 end;
 
 { A dim bold title with a dim detail after it and, after that, a state
