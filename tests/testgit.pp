@@ -2973,7 +2973,7 @@ end;
 
 procedure TGitRepoTest.TestCommitTemplate;
 var
-  Outside: string;
+  Outside, Name: string;
 begin
   MakeHistory;
   AssertTrue(FRepo.Open(FDir));
@@ -3013,6 +3013,18 @@ begin
     AssertEquals('nothing of git''s own', '', FRepo.CommitTemplate('.git/config'));
     AssertEquals('nothing of git''s own, by another case', '',
       FRepo.CommitTemplate('.GIT/config'));
+    { What Windows takes for .git, here folders of their own. }
+    AssertTrue(ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'git~x'));
+    WriteFile('git~x/t.txt', 'kept'#10);
+    AssertEquals('another name', 'kept', FRepo.CommitTemplate('git~x/t.txt'));
+    {$IFDEF UNIX}
+    for Name in TStringArray.Create('.git.', '.git ', '.git. .', 'GIT~1', '.git::$INDEX_ALLOCATION') do
+    begin
+      AssertTrue(ForceDirectories(IncludeTrailingPathDelimiter(FDir) + Name));
+      WriteFile(Name + '/t.txt', 'secret'#10);
+      AssertEquals(Name, '', FRepo.CommitTemplate(Name + '/t.txt'));
+    end;
+    {$ENDIF}
     {$IFDEF UNIX}
     AssertEquals(0, fpSymlink(PChar(Outside), PChar(IncludeTrailingPathDelimiter(FDir) +
       'link.txt')));
@@ -4073,7 +4085,7 @@ begin
   AssertTrue(FRepo.Error, FRepo.MergeRef('side', Conflicts, mwSquash));
   Git(['rm', '-q', '-f', 'b.txt', 'c.txt']);
   AssertFalse('nothing staged', FRepo.SquashPending);
-  AssertFalse('git''s file is removed with it', FileExists(IncludeTrailingPathDelimiter(FDir) +
+  AssertTrue('git''s file is left to git', FileExists(IncludeTrailingPathDelimiter(FDir) +
     SetDirSeparators('.git/SQUASH_MSG')));
   { So work staged later is not taken for the squash. }
   WriteFile('later.txt', 'later'#10);

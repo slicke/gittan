@@ -865,8 +865,8 @@ type
       takes away, git is in the middle of nothing else, and the index
       holds something to commit. The file alone does not say so: it
       stays when the staged changes are stashed or discarded one by
-      one, and is removed here then, so that changes staged later are
-      not taken for the squash. Runs git when the file is there. }
+      one, and is not gone by from then on, so that changes staged
+      later are not taken for the squash. Runs git when the file is there. }
     function SquashPending: boolean;
     {** The e-mail the repository commits under (`git config
       user.email`), empty when none is set. }
@@ -3637,6 +3637,28 @@ end;
   symbolic link (or on Windows a reparse point), and nothing is in .git,
   so a path a cloned file names cannot read what lies outside the
   checkout or git's own files. }
+function IsGitDirName(const APart: string): boolean;
+var
+  Name: string;
+  i: integer;
+begin
+  Name := APart;
+  { A stream of it (.git::$INDEX_ALLOCATION) is the folder itself. }
+  i := Pos(':', Name);
+  if i > 0 then
+    SetLength(Name, i - 1);
+  while (Name <> '') and (Name[Length(Name)] in ['.', ' ']) do
+    SetLength(Name, Length(Name) - 1);
+  if SameText(Name, '.git') then
+    Exit(True);
+  if not SameText(Copy(Name, 1, 4), 'git~') or (Length(Name) = 4) then
+    Exit(False);
+  for i := 5 to Length(Name) do
+    if not (Name[i] in ['0'..'9']) then
+      Exit(False);
+  Result := True;
+end;
+
 function FileInCheckout(const ARoot, AFileName: string): boolean;
 
   function IsLink(const APath: string): boolean;
@@ -3678,7 +3700,7 @@ begin
     if Parts[i] = '' then
       Continue;
     { Nothing of git's own: .git/config may hold a remote's token. }
-    if SameText(Parts[i], '.git') then
+    if IsGitDirName(Parts[i]) then
       Exit;
     Path := Path + PathDelim + Parts[i];
     if IsLink(Path) then
@@ -5138,6 +5160,69 @@ begin
   end;
 end;
 
+{ The SQUASH_MSG files found with nothing staged, by the git directory,
+  for every TGittanRepo of the process: the watcher has its own. One
+  written anew has another time or size, or was asked for here
+  (ForgetSquashStale). }
+type
+  TSquashStale = record
+    Dir: string;
+    Age: longint;
+    Size: int64;
+  end;
+
+var
+  GSquashLock: TRTLCriticalSection;
+  GSquashStale: array of TSquashStale;
+
+function SquashStale(const ADir: string): boolean;
+var
+  Age: longint;
+  Size: int64;
+  i: integer;
+begin
+  FileStamp(IncludeTrailingPathDelimiter(ADir) + 'SQUASH_MSG', Age, Size);
+  Result := False;
+  EnterCriticalSection(GSquashLock);
+  try
+    for i := 0 to High(GSquashStale) do
+      if (GSquashStale[i].Dir = ADir) and (GSquashStale[i].Age = Age) and
+        (GSquashStale[i].Size = Size) then
+        Exit(True);
+  finally
+    LeaveCriticalSection(GSquashLock);
+  end;
+end;
+
+procedure ForgetSquashStale(const ADir: string);
+var
+  i: integer;
+begin
+  EnterCriticalSection(GSquashLock);
+  try
+    for i := High(GSquashStale) downto 0 do
+      if GSquashStale[i].Dir = ADir then
+        Delete(GSquashStale, i, 1);
+  finally
+    LeaveCriticalSection(GSquashLock);
+  end;
+end;
+
+procedure SetSquashStale(const ADir: string);
+var
+  New: TSquashStale;
+begin
+  New.Dir := ADir;
+  FileStamp(IncludeTrailingPathDelimiter(ADir) + 'SQUASH_MSG', New.Age, New.Size);
+  EnterCriticalSection(GSquashLock);
+  try
+    ForgetSquashStale(ADir);
+    Insert(New, GSquashStale, 0);
+  finally
+    LeaveCriticalSection(GSquashLock);
+  end;
+end;
+
 { Whether the repository at ARoot sets merge.conflictStyle itself, from
   what is remembered while its config file is unchanged, else asked of
   git and remembered. }
@@ -6324,6 +6409,7 @@ begin
       Result := RunCommitting(Self, FRoot, ['merge', '--no-ff', '--no-edit', ARef], AConflicts, Err);
     mwSquash:
     begin
+      ForgetSquashStale(GitDir);
       { A squash writes no MERGE_HEAD, so git is in the middle of
         nothing when it stops; the unmerged entries say it did. }
       Result := RunCommitting(Self, FRoot, ['merge', '--squash', ARef], AConflicts, Err);
@@ -7390,7 +7476,11 @@ begin
     Exit;
   FileName := IncludeTrailingPathDelimiter(Dir) + 'MERGE_MSG';
   if not FileExists(FileName) then
+  begin
     FileName := IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG';
+    if SquashStale(Dir) then
+      Exit;
+  end;
   if not FileExists(FileName) then
     Exit;
   if not RunGit(FRoot, ['config', '--get', 'core.commentString'], Comment) and
@@ -7417,15 +7507,16 @@ var
 begin
   Dir := GitDir;
   if (Dir = '') or not FileExists(IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG') or
-    (Operation <> '') then
+    (Operation <> '') or SquashStale(Dir) then
     Exit(False);
   { diff --quiet fails with a staged change, an unmerged file too. }
   Result := not RunGitIn(FRoot, ['diff', '--cached', '--quiet'], Output, Err);
   { Nothing staged: the squash's changes were stashed or discarded and
-    git left its file. It is removed, or work staged later would pass
-    for the squash, with its message and an Abort that resets it. }
+    git left its file. It is no longer gone by, or work staged later
+    would pass for the squash, with its message and an Abort that resets
+    it. The file stays for git, as this is asked at every poll. }
   if not Result then
-    DeleteFile(IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG');
+    SetSquashStale(Dir);
 end;
 
 function TGittanRepo.HeadMessage(out AMessage: string): boolean;
@@ -9532,6 +9623,7 @@ initialization
   InitCriticalSection(GSpawnLock);
   {$endif}
   InitCriticalSection(GConflictLock);
+  InitCriticalSection(GSquashLock);
   GToolPath := MakeToolPath;
   GOldGitExes := TStringList.Create;
   GGitRuns := TList.Create;
@@ -9541,6 +9633,7 @@ finalization
   FreeGitRuns;
   GOldGitExes.Free;
   DoneCriticalSection(GConflictLock);
+  DoneCriticalSection(GSquashLock);
   {$ifdef unix}
   DoneCriticalSection(GSpawnLock);
   {$endif}
