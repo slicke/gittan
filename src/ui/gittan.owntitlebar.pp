@@ -70,7 +70,7 @@ type
 
   {** What a point of the bar is: the menu button, a tab, a tab's cross,
     the plus, a caption button, or nothing (the caption, a drag area). }
-  TGittanTitlePart = (tpNone, tpMenu, tpBack, tpForward, tpTab, tpTabClose, tpPlus,
+  TGittanTitlePart = (tpNone, tpMenu, tpBack, tpForward, tpTab, tpTabClose, tpMore, tpPlus,
     tpForge, tpMinimize, tpMaximize, tpClose);
 
   {** The glyphs a descendant draws: the caption buttons' (restore for
@@ -180,6 +180,8 @@ type
   private
     FSplitControl: TControl;
     FCaptions, FHints: array of string;
+    { The first tab shown: past 0 when they do not all fit. }
+    FFirst: integer;
     FMarks: array of boolean;
     { The tabs an extension added (the forge view's): a puzzle piece
       before the name. }
@@ -187,7 +189,7 @@ type
     FTabActive: integer;
     { The tabs are a view's own (the forge view's): no cross, no plus. }
     FFixed: boolean;
-    FMenuRect, FBackRect, FForwardRect, FPlusRect, FForgeRect, FMinRect, FMaxRect,
+    FMenuRect, FBackRect, FForwardRect, FMoreRect, FPlusRect, FForgeRect, FMinRect, FMaxRect,
     FCloseRect: TRect;
     { Back and Forward: whether each can be gone to, and their hints. }
     FCanBack, FCanForward: boolean;
@@ -221,6 +223,7 @@ type
     function NavEnabled(APart: TGittanTitlePart): boolean;
     function TabWidth: integer;
     function TabsShown: integer;
+    function NextHidden: integer;
     function TabRect(AIndex: integer): TRect;
     function CrossRect(const ATab: TRect): TRect;
     function Strip: TGittanMenuStrip;
@@ -381,6 +384,7 @@ const
   TabHeight = 30;
   MaxTabWidth = 220;
   MinTabWidth = 64;
+  MoreWidth = 34;
   TabGap = 3;
   PlusSize = 26;
   { A chevron's button, square, and the gap between the two. }
@@ -481,7 +485,7 @@ begin
   if FHotIndex > High(FCaptions) then
     SetHot(tpNone, -1)
   { Another tab may be under the mouse now, with a tip of its own. }
-  else if (FHotIndex >= 0) and (FHotPart in [tpTab, tpTabClose]) and
+  else if (FHotIndex >= 0) and (FHotPart in [tpTab, tpTabClose, tpMore]) and
     (Hint <> FHints[FHotIndex]) then
   begin
     Hint := FHints[FHotIndex];
@@ -580,19 +584,40 @@ begin
     Room div Length(FCaptions)));
 end;
 
-{ How many tabs fit before the limit, with room for the plus after them
-  (when they are not fixed); those after are not drawn, so the plus
-  stays clear of the caption buttons in a narrow window. }
+{ How many tabs are shown: all while they fit before the limit, with
+  room for the plus after them (when they are not fixed), else as many
+  as fit beside "+N" too, one at the least. FFirst is moved so the
+  active tab is among them. }
 function TGittanOwnTitleBar.TabsShown: integer;
 var
-  Limit: integer;
+  Room: integer;
 begin
-  Limit := TabsLimit;
+  Room := TabsLimit - TabsStart;
   if not FFixed then
-    Dec(Limit, Scale96ToForm(PlusSize + Gap));
-  Result := 0;
-  while (Result < Length(FCaptions)) and (TabRect(Result).Right <= Limit) do
-    Inc(Result);
+    Dec(Room, Scale96ToForm(PlusSize + Gap));
+  Result := Length(FCaptions);
+  if Result * TabWidth <= Room + Scale96ToForm(TabGap) then
+  begin
+    FFirst := 0;
+    Exit;
+  end;
+  Result := Max(1, Min(Result, (Room - Scale96ToForm(MoreWidth)) div TabWidth));
+  if (FTabActive >= 0) and (FTabActive < FFirst) then
+    FFirst := FTabActive
+  else if FTabActive >= FFirst + Result then
+    FFirst := FTabActive - Result + 1;
+  FFirst := Max(0, Min(FFirst, Length(FCaptions) - Result));
+end;
+
+{ The tab a click on "+N" shows: the first hidden one after those shown,
+  else the first one, so clicks go round them all. }
+function TGittanOwnTitleBar.NextHidden: integer;
+begin
+  Result := TabsShown;
+  if FFirst + Result < Length(FCaptions) then
+    Inc(Result, FFirst)
+  else
+    Result := 0;
 end;
 
 function TGittanOwnTitleBar.TabRect(AIndex: integer): TRect;
@@ -600,7 +625,7 @@ var
   W, X, H: integer;
 begin
   W := TabWidth;
-  X := TabsStart + AIndex * W;
+  X := TabsStart + (AIndex - FFirst) * W;
   H := Scale96ToForm(TabHeight);
   Result := Types.Rect(X, (Height - H) div 2 + 1, X + W - Scale96ToForm(TabGap),
     (Height + H) div 2 + 1);
@@ -619,7 +644,7 @@ end;
   the chevrons, the tabs and the plus after them. }
 procedure TGittanOwnTitleBar.Layout;
 var
-  W, H, X, S: integer;
+  W, H, X, S, n: integer;
 begin
   { Setting the height in Create resizes the bar before it has a form to
     scale by. }
@@ -654,7 +679,17 @@ begin
   FBackRect := Types.Rect(X, (H - W) div 2 + 1, X + W, (H + W) div 2 + 1);
   X := FBackRect.Right + Scale96ToForm(NavGap);
   FForwardRect := Types.Rect(X, FBackRect.Top, X + W, FBackRect.Bottom);
-  X := TabsStart + TabsShown * TabWidth;
+  { "+N" right after the last tab shown; empty while every tab is. }
+  n := TabsShown;
+  X := TabsStart + n * TabWidth;
+  FMoreRect := Types.Rect(0, 0, 0, 0);
+  if n < Length(FCaptions) then
+  begin
+    W := Scale96ToForm(TabHeight);
+    FMoreRect := Types.Rect(X, (H - W) div 2 + 1, Min(TabsLimit, X + Scale96ToForm(MoreWidth -
+      TabGap)), (H + W) div 2 + 1);
+    Inc(X, Scale96ToForm(MoreWidth));
+  end;
   if FFixed or (X + S > TabsLimit) then
     FPlusRect := Types.Rect(0, 0, 0, 0)
   else
@@ -669,7 +704,7 @@ end;
 
 function TGittanOwnTitleBar.PartAt(X, Y: integer; out AIndex: integer): TGittanTitlePart;
 var
-  i: integer;
+  i, n: integer;
   P: TPoint;
   R: TRect;
 begin
@@ -691,7 +726,14 @@ begin
     Exit(tpForge);
   if FPlusRect.Contains(P) then
     Exit(tpPlus);
-  for i := 0 to TabsShown - 1 do
+  if FMoreRect.Contains(P) then
+  begin
+    { With the tab it brings in, for its hint. }
+    AIndex := NextHidden;
+    Exit(tpMore);
+  end;
+  n := TabsShown;
+  for i := FFirst to FFirst + n - 1 do
   begin
     R := TabRect(i);
     if R.Contains(P) then
@@ -773,7 +815,7 @@ begin
     Exit;
   case Part of
     tpMenu: DropMenu(nil);
-    tpTab:
+    tpTab, tpMore:
       if Assigned(FOnTabSelect) then
         FOnTabSelect(Self, Index);
     tpBack, tpForward:
@@ -1122,7 +1164,8 @@ end;
 
 procedure TGittanOwnTitleBar.Paint;
 var
-  Split, i, TextY, Mid, W, L: integer;
+  Split, i, TextY, Mid, W, L, Count: integer;
+  More: string;
   R, C: TRect;
   Ink, GlobeInk: TColor;
   Glyph: TGittanTitleGlyph;
@@ -1228,7 +1271,8 @@ begin
   DrawChevron(tpBack, FBackRect);
   DrawChevron(tpForward, FForwardRect);
 
-  for i := 0 to TabsShown - 1 do
+  Count := TabsShown;
+  for i := FFirst to FFirst + Count - 1 do
   begin
     R := TabRect(i);
     Shown := i = FTabActive;
@@ -1245,7 +1289,7 @@ begin
     else if Hover then
       HotBox(R, FButtonHot)
     { A faint line parts two tabs that are neither shown nor hovered. }
-    else if (i < High(FCaptions)) and (i + 1 <> FTabActive) and
+    else if (i < FFirst + Count - 1) and (i + 1 <> FTabActive) and
       not ((FHotIndex = i + 1) and (FHotPart in [tpTab, tpTabClose])) then
       Line(R.Right + Scale96ToForm(TabGap) div 2, R.Top + Scale96ToForm(7),
         R.Right + Scale96ToForm(TabGap) div 2, R.Bottom - Scale96ToForm(7), FTabBorder);
@@ -1293,6 +1337,16 @@ begin
     end;
   end;
 
+  if not FMoreRect.IsEmpty then
+  begin
+    if FHotPart = tpMore then
+      HotBox(FMoreRect, FButtonHot);
+    Canvas.Brush.Style := bsClear;
+    Canvas.Font.Color := FDim;
+    More := '+' + IntToStr(Length(FCaptions) - Count);
+    Canvas.TextOut((FMoreRect.Left + FMoreRect.Right - Canvas.TextWidth(More)) div 2, TextY, More);
+  end;
+
   { The plus, unless there is no room for it. }
   if not FFixed and not FPlusRect.IsEmpty then
   begin
@@ -1310,9 +1364,11 @@ begin
     while it is clear of the last tab and the plus. }
   if not FFixed and (FTip <> '') then
   begin
-    L := TabsStart + TabsShown * TabWidth;
+    L := TabsStart + Count * TabWidth;
     if not FPlusRect.IsEmpty then
-      L := FPlusRect.Right;
+      L := FPlusRect.Right
+    else if not FMoreRect.IsEmpty then
+      L := FMoreRect.Right;
     W := Canvas.TextWidth(FTip);
     Mid := TabsLimit - Scale96ToForm(Pad + Gap) - W;
     if Mid >= L + Scale96ToForm(16) then
@@ -1782,13 +1838,21 @@ end;
 
 function TGittanMenuStrip.StepMenu(ADelta: integer): boolean;
 var
-  N: integer;
+  N, Index: integer;
 begin
   N := Length(FItems);
-  Result := (FOpen >= 0) and (N > 1);
+  Result := False;
+  if (FOpen < 0) or (FOpen >= N) or (N < 2) then
+    Exit;
+  { Past the names that open nothing. }
+  Index := FOpen;
+  repeat
+    Index := (Index + ADelta + N) mod N;
+  until (Index = FOpen) or FItems[Index].Enabled;
+  Result := Index <> FOpen;
   if Result then
   begin
-    FStepTo := (FOpen + ADelta + N) mod N;
+    FStepTo := Index;
     FKeys := True;
   end;
 end;

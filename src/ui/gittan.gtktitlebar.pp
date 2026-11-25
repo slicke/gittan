@@ -147,13 +147,24 @@ begin
     GDK_GRAVITY_NORTH_WEST, AEvent);
 end;
 
+{ GTK may refuse a popup (Wayland without a valid event for it): no
+  deactivate comes then, and the strip would think the menu open. }
+procedure CloseUnshown(AStrip: TGittanMenuStrip; AMenu: PGtkWidget);
+begin
+  if not gtk_widget_get_mapped(AMenu) then
+    AStrip.MenuClosed;
+end;
+
 function PopupPending(AData: gpointer): gboolean; cdecl;
 begin
   Result := False;
   PendingSource := 0;
   if (TrackStrip <> nil) and TrackStrip.Visible and TrackStrip.MenuOpen and
     (PGtkWidget(TrackTop) = PendingMenu) then
+  begin
     PopupMenuAt(PendingMenu, PendingWidget, PendingDx, PendingEvent);
+    CloseUnshown(TrackStrip, PendingMenu);
+  end;
   if PendingEvent <> nil then
     gdk_event_free(PendingEvent);
   PendingEvent := nil;
@@ -202,7 +213,12 @@ end;
 procedure MenuDeactivate(AShell: PGtkMenuShell; AData: gpointer); cdecl;
 begin
   if (TrackStrip <> nil) and (AShell = TrackTop) then
+  begin
     TrackStrip.MenuClosed;
+    { No menu follows: the next one opened is none stepped to. }
+    if not TrackStrip.MenuOpen then
+      Stepping := False;
+  end;
 end;
 
 function MenuMotion(AWidget: PGtkWidget; AEvent: PGdkEventMotion;
@@ -569,6 +585,7 @@ begin
   PopupMenuAt(Menu, TGtk3Widget(AStrip.Handle).Widget, AName.Left, Event);
   if Event <> nil then
     gdk_event_free(Event);
+  CloseUnshown(AStrip, Menu);
 end;
 
 procedure TGittanGtkTitleBar.HideNativeMenu;

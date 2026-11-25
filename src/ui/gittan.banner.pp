@@ -49,6 +49,8 @@ type
   private
     FItems: array of TItem;
     FLines: TStringArray;
+    { What unfolds: the detail, after the title when the row cut it. }
+    FTitleCut: boolean;
     FExpanded: boolean;
     FHotPart: TPart;
     FActionRect, FDetailsRect, FCopyRect, FCloseRect: TRect;
@@ -60,6 +62,7 @@ type
     procedure SetHotPart(AValue: TPart);
     procedure TimerTimer(Sender: TObject);
     procedure ShowCurrent;
+    function Unfolded: TStringArray;
     procedure UpdateHeight;
     function LineHeight(AFont: TFont): integer;
     function Unfoldable: boolean;
@@ -244,7 +247,8 @@ end;
 procedure TGittanBanner.ShowCurrent;
 begin
   FExpanded := False;
-  FHotPart := bpNone;
+  FTitleCut := False;
+  SetHotPart(bpNone);
   FTimer.Enabled := False;
   if Length(FItems) = 0 then
   begin
@@ -290,13 +294,21 @@ begin
     Result := 16;
 end;
 
+{ The lines Details shows. }
+function TGittanBanner.Unfolded: TStringArray;
+begin
+  Result := Copy(FLines);
+  if FTitleCut then
+    Insert(Current.Title, Result, 0);
+end;
+
 procedure TGittanBanner.UpdateHeight;
 var
   H: integer;
 begin
   H := Px(RowHeight);
   if FExpanded then
-    H := H + Min(Length(FLines), MaxLines + 1) * LineHeight(FDetailFont) + Px(Pad);
+    H := H + Min(Length(Unfolded), MaxLines + 1) * LineHeight(FDetailFont) + Px(Pad);
   if H <> Height then
   begin
     Height := H;
@@ -363,7 +375,9 @@ var
   Item: TItem;
   Tone, Back: TColor;
   X, Y, TextY, Right, LH, i, Room: integer;
-  First, S: string;
+  Title, First, S: string;
+  Lines: TStringArray;
+  Cut: boolean;
 
   { A link at the right end of the row, from Right leftward. }
   function PlaceLink(const ACaption: string; APart: TPart): TRect;
@@ -460,8 +474,22 @@ begin
   X := Px(Pad) + Px(IconSize) + Px(Gap);
   Canvas.Font.Style := [fsBold];
   Canvas.Font.Color := FText;
-  Canvas.TextOut(X, TextY, Item.Title);
-  Inc(X, Canvas.TextWidth(Item.Title) + Px(Gap));
+  Title := Item.Title;
+  { One too long leaves room for Details, which shows it whole. }
+  Cut := X + Canvas.TextWidth(Title) > Right - Px(Gap);
+  { Unfolded, what is shown stays as it was when it unfolded, which is
+    what the height is for. }
+  if not FExpanded then
+    FTitleCut := Cut;
+  if Cut then
+  begin
+    Canvas.Font.Style := [];
+    Room := Max(Canvas.TextWidth(rsBannerHide), Canvas.TextWidth(rsBannerDetails));
+    Canvas.Font.Style := [fsBold];
+    Title := FitTextRight(Canvas, Title, Max(0, Right - 2 * Px(Gap) - Room - X));
+  end;
+  Canvas.TextOut(X, TextY, Title);
+  Inc(X, Canvas.TextWidth(Title) + Px(Gap));
   Canvas.Font.Style := [];
   if Length(FLines) > 0 then
     First := Trim(FLines[0])
@@ -469,7 +497,7 @@ begin
     First := '';
   FDetailsRect := Rect(0, 0, 0, 0);
   if (Length(FLines) > 1) or (X + Canvas.TextWidth(First) > Right - Px(Gap)) or
-    (FExpanded and (First <> '')) then
+    Cut or FExpanded then
   begin
     if FExpanded then
       S := rsBannerHide
@@ -496,15 +524,16 @@ begin
     Canvas.Brush.Style := bsClear;
     X := Px(Pad) + Px(IconSize) + Px(Gap);
     Y := Px(RowHeight);
-    for i := 0 to Min(High(FLines), MaxLines - 1) do
+    Lines := Unfolded;
+    for i := 0 to Min(High(Lines), MaxLines - 1) do
     begin
-      Canvas.TextRect(Rect(X, Y, Width - Px(Pad), Y + LH), X, Y, FLines[i]);
+      Canvas.TextRect(Rect(X, Y, Width - Px(Pad), Y + LH), X, Y, Lines[i]);
       Inc(Y, LH);
     end;
-    if Length(FLines) > MaxLines then
+    if Length(Lines) > MaxLines then
     begin
       Canvas.Font.Color := FDim;
-      Canvas.TextOut(X, Y, Format(rsBannerMore, [Length(FLines) - MaxLines]));
+      Canvas.TextOut(X, Y, Format(rsBannerMore, [Length(Lines) - MaxLines]));
     end;
   end;
 end;

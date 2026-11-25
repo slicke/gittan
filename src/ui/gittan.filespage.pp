@@ -375,7 +375,7 @@ end;
 procedure TGittanFilesPage.PaintCrumbs(var Y: integer);
 var
   Parts: TStringArray;
-  i, X, TextH, Right: integer;
+  i, X, TextH, Right, First, Room, Need: integer;
   Path, Crumb: string;
   R: TRect;
 begin
@@ -390,9 +390,41 @@ begin
     Parts := FFolder.Split(['/']);
   X := Px(Pad);
   Path := '';
+  { The folders on the way that do not fit are left out, after the first
+    crumb, and the folder shown always is. }
+  FC.Font.Style := [fsBold];
+  First := 0;
+  if Length(Parts) > 1 then
+  begin
+    Room := Right - X - FC.TextWidth(FName) - FC.TextWidth(CrumbSep) -
+      Min(FC.TextWidth(Parts[High(Parts)]), (Right - X) div 2);
+    Need := 0;
+    for i := 0 to High(Parts) - 1 do
+      Inc(Need, FC.TextWidth(Parts[i]) + FC.TextWidth(CrumbSep));
+    if Need > Room then
+    begin
+      Dec(Room, FC.TextWidth('…') + FC.TextWidth(CrumbSep));
+      while (First < High(Parts)) and (Need > Room) do
+      begin
+        Dec(Need, FC.TextWidth(Parts[First]) + FC.TextWidth(CrumbSep));
+        Inc(First);
+      end;
+    end;
+  end;
   for i := -1 to High(Parts) do
   begin
-    if i < 0 then
+    if (i >= 0) and (i < First) then
+    begin
+      if Path = '' then
+        Path := Parts[i]
+      else
+        Path := Path + '/' + Parts[i];
+      if i < First - 1 then
+        Continue;
+      { A click on the dots leads to the nearest folder left out. }
+      Crumb := '…';
+    end
+    else if i < 0 then
       Crumb := FName
     else
     begin
@@ -420,8 +452,6 @@ begin
     FC.Font.Color := FDim;
     FC.TextOut(X, Y, CrumbSep);
     Inc(X, FC.TextWidth(CrumbSep));
-    if X > Right then
-      Break;
   end;
   FC.Font.Style := [];
   Inc(Y, TextH + Px(Gap) div 2);
