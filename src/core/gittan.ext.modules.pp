@@ -381,6 +381,7 @@ begin
     'export const settings = T.settings;' + LineEnding +
     'export const app = T.app;' + LineEnding +
     'export const forge = T.forge;' + LineEnding +
+    'export const forges = T.forges;' + LineEnding +
     'export const forgeTabs = T.forgeTabs;' + LineEnding +
     'export const batch = T.batch;' + LineEnding +
     'export const on = (event, fn) => T.on(event, fn);' + LineEnding +

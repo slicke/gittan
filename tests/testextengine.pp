@@ -119,6 +119,7 @@ type
     procedure TestValuesThatCannotBeShown;
     procedure TestResultTooLarge;
     procedure TestAnswerOutOfReach;
+    procedure TestUnloadGetter;
     procedure TestDialogsWhileUnloading;
   end;
 
@@ -1036,6 +1037,37 @@ begin
   AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
   FEngine.RunCommand(TGittanExtRegistry.KindKey('sweeper', 'b', cwBatch), '{"seq": 3, "repo": "/r"}');
   AssertEquals('the shim''s timer is left', 1, FEngine.TimersOf(Info^.Ctx));
+  { Nor by an id that only the native reads as the shim's. }
+  Info := Load('fraction', 'Gittan.batch.register({id: "b", run: function () {' +
+    ' var id = setTimeout(function () {}, 600000);' +
+    ' for (var i = 0; i <= id; i++) clearTimeout(i + 0.5); return new Promise(function () {}); }}); "ok";',
+    PermBaseline);
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  FEngine.RunCommand(TGittanExtRegistry.KindKey('fraction', 'b', cwBatch), '{"seq": 4, "repo": "/r"}');
+  AssertEquals('left', 1, FEngine.TimersOf(Info^.Ctx));
+  Info := Load('parser', 'JSON.parse = function () { return null; };' +
+    'Gittan.batch.register({id: "b", run: function (c) { return c.repo; }}); "ok";', PermBaseline + [epExec]);
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  FHost.Delivered.Clear;
+  FEngine.RunCommand(TGittanExtRegistry.KindKey('parser', 'b', cwBatch), '{"seq": 5, "repo": "/r"}');
+  AssertEquals('5|parser|{"value":"/r"}', FHost.Delivered.Text.Trim);
+  AssertFalse('nothing threw', JS_HasException(Info^.Ctx));
+end;
+
+{ The unload hook behind a getter that throws the second time, or at
+  once: nothing is left pending for another extension's load. }
+procedure TExtEngineTest.TestUnloadGetter;
+var
+  Info: PExtContextInfo;
+begin
+  AssertLoaded('loads', LoadResult('getter', 'var n = 0; Object.defineProperty(globalThis,' +
+    ' "unloadCallback", { get() { if (n++) throw new Error("x"); return function () {}; } }); "ok";'));
+  AssertLoaded('loads', LoadResult('thrower', 'Object.defineProperty(globalThis,' +
+    ' "unloadCallback", { get() { throw new Error("y"); } }); "ok";'));
+  FEngine.UnloadExtensions;
+  Info := Load('after', 'globalThis.v = Gittan.commands ? 1 : 0; "ok";', PermBaseline);
+  AssertFalse('nothing pending', JS_HasException(Info^.Ctx));
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
 end;
 
 { alert and confirm from a job that an unload listener queued. }

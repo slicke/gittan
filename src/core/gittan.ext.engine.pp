@@ -121,6 +121,10 @@ TExtContextInfo = record
     reach, so it stays here, not only for the call, until it is taken or
     the context goes. }
   EntrySource: RawUtf8;
+  { JSON.parse as the context was made with it, which the host's own
+    calls go through whatever the script puts in its place; freed before
+    the context. }
+  ParseFn: JSValue;
 end;
 
 TExtContextList = specialize TFPGList<PExtContextInfo>;
@@ -673,7 +677,10 @@ public
     {** Runs the command AKey (TGittanExtRegistry.CommandKey) with
         AContextJson parsed in its context as its argument; a throw is
         reported. False when there is no such command. }
-  function RunCommand(const AKey, AContextJson: string): boolean;
+  function RunCommand(const AKey, AContextJson: string): boolean; overload;
+    {** As RunCommand; AThrew says whether the call itself threw, so that
+      one that answers later never will. }
+  function RunCommand(const AKey, AContextJson: string; out AThrew: boolean): boolean; overload;
 
     {** Register the engine-internal baseline (alert/confirm/prompt/select/log,
         setTimeout/setInterval/clear*, console.*) into the current registration
@@ -1886,7 +1893,7 @@ const
     '  var apply = Reflect.apply, stringify = JSON.stringify, text = String;' + LineEnding +
     '  var set = globalThis.setTimeout, clear = globalThis.clearTimeout, mine = { __proto__: null };' + LineEnding +
     '  if (typeof clear === "function")' + LineEnding +
-    '    globalThis.clearTimeout = globalThis.clearInterval = function (id) { if (!mine[+id]) clear(id); };' + LineEnding +
+    '    globalThis.clearTimeout = globalThis.clearInterval = function (id) { var n = id | 0; if (!mine[n]) clear(n); };' + LineEnding +
     { The raw natives would keep a function that never answers, and the
       run or the tab would wait for ever: only the shim's way is left. }
     '  var registerForgeTab = t.registerForgeTab, registerBatch = t.registerBatch;' + LineEnding +
@@ -1897,13 +1904,16 @@ const
     '    var done = false, timer = null;' + LineEnding +
     '    var send = function (o) {' + LineEnding +
     '      if (done) return;' + LineEnding +
-    '      done = true;' + LineEnding +
-    '      if (timer !== null) { clear(timer); delete mine[timer]; }' + LineEnding +
+    { Made before the timer goes: a toJSON the watchdog ends takes this
+      call with it, and the timer is what answers then. }
     '      var s;' + LineEnding +
     '      try { s = stringify(o); } catch (e) {' + LineEnding +
     '        try { s = stringify({ error: "The answer is not JSON: " + said(e) }); }' + LineEnding +
     '        catch (x) { s = ''{"error":"The answer is not JSON"}''; }' + LineEnding +
     '      }' + LineEnding +
+    '      if (done) return;' + LineEnding +
+    '      done = true;' + LineEnding +
+    '      if (timer !== null) { clear(timer); delete mine[timer]; }' + LineEnding +
     '      deliver(+seq, s);' + LineEnding +
     '    };' + LineEnding +
     '    try {' + LineEnding +
@@ -2152,6 +2162,7 @@ begin
         if FExtContexts[i]^.Ctx <> nil then
         try
           FRegistry.RemoveContext(FExtContexts[i]^.Ctx);
+          JS_FreeValue(FExtContexts[i]^.Ctx, FExtContexts[i]^.ParseFn);
           JS_FreeContext(FExtContexts[i]^.Ctx);
         except
         end;
@@ -2485,15 +2496,18 @@ begin
     if (info = nil) or (info^.Ctx = nil) then
       Continue;
     ctx := info^.Ctx;
-    if not ContextHasFunction(ctx, 'unloadCallback') then
-      Continue;
 
     globalObj := JS_GetGlobalObject(ctx);
+    { Read once: a getter may throw, and another read may give another
+      answer. What it throws is taken off, or the next call of another
+      extension would throw it. }
     funcObj := JS_GetPropertyStr(ctx, globalObj, 'unloadCallback');
     retVal := JS_UNDEFINED;
     try
       try
-        if JS_IsFunction(ctx, funcObj) then
+        if JS_IsException(funcObj) then
+          DumpJSError(ctx)
+        else if JS_IsFunction(ctx, funcObj) then
         begin
           retVal := JS_Call(ctx, funcObj, globalObj, 0, nil);
           // JS_IsException, not JS_IsError: a throwing unload hook returns the
@@ -2565,6 +2579,7 @@ begin
   { Out of the list first: a promise task of it then finds no generation
     and leaves its promise alone. }
   FExtContexts.Remove(Ext);
+  JS_FreeValue(ctx, Ext^.ParseFn);
   JS_FreeContext(ctx);
   Dispose(Ext);
 end;
@@ -2646,6 +2661,7 @@ begin
             { What the script defines on its next load is what it has: a
               key it no longer defines goes. }
             FRegistry.RemoveSettingsOf(FExtContexts[i]^.ExtId);
+            JS_FreeValue(FExtContexts[i]^.Ctx, FExtContexts[i]^.ParseFn);
             JS_FreeContext(FExtContexts[i]^.Ctx);
           except
           end;
@@ -2672,7 +2688,7 @@ DisplayName, Author: string; Granted: TExtPermSet): PExtContextInfo;
 var
   ctx: JSContext;
   Info: PExtContextInfo;
-  globalObj: JSValue;
+  globalObj, jsonObj: JSValue;
 begin
   Result := nil;
   if FRuntime = nil then Exit;
@@ -2709,6 +2725,12 @@ begin
   Info^.Granted := Granted;
   Inc(FContextGeneration);
   Info^.Generation := FContextGeneration;
+  Info^.ParseFn := JS_UNDEFINED;
+  globalObj := JS_GetGlobalObject(ctx);
+  jsonObj := JS_GetPropertyStr(ctx, globalObj, 'JSON');
+  Info^.ParseFn := JS_GetPropertyStr(ctx, jsonObj, 'parse');
+  JS_FreeValue(ctx, jsonObj);
+  JS_FreeValue(ctx, globalObj);
 
   // Provision engine-internal baselines (alert/confirm/prompt/select/log/timers/console)
   // into this ctx, gated by Granted. Caller will follow up with BeginRegistration to
@@ -2723,6 +2745,7 @@ begin
       EndRegistration;
     end;
   except
+    JS_FreeValue(ctx, Info^.ParseFn);
     JS_FreeContext(ctx);
     Dispose(Info);
     raise;
@@ -3768,13 +3791,23 @@ end;
 function TGittanExtEngine.ParseJsonIn(ctx: JSContext; const Json: string): JSValue;
 var
   glob, jsonObj, parseFn, text: JSValue;
+  i: integer;
 begin
   Result := JS_UNDEFINED;
   if ctx = nil then
     Exit;
   glob := JS_GetGlobalObject(ctx);
-  jsonObj := JS_GetPropertyStr(ctx, glob, 'JSON');
-  parseFn := JS_GetPropertyStr(ctx, jsonObj, 'parse');
+  jsonObj := JS_UNDEFINED;
+  parseFn := JS_UNDEFINED;
+  if Assigned(FExtContexts) then
+    for i := 0 to FExtContexts.Count - 1 do
+      if (FExtContexts[i] <> nil) and (FExtContexts[i]^.Ctx = ctx) then
+        parseFn := JS_DupValue(ctx, FExtContexts[i]^.ParseFn);
+  if not JS_IsFunction(ctx, parseFn) then
+  begin
+    jsonObj := JS_GetPropertyStr(ctx, glob, 'JSON');
+    parseFn := JS_GetPropertyStr(ctx, jsonObj, 'parse');
+  end;
   text := JS_NewString(ctx, RawUtf8(Json));
   try
     Result := JS_Call(ctx, parseFn, jsonObj, 1, @text);
@@ -4050,10 +4083,19 @@ end;
 
 function TGittanExtEngine.RunCommand(const AKey, AContextJson: string): boolean;
 var
+  Threw: boolean;
+begin
+  Result := RunCommand(AKey, AContextJson, Threw);
+end;
+
+function TGittanExtEngine.RunCommand(const AKey, AContextJson: string;
+  out AThrew: boolean): boolean;
+var
   Cmd: TGittanExtCommand;
   Func, arg, ret: JSValue;
 begin
   Result := False;
+  AThrew := False;
   if IsExtShuttingDown or (FRuntime = nil) or (FRegistry = nil) then
     Exit;
   if not FRegistry.FindCommand(AKey, Cmd) then
@@ -4063,7 +4105,8 @@ begin
   try
     arg := ParseJsonIn(Cmd.Ctx, CommandContextFor(GrantedForContext(Cmd.Ctx), AContextJson));
     ret := JS_Call(Cmd.Ctx, Func, JS_UNDEFINED, 1, @arg);
-    if JS_IsException(ret) then
+    AThrew := JS_IsException(ret);
+    if AThrew then
       DumpJSError(Cmd.Ctx);
     JS_FreeValue(Cmd.Ctx, ret);
     JS_FreeValue(Cmd.Ctx, arg);

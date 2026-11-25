@@ -54,7 +54,7 @@ type
     FSettings: TGittanSettings;
     FInfos: TGittanExtInfos;
     FOnProvision: TGittanExtProvision;
-    FLoading: boolean;
+    FLoading, FReloading: boolean;
     FModulesDigest: string;
     { The hashes of the modules FModulesDigest covers, sorted. }
     FModuleHashes: TStringList;
@@ -81,6 +81,11 @@ type
     {** True while Load runs, so a host that rebuilds its menus on every
       registered command can wait for the end. }
     property Loading: boolean read FLoading;
+    {** Whether a Reload is under way, from the unload to the end of the
+      load: what is registered meanwhile is not what will be, so a menu
+      or a tab is not built from it. CommandsChanged comes once it is
+      done. }
+    property Reloading: boolean read FReloading;
     property Settings: TGittanSettings read FSettings;
   end;
 
@@ -498,8 +503,14 @@ begin
   Engine := TGittanExtEngine.Existing;
   if FLoading or IsExtShuttingDown or ((Engine <> nil) and Engine.Unloading) then
     Exit;
-  Unload;
-  Load;
+  FReloading := True;
+  try
+    Unload;
+    Load;
+  finally
+    { Load has queued CommandsChanged, which runs after this. }
+    FReloading := False;
+  end;
 end;
 
 end.
