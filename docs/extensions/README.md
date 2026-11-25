@@ -1,6 +1,6 @@
 # Writing a Gittan extension
 
-An extension is one JavaScript file in Gittan's extensions folder: `~/.config/Gittan/extensions` on macOS and Linux, `%APPDATA%\Gittan\extensions` on Windows (Extensions > Open Extensions Folder opens it). Gittan loads every `.js` file there when it starts, and Extensions > Reload Extensions loads them again after an edit. The Extensions page of the settings lists them, turns one off, and shows the fields an extension declares.
+An extension is one JavaScript file in Gittan's extensions folder: `~/.config/Gittan/extensions` on macOS and Linux, `%LOCALAPPDATA%\Gittan\extensions` on Windows (Extensions > Open Extensions Folder opens it). Gittan loads every `.js` file there when it starts, and Extensions > Reload Extensions loads them again after an edit. The Extensions page of the settings lists them, turns one off, and shows the fields an extension declares.
 
 The file starts with a manifest in a comment:
 
@@ -30,7 +30,7 @@ The file starts with a manifest in a comment:
 
 `@repos` and `@forges` pick where the extension acts; they are not permissions. A timer or a command's own code can still read the repository shown, as far as `@perms` lets it.
 
-The scripts run in quickjs-ng (ES2023, with `fetch`-like networking, timers, `console`, `import` of modules from subfolders of the extensions folder, and top-level `await`). `gittan.d.ts` beside this file describes the `Gittan` object for an editor's completion.
+The scripts run in quickjs-ng (ES2023, with `fetch`-like networking, timers, `console`, `import` of modules from subfolders of the extensions folder, and top-level `await`). A module may also `import Gittan from "gittan"`, or its parts by name (`import { git, ui, forges } from "gittan"`); it is the same object as the global `Gittan`. `gittan.d.ts` beside this file describes the `Gittan` object for an editor's completion.
 
 ## Commands
 
@@ -39,11 +39,13 @@ Gittan.commands.register({
   id: "shortlog",
   title: "Who Wrote What",
   where: ["menu", "file"],      // the Extensions menu (and the command palette), the file tree's popup, "editor" for the editor's
-  run: function (ctx) {         // ctx: {repo, path, line, selection}
+  run: function (ctx) {         // ctx: {repo, path, line, selection}, see below
     Gittan.git.run(["shortlog", "-sn", "HEAD"]).then(function (r) { Gittan.ui.alert(r.stdout); });
   }
 });
 ```
+
+`ctx.path`, `ctx.line` and `ctx.selection` need the `data` permission; without it they are not there.
 
 In the GitHub view's own Extensions menu, `where: "forge"`; such a command gets `{forge, login}`: the forge's name and, with the `forge` permission, your login on it.
 

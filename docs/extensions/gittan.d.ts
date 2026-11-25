@@ -44,7 +44,7 @@ declare namespace Gittan {
   const git: { run(args: string[], o?: RepoOptions & { input?: string }): Promise<RunResult> };
   const exec: { run(cmd: string, args: string[], o?: RepoOptions & { cwd?: string; input?: string }): Promise<RunResult> };
 
-  /** The forge the call acts on: the repository's (repo), the one named (forge), else the GitHub view's while it is shown, else the shown repository's. */
+  /** The forge the call acts on: the one named (forge), else the repository's (repo), else the GitHub view's while it is shown, else the shown repository's. */
   interface ForgeOptions extends RepoOptions { forge?: string; input?: string }
   interface ForgeInfo { name: string; cli: string; ready: boolean; reason?: string; accounts: { host: string; login: string; active: boolean }[] }
   /** Needs forge. cli runs the forge's own tool (gh for GitHub) with your account; rejected on no forge or when it cannot run. */
@@ -76,7 +76,7 @@ declare namespace Gittan {
   };
 
   /** A command of a repository gets CommandContext; one of the GitHub view (where "forge") gets ForgeContext, and one in both either. */
-  interface CommandContext { repo: string; path: string; line: number; selection: string }
+  interface CommandContext { repo: string; /** path, line and selection with the data permission. */ path?: string; line?: number; selection?: string }
   interface ForgeContext { forge: string; /** With the forge permission. */ login?: string }
   type RepoWhere = "menu" | "file" | "editor";
   const commands: {
@@ -129,3 +129,25 @@ declare namespace Gittan {
 }
 
 declare function alert(...text: any[]): void;
+
+/** The same object, for a module. */
+declare module "gittan" {
+  export default Gittan;
+  export import api = Gittan.api;
+  export import permissions = Gittan.permissions;
+  export import repo = Gittan.repo;
+  export import git = Gittan.git;
+  export import exec = Gittan.exec;
+  export import net = Gittan.net;
+  export import ui = Gittan.ui;
+  export import commands = Gittan.commands;
+  export import storage = Gittan.storage;
+  export import settings = Gittan.settings;
+  export import app = Gittan.app;
+  export import forge = Gittan.forge;
+  export import forges = Gittan.forges;
+  export import forgeTabs = Gittan.forgeTabs;
+  export import batch = Gittan.batch;
+  export import on = Gittan.on;
+  export import off = Gittan.off;
+}

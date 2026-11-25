@@ -2,6 +2,60 @@
 
 ## Unreleased
 
+### Changed
+
+- The Project page's dependency table shows a locked version as a badge when the lock file has moved past the version the manifest asks for, with a hint that names both; before, it looked like one still at the version asked for.
+
+- A Paint.NET (`.pdn`) or `.xwd` file is no longer shown as an image: the size of a Paint.NET image is not known before it is decoded, so nothing could keep a huge one from freezing Gittan.
+- An extension gets your login on the forge only with the `forge` permission, and a repository's name only with `data`, `exec` or `forge`.
+- A push no longer gives up when a server over HTTP is silent for a minute, as one running its hooks may be. The status bar counts the silence instead, and after a minute the notice has a Stop button; Repository > Stop Push stops a push at any time. A push that stays silent while you quit is ended after a minute.
+
+- A plan of one commit (Split into Commits) is shown to pick as the others are, instead of replacing the message and the ticks at once.
+- Clearing the push address of a remote with several makes the first one the remote's own address; the others stay.
+- In the title bar on Windows and Linux, tabs that do not fit are behind a "+N" button, and the active tab is always shown.
+
+### Fixed
+
+- The list of recent repositories and the rest of `state.json` are kept when the file is missing or cannot be read as Gittan starts; they could be overwritten with a nearly empty file.
+- A fetch, pull or push waiting for a commit is dropped when the commit fails, instead of running anyway.
+- Opening a file that is gone no longer leaves the text of the file shown before it under its name, where it could be edited and saved.
+- Names from a repository (scripts, programs, commands) that start with a dash or hold characters a shell reads are no longer put on a command line by the Project and Commands pages, and Run and Install use the same package manager.
+- A `replace` in a `go.mod` with a network path no longer makes Gittan contact the server, and `.git` under the other names Windows has for it is refused as a file of the repository.
+- A squash is recognised whatever your diff settings are, and the message of a squash merge is left for git instead of being deleted by the watching.
+- The Project page no longer shows every dependency as changed when the last tag has no lock file, and Add to .gitignore works on a `.pyc` file outside `__pycache__`.
+- Leave Out puts a line back with its CRLF line ending.
+- Changing only whether the identity is for this repository, or only the e-mail, no longer rewrites the signing key and settings, and a name can be changed when no key is found.
+- Editing a remote keeps all its push addresses; those after the first were removed.
+- An extension's failure no longer reaches the calls of other extensions, its prompts and choices say which extension asks, its time in a dialog over the pull request view does not count as running, and a module extension that is a symbolic link loads.
+- An extension's module runs only as it was when its permissions were checked; one changed or added since then needs a reload. `Gittan.forge.cli` takes a value joined to `-f` or `-H` of `gh api` and `gh workflow`.
+- The pull request view no longer says more are on GitHub when all of them are shown.
+- On Linux with Qt the summary shows the changed files again when a pull request's conversation is above them, and the link at the right of its heading no longer covers the branch in a narrow window.
+- The hand cursor, the highlight and the tooltip follow the mouse when a page changes under it, and a tab's tooltip is its own after the tab before it is closed.
+- The Markdown and HTML preview reads images only from the repository and the file's own folder, so a page can no longer make Gittan contact a server through a network path.
+- An SVG whose `<use>` elements or masks multiply is no longer drawn; a file of a kilobyte could freeze Gittan.
+- A `.gittan` file over 64 KB is not read, and the page or banner says so; a large one could freeze Gittan.
+- A branch that follows a pull request (`refs/pull/7/head`) is no longer shown as deleted on the remote and offered for deletion.
+- A command's tooltip shows the whole line it runs; everything from the first `|` was left out.
+- The commit box no longer folds while the message field has the caret.
+- The watching holds git's index for a few milliseconds instead of for as long as the files take to read, and not while Gittan commits, fetches or pushes, so a git command started meanwhile no longer finds it locked. A commit that met a lock after it was made says so instead of looking failed.
+- Started from a git hook or alias, Gittan no longer takes over the repository that hook was for.
+- A commit made while an agent writes the message stops the agent; its message could end up in the field for the next commit, or be shown as the one committed.
+- What an agent found for a question in the filter field waits until the tab and Gittan are in front, and the status bar keeps showing what still runs when one of several jobs ends.
+- A large SVG no longer shows as an empty page on a Retina screen.
+- A long title in the red banner is cut before its links, and Details shows it whole.
+- The Files page always shows the folder it is in, also deep down in a narrow window.
+- A pull request with a very long conversation shows its newest comments and the changed files; a Batch page with very many repositories or branches ends in a line saying how many more there are.
+- The Batch tab no longer stands still while a network volume does not answer.
+- An extension that fails or never answers no longer stops a batch run, which has a Stop button, and extensions can be reloaded from the settings without a crash when a page is open.
+- The Project page no longer calls Lazarus packages missing when it could not search every folder, and the Batch tab leaves alone branches that a worktree, a rebase or a bisect has in use.
+- Run Again runs the line that was run, also when two commands of a project have the same name; a script whose name begins with `=` runs under zsh.
+- A `.gittan` file that cannot be read gives a short message, and Markdown with one enormous word no longer freezes Gittan.
+- A connection over port 443 to `ssh.github.com` is recognised as GitHub's when its key is asked about, your own `merge.conflictStyle` is kept, commands are quoted as Windows' `cmd` reads them, and the Project page's Run works for Python.
+- On Linux with GTK the rest of the summary is no longer painted outside its box after a comment, and a menu the system would not show no longer keeps the others from opening.
+- On Windows, removing Gittan while it runs asks to close it first, instead of leaving files behind.
+
+## 0.22 (build-147, 2026-11-19)
+
 ### Fixed
 
 - Gittan is quicker on a Mac that uses Apple's git (`/usr/bin/git`): each of the many git calls behind opening a repository and watching it for changes took 6 ms and now takes 2.5, and the watching itself makes two calls every other second where it made seven.

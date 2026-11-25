@@ -159,7 +159,7 @@ LEXERS_OWN := lexers
 LEXLIB := lexlib
 
 # Vendored packages, in dependency order: the list is VENDOR_PACKAGES in
-# .github/workflows/build.yml, and a new package goes in both. `make deps`
+# .github/workflows/build.yml, and a new package goes in both and in make.ps1. `make deps`
 # registers each with --add-package-link and compiles it, after a fresh clone
 # or a submodule move; `make ide` installs ATFlatControls and ATSynEdit in the
 # Lazarus IDE (IDE_PACKAGES) and rebuilds it, so it is built with ATSynEdit,
