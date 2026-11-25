@@ -27,6 +27,8 @@ type
     procedure TestStringsAsTheyAre;
     procedure TestRecentList;
     procedure TestSaveRecent;
+    procedure TestSaveRecentFileGone;
+    procedure TestListsOfUnreadState;
     procedure TestTabs;
     procedure TestBatchRepos;
     procedure TestCoAuthors;
@@ -516,6 +518,88 @@ begin
       S.Free;
     end;
   end;
+end;
+
+{ state.json gone or broken while Gittan runs: SaveRecent writes what it
+  held, so the next Save has it to keep. }
+procedure TSettingsTest.TestSaveRecentFileGone;
+var
+  S: TGittanSettings;
+  Round: integer;
+begin
+  for Round := 0 to 1 do
+  begin
+    Put('state.json', '{}');
+    S := TGittanSettings.Create(FDir);
+    try
+      S.Load;
+      S.Width := 1234;
+      S.SetCommitDraft('/repo/a', 'draft');
+      S.Save;
+      if Round = 0 then
+        AssertTrue(DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'state.json'))
+      else
+        Put('state.json', '{"recent": [');
+      S.AddRecent('/repo/a');
+      S.SaveRecent;
+      S.Save;
+    finally
+      S.Free;
+    end;
+    S := TGittanSettings.Create(FDir);
+    try
+      S.Load;
+      AssertEquals(1234, S.Width);
+      AssertEquals('draft', S.CommitDraftFor('/repo/a'));
+      AssertEquals('/repo/a', S.Recent[0]);
+    finally
+      S.Free;
+    end;
+  end;
+end;
+
+{ A state.json that could not be read at the start keeps its lists when
+  one is added to and the file can be read again. }
+procedure TSettingsTest.TestListsOfUnreadState;
+{$IFDEF UNIX}
+var
+  S: TGittanSettings;
+  Name: string;
+  Round: integer;
+{$ENDIF}
+begin
+  {$IFDEF UNIX}
+  if FpGeteuid = 0 then
+    Exit;
+  Name := IncludeTrailingPathDelimiter(FDir) + 'state.json';
+  for Round := 0 to 1 do
+  begin
+    Put('state.json', '{"recent": ["/a", "/b"], "commit": {"coAuthors": ["A <a@x>"]}}');
+    FpChmod(Name, 0);
+    S := TGittanSettings.Create(FDir);
+    try
+      S.Load;
+      FpChmod(Name, &600);
+      S.AddRecent('/b');
+      S.AddRecent('/new');
+      if Round = 0 then
+        S.SaveRecent
+      else
+        S.Save;
+    finally
+      S.Free;
+      FpChmod(Name, &600);
+    end;
+    S := TGittanSettings.Create(FDir);
+    try
+      S.Load;
+      AssertEquals('/new,/b,/a', S.Recent.CommaText);
+      AssertEquals(1, S.CoAuthors.Count);
+    finally
+      S.Free;
+    end;
+  end;
+  {$ENDIF}
 end;
 
 { A file with a UTF-8 byte order mark is read; one that cannot be read
