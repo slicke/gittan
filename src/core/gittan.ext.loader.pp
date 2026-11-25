@@ -56,9 +56,13 @@ type
     FOnProvision: TGittanExtProvision;
     FLoading: boolean;
     FModulesDigest: string;
+    { The hashes of the modules FModulesDigest covers, sorted. }
+    FModuleHashes: TStringList;
+    function ModuleApproved(const ASource: RawByteString): boolean;
     procedure LoadOne(const AFileName: string; ASeen: TStrings);
   public
     constructor Create(ASettings: TGittanSettings);
+    destructor Destroy; override;
     {** The folder the extensions are read from, made when missing. }
     function Dir: string;
     {** Loads the extensions of Dir into the engine (made when there is
@@ -101,6 +105,15 @@ constructor TGittanExtLoader.Create(ASettings: TGittanSettings);
 begin
   inherited Create;
   FSettings := ASettings;
+  FModuleHashes := TStringList.Create;
+  FModuleHashes.Sorted := True;
+end;
+
+destructor TGittanExtLoader.Destroy;
+begin
+  OnModuleApproval := nil;
+  FModuleHashes.Free;
+  inherited Destroy;
 end;
 
 function TGittanExtLoader.Dir: string;
@@ -155,11 +168,18 @@ begin
   end;
 end;
 
+function TGittanExtLoader.ModuleApproved(const ASource: RawByteString): boolean;
+begin
+  Result := FModuleHashes.IndexOf(HashScript(string(ASource))) >= 0;
+end;
+
 { A digest of every file in the subfolders of AFolder, its path and its
   content; '' when there is none, so a single-file extension's grant keeps
-  the hash of its file alone. }
-function ModulesDigest(const AFolder: string): string;
+  the hash of its file alone. The hash of each file's content goes to
+  AHashes. }
+function ModulesDigest(const AFolder: string; AHashes: TStrings = nil): string;
 var
+  Text: string;
   Sr: TSearchRec;
   Files: TStringList;
   Buf: TStringStream;
@@ -187,7 +207,10 @@ begin
     try
       for Path in Files do
       try
-        Buf.WriteString(Path + #0 + string(ReadFileBytes(AFolder + Path)) + #0);
+        Text := string(ReadFileBytes(AFolder + Path));
+        Buf.WriteString(Path + #0 + Text + #0);
+        if AHashes <> nil then
+          AHashes.Add(HashScript(Text));
       except
         Buf.WriteString(Path + #0#1#0);
       end;
@@ -428,7 +451,12 @@ begin
     Files.Sort;
     if (Files.Count > 0) and (TGittanExtEngine.Instance = nil) then
       Exit;
-    FModulesDigest := ModulesDigest(Folder);
+    { A grant covers the modules as they are now: one imported later, or
+      while a question is up, runs only as it was hashed here. By content
+      alone, as a path may be spelled in other ways (case, Unicode). }
+    FModuleHashes.Clear;
+    FModulesDigest := ModulesDigest(Folder, FModuleHashes);
+    OnModuleApproval := @ModuleApproved;
     for FileName in Files do
     begin
       if ExtHost.Terminated then
@@ -451,6 +479,7 @@ begin
   if Engine <> nil then
     Engine.UnloadExtensions;
   FInfos := nil;
+  OnModuleApproval := nil;
   { Their cards go with them. }
   ExtHost.ClearCards('', '');
   ExtHost.CommandsChanged;

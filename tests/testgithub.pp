@@ -137,6 +137,8 @@ begin
   AssertFalse('-O after = in a cluster', Allows(['release', 'view', '-iO=x']));
   AssertTrue('api -iF a value', Allows(['api', 'x', '-iF', 'per_page=5']));
   AssertTrue('api -f, no file', Allows(['api', 'x', '-f', 'body=@not-a-file']));
+  AssertTrue('api -f run together', Allows(['api', 'x', '-fevent=APPROVE']));
+  AssertTrue('api -H run together', Allows(['api', 'x', '-HAccept:text/html']));
   AssertTrue('a value run together', Allows(['pr', 'list', '-q.title']));
   { Deleting the local branch, the browser, a checkout or worktree. }
   AssertFalse('pr merge -d', Allows(['pr', 'merge', '12', '-d']));

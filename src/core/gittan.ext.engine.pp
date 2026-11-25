@@ -1116,8 +1116,7 @@ opaque: pointer): pointer; cdecl;
 var
   FileName: string;
   Script: RawUtf8;
-  FileStream: TFileStream;
-  StringStream: TStringStream;
+  Source: RawByteString;
   Compiled: JSValue;
 
   { Leave a readable error pending on the context: returning nil without one
@@ -1159,15 +1158,14 @@ begin
   // Load file contents into Script as UTF-8. This runs inside a C frame, so a
   // Pascal exception must not be allowed to unwind out of it.
   try
-    FileStream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyWrite);
-    StringStream := TStringStream.Create;
-    try
-      StringStream.CopyFrom(FileStream, FileStream.Size);
-      Script := StringStream.DataString;
-    finally
-      StringStream.Free;
-      FileStream.Free;
+    Source := ReadFileBytes(FileName);
+    if Assigned(OnModuleApproval) and not OnModuleApproval(Source) then
+    begin
+      Fail('module ' + FileName + ' changed since the extensions were loaded; ' +
+        'reload the extensions');
+      Exit;
     end;
+    Script := RawUtf8(Source);
   except
     on E: Exception do
     begin

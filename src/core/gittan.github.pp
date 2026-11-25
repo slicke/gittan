@@ -72,10 +72,11 @@ function ParsePullRequest(const AJson: string; out APull: TGittanPullRequest): b
 {** Reads the array gh pr list --json prints. }
 function ParsePullRequests(const AJson: string; out APulls: TGittanPullRequests): boolean;
 
-{** How many pull requests each search of ForgeQuery's answer found in
-  all (its issueCount), of which it gives the first fifty; false when
-  the answer has no such counts. }
-function ParseForgeTotals(const AJson: string; out AMine, AReview: integer): boolean;
+{** How many pull requests each search of ForgeQuery's answer found
+  beyond the first fifty it gives: its issueCount less its nodes, also
+  those no pull request could be read from; false when the answer has
+  no such counts. }
+function ParseForgeLeft(const AJson: string; out AMine, AReview: integer): boolean;
 
 {** Reads the answer to ForgeQuery: the login, the pull requests the
   user wrote (AMine) and those asked of them (AReview, as GitHub lists
@@ -874,9 +875,25 @@ begin
   SetLength(APulls, n);
 end;
 
-function ParseForgeTotals(const AJson: string; out AMine, AReview: integer): boolean;
+function ParseForgeLeft(const AJson: string; out AMine, AReview: integer): boolean;
+
+  function Left(AData: TJSONData; const AName: string; out ALeft: integer): boolean;
+  var
+    Count, Nodes: TJSONData;
+  begin
+    ALeft := 0;
+    Count := Dig(AData, [AName, 'issueCount']);
+    Result := (Count <> nil) and (Count.JSONType = jtNumber);
+    if not Result then
+      Exit;
+    ALeft := Count.AsInteger;
+    Nodes := Dig(AData, [AName, 'nodes']);
+    if (Nodes <> nil) and (Nodes.JSONType = jtArray) then
+      ALeft := Max(0, ALeft - Nodes.Count);
+  end;
+
 var
-  Root, Data, Count: TJSONData;
+  Root, Data: TJSONData;
 begin
   AMine := 0;
   AReview := 0;
@@ -892,15 +909,7 @@ begin
     Data := TJSONObject(Root).Find('data');
     if (Data = nil) or (Data.JSONType <> jtObject) then
       Exit;
-    Count := Dig(Data, ['mine', 'issueCount']);
-    if (Count = nil) or (Count.JSONType <> jtNumber) then
-      Exit;
-    AMine := Count.AsInteger;
-    Count := Dig(Data, ['review', 'issueCount']);
-    if (Count = nil) or (Count.JSONType <> jtNumber) then
-      Exit;
-    AReview := Count.AsInteger;
-    Result := True;
+    Result := Left(Data, 'mine', AMine) and Left(Data, 'review', AReview);
   finally
     Root.Free;
   end;
@@ -1412,7 +1421,7 @@ function TGitHubAccountJob.Ask(out ALogin: string; out AMine, AReview: TGittanFo
   out AError: string): boolean;
 var
   Output, Url: string;
-  MineCount, ReviewCount: integer;
+  MineMore, ReviewMore: integer;
 begin
   ALogin := '';
   AMine := nil;
@@ -1421,10 +1430,8 @@ begin
   Result := RunGh(FExe, Root, ['api', 'graphql', '-f', 'query=' + ForgeQuery], Output, AError)
     and ParseForgeAnswer(Output, ALogin, Url, AMine, AReview, AError);
   AvatarUrl := Url;
-  if Result and ParseForgeTotals(Output, MineCount, ReviewCount) then
-  begin
-    SetLeft(Max(0, MineCount - Length(AMine)), Max(0, ReviewCount - Length(AReview)));
-  end;
+  if Result and ParseForgeLeft(Output, MineMore, ReviewMore) then
+    SetLeft(MineMore, ReviewMore);
 end;
 
 { ---------------------------------------------------------------------------
@@ -1565,7 +1572,7 @@ const
     ('repo', 'read-file', 'o', '--output'));
   { Short flags that take a value in every command that has one, so the
     rest of a run of short flags after one is its value (-q.name,
-    -tDeploy) and no flag. }
+    -tDeploy) and no flag; api's and workflow run's -f and -H do too. }
   ValueLetters = ['A', 'B', 'D', 'L', 'O', 'R', 'S', 'T', 'X', 'b', 'g', 'j',
     'k', 'o', 'q', 't'];
 
@@ -1733,7 +1740,7 @@ begin
           Exit;
         Break;
       end;
-      if (A[k] in ValueLetters) or (k < Length(A)) and (A[k + 1] = '=') then
+      if (A[k] in ValueLetters) or Typed and (A[k] in ['f', 'H']) or (k < Length(A)) and (A[k + 1] = '=') then
         Break;
       Inc(k);
     end;

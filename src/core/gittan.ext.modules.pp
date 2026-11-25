@@ -87,6 +87,16 @@ function ModuleBootstrapScript(const EntryPath: string): UTF8String;
     context's @code(Gittan) object plus named exports of its namespaces. }
 function GittanModuleSource: UTF8String;
 
+type
+  {** Whether a module whose text is ASource may run. }
+  TModuleApproval = function(const ASource: RawByteString): boolean of object;
+
+var
+  {** Asked for every module read from disk; nil lets them all run. Set by
+    the loader of the extensions folder, which hashed the modules for the
+    grants; main thread only. }
+  OnModuleApproval: TModuleApproval = nil;
+
 implementation
 
 {******************************************************************************

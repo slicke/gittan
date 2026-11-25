@@ -23,6 +23,7 @@ type
     FAskedAgain: boolean;
     procedure Put(const AName, AScript: string);
     procedure EditModule;
+    procedure EditModules(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
     procedure SwapFiles(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
     procedure AddSlowTask(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
     procedure ReloadAgain;
@@ -38,6 +39,7 @@ type
     procedure TestPermissionAskedAndKept;
     procedure TestPermissionDenied;
     procedure TestChangedWhileAsked;
+    procedure TestModuleRunsOnlyAsHashed;
     procedure TestReloadPicksUpEdits;
     procedure TestScriptErrorListed;
     procedure TestThrowDropsWhatWasRegistered;
@@ -303,6 +305,34 @@ begin
   AssertEquals('not run', '', FHost.Alerts.CommaText);
   FLoader.Reload;
   AssertEquals('asked again', 2, FHost.Asked.Count);
+end;
+
+{ A module imported after the load runs as it was hashed for the
+  grants; one changed or added since waits for a reload. }
+procedure TExtLoaderTest.TestModuleRunsOnlyAsHashed;
+begin
+  Put('lib/same.js', 'export const s = "same";');
+  Put('lib/other.js', 'export const s = "other";');
+  Put('a.js', '/* @name Ay */ for (const m of ["same", "other", "new"])' +
+    ' import("./lib/" + m + ".js").then(function (n) { Gittan.alert(n.s); },' +
+    ' function (e) { Gittan.alert(m + " " + String(e).includes("changed since")); });');
+  FLoader.OnProvision := @EditModules;
+  FLoader.Load;
+  TGittanExtEngine.Instance.PumpJobs;
+  FHost.Alerts.Sort;
+  AssertEquals('"new true","other true",same', FHost.Alerts.CommaText);
+  FLoader.OnProvision := nil;
+  FHost.Alerts.Clear;
+  FLoader.Reload;
+  TGittanExtEngine.Instance.PumpJobs;
+  FHost.Alerts.Sort;
+  AssertEquals('after a reload', 'edited,new,same', FHost.Alerts.CommaText);
+end;
+
+procedure TExtLoaderTest.EditModules(AEngine: TGittanExtEngine; AExt: PExtContextInfo);
+begin
+  Put('lib/other.js', 'export const s = "edited";');
+  Put('lib/new.js', 'export const s = "new";');
 end;
 
 procedure TExtLoaderTest.TestReloadPicksUpEdits;
