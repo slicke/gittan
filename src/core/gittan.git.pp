@@ -298,7 +298,7 @@ type
     { Git LFS's store folder (LfsObjectFile) and FETCH_HEAD's path
       (LastFetch), '' until they are asked for. }
     FLfsStore, FFetchHead: string;
-    FError: string;
+    FError, FCommitNote: string;
     FBase: string;
     FWholeTree: boolean;
     FTempIndex: string;
@@ -1188,10 +1188,11 @@ type
     function CommitDetails(const AHash: string; out ACommit: TGittanCommitLine;
       out ABody: string): boolean;
     {** Brings the index's record of the files' times and sizes up to
-      date (`git update-index -q --refresh`), so a status after it need
+      date (`git status` with optional locks), so a status after it need
       not read files touched but not changed again; every other git
-      Gittan runs takes no optional lock and never does it. False with
-      nothing run while index.lock is there, another git at work. }
+      Gittan runs takes no optional lock and never does it. index.lock
+      is held for the write alone. False with nothing run while it is
+      there, another git at work. }
     function RefreshIndex: boolean;
     {** A text that changes whenever the branch, the set of changed files
       or the content of a changed file changes: the branch, the commit ids
@@ -1214,6 +1215,10 @@ type
       still give one), so it says why only right after a call that
       returned false. }
     property Error: string read FError;
+    {** After a Commit that returned true: why the index could not be
+      brought up to the new commit (index.lock held by another git), so
+      the files committed show as changed; '' when it was. }
+    property CommitNote: string read FCommitNote;
     {** The commit the work tree is compared against: a branch, tag or
       commit id, or empty for HEAD. A range "A..B" compares the commits A
       and B instead, "A...B" the commit B against its merge base with A
@@ -1269,6 +1274,15 @@ function EnvironmentVariable(const AName: string): string;
   describes, and a git given a USERPROFILE of Bj÷rn could not write
   ~/.gitconfig. }
 function EnvironmentStrings: TStringArray;
+
+{** Takes the variables that tie a git to one repository (GIT_DIR,
+  GIT_WORK_TREE and their like, what a git alias or hook exports to what
+  it starts, and the -c settings of that git) out of Gittan's own
+  environment, so neither its git, its terminals nor the commands it
+  runs inherit them: every tab would work in that one repository.
+  GIT_CONFIG_COUNT stays, as git does not set it: it is the user's.
+  Called once, as Gittan starts. }
+procedure ClearGitEnvironment;
 
 {** Full path of the command AName (without .exe; Windows adds it) on
   ToolSearchPath, or empty when it is not installed. node is found this
@@ -2187,6 +2201,45 @@ end;
   Windows (whose variable is "Path", and whose PATH is kept as it is).
   Windows takes a name in any case, so there ASkip is matched so too:
   Copilot_Allow_All is the COPILOT_ALLOW_ALL it would read. }
+{$ifndef windows}
+function libc_unsetenv(AName: PChar): cint; cdecl; external 'c' name 'unsetenv';
+{$endif}
+
+procedure ClearGitEnvironment;
+const
+  Names: array[0..9] of string = ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR',
+    'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+    'GIT_NAMESPACE', 'GIT_PREFIX', 'GIT_IMPLICIT_WORK_TREE', 'GIT_CONFIG_PARAMETERS');
+var
+  Name: string;
+  {$ifndef windows}
+  i, j: integer;
+  {$endif}
+begin
+  for Name in Names do
+  begin
+    {$ifdef windows}
+    SetEnvironmentVariableW(PWideChar(UnicodeString(Name)), nil);
+    {$else}
+    { libc's environment and the RTL's envp: one block at the start, but
+      libc moves its own once it adds to it. }
+    libc_unsetenv(PChar(Name));
+    i := 0;
+    while (envp <> nil) and (envp[i] <> nil) do
+      if StrLComp(envp[i], PChar(Name + '='), Length(Name) + 1) = 0 then
+      begin
+        j := i;
+        repeat
+          envp[j] := envp[j + 1];
+          Inc(j);
+        until envp[j - 1] = nil;
+      end
+      else
+        Inc(i);
+    {$endif}
+  end;
+end;
+
 procedure CopyEnvironment(P: TProcess; const ASkip: array of string);
 var
   Env, Prefix: string;
@@ -2729,8 +2782,12 @@ begin
   Env[i] := 'LC_ALL=C';
   Env[i + 1] := 'GIT_TERMINAL_PROMPT=0';
   { git status refreshes the index when it may, under index.lock; the
-    watcher's poll would then make a commit started meanwhile fail. }
-  Env[i + 2] := 'GIT_OPTIONAL_LOCKS=0';
+    watcher's poll would then make a commit started meanwhile fail. A
+    caller that wants just that (RefreshIndex) passes its own. }
+  if HasEnvName(AEnv, 'GIT_OPTIONAL_LOCKS') then
+    Env[i + 2] := 'LC_ALL=C'
+  else
+    Env[i + 2] := 'GIT_OPTIONAL_LOCKS=0';
   if AIndexFile <> '' then
     Env[i + 3] := 'GIT_INDEX_FILE=' + AIndexFile
   else
@@ -3278,6 +3335,10 @@ end;
 
 { The repository's index file: in the git dir of the work tree (a linked
   work tree has one of its own). }
+{ git status, not update-index --refresh, which holds index.lock for the
+  whole refresh (428 of 429 ms with 20 000 touched files): status takes
+  it for the write alone (12 to 17 ms) and leaves the index as it was
+  when another git holds it. }
 function TGittanRepo.RefreshIndex: boolean;
 var
   Output: string;
@@ -3285,9 +3346,8 @@ begin
   Result := False;
   if (FRoot = '') or FileExists(IndexPath + '.lock') then
     Exit;
-  { Files that differ are listed, and git exits with 1: no failure. }
-  RunGit(FRoot, ['update-index', '-q', '--refresh'], Output);
-  Result := not FileExists(IndexPath + '.lock');
+  Result := RunGitEnv(FRoot, ['status', '--porcelain', '-uno', '--no-renames',
+    '--ignore-submodules=all'], ['GIT_OPTIONAL_LOCKS=1'], Output, FError) and not FileExists(IndexPath + '.lock');
 end;
 
 function TGittanRepo.IndexPath: string;
@@ -4741,6 +4801,23 @@ var
   Whole: boolean;
   i: integer;
 
+  { Runs git on the real index, again for a second or two while another
+    git holds index.lock. }
+  function RunUnlocked(const ACommand: array of string): boolean;
+  var
+    Tries: integer;
+  begin
+    Tries := 0;
+    repeat
+      Result := RunGit(FRoot, ACommand, Output);
+      if Result or (Pos('index.lock', FError) = 0) then
+        Exit;
+      Inc(Tries);
+      if Tries < 10 then
+        Sleep(150);
+    until Tries = 10;
+  end;
+
   { -F with the message, then --amend, --signoff and --no-verify as
     asked. }
   procedure AddCommitArgs;
@@ -4827,8 +4904,9 @@ var
     if not Result then
       Exit;
     Err := FError;
-    RunGit(FRoot, ['--literal-pathspecs', 'reset', '-q', '--pathspec-from-file=' +
-      SpecFile, '--pathspec-file-nul'], Output);
+    if not RunUnlocked(['--literal-pathspecs', 'reset', '-q', '--pathspec-from-file=' +
+      SpecFile, '--pathspec-file-nul']) then
+      FCommitNote := FError;
     FError := Err;
     if RunGit(FRoot, ['rev-parse', 'HEAD'], Output) then
       AId := Trim(Output);
@@ -4836,6 +4914,7 @@ var
 
 begin
   AId := '';
+  FCommitNote := '';
   if FRoot = '' then
     Exit(False);
   Op := Operation;
@@ -4933,8 +5012,9 @@ begin
       if not Whole and (Added.Count > 0) then
       begin
         Err := FError;
-        RunGit(FRoot, ['--literal-pathspecs', 'rm', '--cached', '-q',
-          '--pathspec-from-file=' + AddFile, '--pathspec-file-nul'], Output);
+        if not RunUnlocked(['--literal-pathspecs', 'rm', '--cached', '-q',
+          '--pathspec-from-file=' + AddFile, '--pathspec-file-nul']) then
+          Err := Err + LineEnding + 'The new files are still added to the index: ' + FError;
         FError := Err;
       end;
       Exit;
@@ -5647,9 +5727,12 @@ begin
       Exit;
     if Urls.Count > 0 then
       Result := RunGit(FRoot, ['config', '--unset-all', Key], Output);
-    if Result and (Urls.Count > 1) and (APushUrl <> '') and (APushUrl <> AUrl) then
+    if Result and (Urls.Count > 1) then
     begin
+      { Cleared, it pushes to the URL; the others stay. }
       Urls[0] := APushUrl;
+      if APushUrl = '' then
+        Urls[0] := AUrl;
       for i := 0 to Urls.Count - 1 do
         Result := RunGit(FRoot, ['config', '--add', Key, Urls[i]], Output) and Result;
       Exit;

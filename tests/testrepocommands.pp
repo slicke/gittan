@@ -896,6 +896,8 @@ begin
   finally
     Job.Free;
   end;
+  {$else}
+  Ignore('not on Windows');
   {$endif}
 end;
 
@@ -935,6 +937,8 @@ begin
   finally
     Job.Free;
   end;
+  {$else}
+  Ignore('not on Windows');
   {$endif}
 end;
 

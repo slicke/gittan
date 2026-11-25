@@ -130,6 +130,12 @@ type
   as it is. }
 function LinkFilePaths(const AMarkdown: string; AExists: TGittanPathTest): string;
 
+{** AMarkdown with a space put into a run of text without one that is full
+  of markup: LazInk measures the rest of a word for each piece of it, so
+  a file of one such word took minutes. Code fences stay as they are, and
+  so does whatever anyone writes. }
+function TameMarkdown(const AMarkdown: string): string;
+
 {** The path and the line (0 for none) of a link LinkFilePaths made;
   false for any other address. }
 function FileOfLink(const ALink: string; out APath: string; out ALine: integer): boolean;
@@ -723,6 +729,56 @@ begin
   Result := FileLinkScheme + APath;
   if ALine > 0 then
     Result := Result + '#L' + IntToStr(ALine);
+end;
+
+function TameMarkdown(const AMarkdown: string): string;
+const
+  { The marks of a word before it is cut. }
+  MaxMarks = 200;
+var
+  i, From, Marks: integer;
+  Fence, Start: boolean;
+  Mark: string;
+begin
+  Result := '';
+  From := 1;
+  Marks := 0;
+  Fence := False;
+  Start := True;
+  for i := 1 to Length(AMarkdown) do
+    case AMarkdown[i] of
+      #10, #13:
+      begin
+        Start := True;
+        Marks := 0;
+      end;
+      ' ', #9:
+        Marks := 0;
+      else
+      begin
+        if Start then
+        begin
+          Mark := Copy(AMarkdown, i, 3);
+          if (Mark = '```') or (Mark = '~~~') then
+            Fence := not Fence;
+        end;
+        Start := False;
+        if not Fence and (AMarkdown[i] in ['*', '_', '~', '`', '<', '[']) then
+        begin
+          Inc(Marks);
+          if Marks > MaxMarks then
+          begin
+            Result := Result + Copy(AMarkdown, From, i - From) + ' ';
+            From := i;
+            Marks := 1;
+          end;
+        end;
+      end;
+    end;
+  if From = 1 then
+    Result := AMarkdown
+  else
+    Result := Result + Copy(AMarkdown, From, MaxInt);
 end;
 
 function LinkFilePaths(const AMarkdown: string; AExists: TGittanPathTest): string;

@@ -32,6 +32,7 @@ type
     procedure TestCommentParts;
     procedure TestLinkFilePaths;
     procedure TestLinkFilePathsLeftAlone;
+    procedure TestTameMarkdown;
     procedure TestFileOfLink;
   end;
 
@@ -336,6 +337,34 @@ begin
     LinkFilePaths('- [ ] fix README.md, see [docs](https://a.b)', @IsFile));
   AssertEquals('an index', 'a[i] in [README.md](gittan-file:README.md)',
     LinkFilePaths('a[i] in README.md', @IsFile));
+end;
+
+procedure TReviewsTest.TestTameMarkdown;
+var
+  S, T: string;
+  i, Marks, Most: integer;
+begin
+  S := 'A **b** `c` [d](e) <f>'#10'- *g*'#10;
+  AssertEquals('what one writes', S, TameMarkdown(S));
+  S := '';
+  for i := 1 to 1000 do
+    S := S + '**a**b';
+  T := TameMarkdown(S);
+  AssertEquals('nothing but spaces', S, StringReplace(T, ' ', '', [rfReplaceAll]));
+  Marks := 0;
+  Most := 0;
+  for i := 1 to Length(T) do
+  begin
+    if T[i] = ' ' then
+      Marks := 0
+    else if T[i] = '*' then
+      Inc(Marks);
+    if Marks > Most then
+      Most := Marks;
+  end;
+  AssertEquals('each piece within the limit', 200, Most);
+  S := '```'#10 + S + #10'```'#10;
+  AssertEquals('a code fence', S, TameMarkdown(S));
 end;
 
 procedure TReviewsTest.TestLinkFilePathsLeftAlone;

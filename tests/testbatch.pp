@@ -51,6 +51,7 @@ type
     procedure TestDelete;
     procedure TestDeleteRefused;
     procedure TestJobs;
+    procedure TestFoldersJob;
     procedure TestStatusClean;
     procedure TestStatusUndone;
     procedure TestStatusOperation;
@@ -310,6 +311,17 @@ begin
   i := FindBranch(Repo, 'wip');
   AssertTrue(i >= 0);
   AssertTrue(Repo.Branches[i].Merge = gmNotMerged);
+  { One another worktree has checked out is not offered, and nothing is
+    while git is in the middle of something. }
+  Git(FWork, ['worktree', 'add', '-q', IncludeTrailingPathDelimiter(FDir) + 'tree', 'wip']);
+  Repo := ScanGoneRepo(FWork, '', True);
+  AssertEquals(-1, FindBranch(Repo, 'wip'));
+  AssertEquals(2, Length(Repo.Branches));
+  Git(FWork, ['bisect', 'start']);
+  Repo := ScanGoneRepo(FWork, '', True);
+  AssertTrue(Repo.Error <> '');
+  AssertEquals(0, Length(Repo.Branches));
+  Git(FWork, ['bisect', 'reset']);
 end;
 
 procedure TBatchTest.TestScanNotARepo;
@@ -368,6 +380,23 @@ begin
   AssertTrue(Pos('error: ', Branch.Error) = 0);
   Branch := DeleteGoneBranch(FWork, 'nosuch');
   AssertFalse(Branch.Deleted);
+end;
+
+procedure TBatchTest.TestFoldersJob;
+var
+  Job: TGittanFoldersJob;
+  Missing: string;
+begin
+  Missing := IncludeTrailingPathDelimiter(FDir) + 'missing';
+  Job := TGittanFoldersJob.Create([FDir, Missing]);
+  try
+    Job.Start;
+    Job.WaitFor;
+    AssertEquals(1, Length(Job.Gone));
+    AssertEquals(Missing, Job.Gone[0]);
+  finally
+    Job.Free;
+  end;
 end;
 
 procedure TBatchTest.TestJobs;

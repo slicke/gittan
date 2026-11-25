@@ -88,8 +88,8 @@ function LpiVersion(const AXml: string): string;
   . or .. would walk the tree again for every link at every level
   (fifteen of them gave 800,000 paths in 55 seconds), and one to a file
   would read what lies outside the clone. It looks at LazPackageEntries
-  entries at most. }
-function FindLazPackages(const ARoot: string): TStringArray;
+  entries at most; AComplete is false when there were more. }
+function FindLazPackages(const ARoot: string; out AComplete: boolean): TStringArray;
 
 {** Whether AName is a package that comes with Lazarus (LCL, FCL,
   LazUtils, SynEdit and the like), whatever the case. }
@@ -152,6 +152,8 @@ resourcestring
   rsBuild = 'Build';
   rsFromLazarus = 'Lazarus';
   rsNotFound = 'not found';
+  rsNotSearched = 'not searched';
+  rsNotSearchedHint = 'The repository has too many files to look for packages in all of it.';
   rsSubmoduleAt = '%s @ %s';
   rsMovedHint = '%s moved from %s to %s since %s';
   rsAdded = 'added';
@@ -521,7 +523,7 @@ begin
   Result := ReadLazProject(AXml).Version;
 end;
 
-function FindLazPackages(const ARoot: string): TStringArray;
+function FindLazPackages(const ARoot: string; out AComplete: boolean): TStringArray;
 var
   Found: TStringList;
   i, Seen: integer;
@@ -540,7 +542,10 @@ var
           Continue;
         Inc(Seen);
         if Seen > LazPackageEntries then
+        begin
+          AComplete := False;
           Exit;
+        end;
         if (Info.Attr and faSymLink) <> 0 then
           Continue;
         if ARel = '' then
@@ -565,6 +570,7 @@ var
 begin
   Found := TStringList.Create;
   Seen := 0;
+  AComplete := True;
   try
     if (ARoot <> '') and DirectoryExists(ARoot) then
       Walk('', 0);
@@ -726,6 +732,68 @@ begin
   Result := '';
 end;
 
+{ Whether the index holds ASub as a submodule, under the root: an entry
+  left in .gitmodules after one that is gone is none, and its path is
+  whatever the file says. }
+function IsGitlink(const ASub: TGittanSubmodule): boolean;
+begin
+  Result := (ASub.Recorded <> '') and (ASub.Path <> '') and
+    (Pos('/../', '/' + ASub.Path + '/') = 0) and not (ASub.Path[1] in ['/', '\']);
+end;
+
+{ The .lpk files FindLazPackages finds and, when the repository is too
+  large for it to look everywhere, those git tracks and those in the
+  submodules, each with the walk's limits of its own. AComplete is false
+  when there may still be others. }
+function ContextPackages(AContext: TGittanProjectContext; out AComplete: boolean): TStringArray;
+var
+  Found: TStringList;
+  Path: string;
+  Sub: TGittanSubmodule;
+  Info: TSearchRec;
+  Whole: boolean;
+  i: integer;
+
+  { A file or folder of its own, not a link out of the repository. }
+  function Plain(const AFileName: string): boolean;
+  begin
+    Result := FindFirst(AFileName, faAnyFile or faSymLink, Info) = 0;
+    if not Result then
+      Exit;
+    Result := (Info.Attr and faSymLink) = 0;
+    FindClose(Info);
+  end;
+
+begin
+  Result := FindLazPackages(AContext.Root, AComplete);
+  if AComplete then
+    Exit;
+  AComplete := True;
+  Found := TStringList.Create;
+  try
+    Found.CaseSensitive := True;
+    Found.Sorted := True;
+    Found.Duplicates := dupIgnore;
+    Found.AddStrings(Result);
+    for i := 0 to AContext.Tracked.Count - 1 do
+      if SameText(ExtractFileExt(AContext.Tracked[i]), '.lpk') and
+        Plain(RootFile(AContext.Root, AContext.Tracked[i])) then
+        Found.Add(AContext.Tracked[i]);
+    for Sub in AContext.Submodules do
+      if IsGitlink(Sub) and Plain(RootFile(AContext.Root, Sub.Path)) then
+      begin
+        for Path in FindLazPackages(RootFile(AContext.Root, Sub.Path), Whole) do
+          Found.Add(Sub.Path + '/' + Path);
+        AComplete := AComplete and Whole;
+      end;
+    SetLength(Result, Found.Count);
+    for i := 0 to Found.Count - 1 do
+      Result[i] := Found[i];
+  finally
+    Found.Free;
+  end;
+end;
+
 { Whether the folder ADir has nothing in it: a submodule not checked
   out. }
 function DirIsEmpty(const ADir: string): boolean;
@@ -755,11 +823,13 @@ begin
   Result := -1;
 end;
 
-class function TGittanLazarusKind.Checks(AContext: TGittanProjectContext): TGittanProjectChecks;
+{ The checks, with the project ALpi names read ('' for none) and its
+  packages looked for, as the section does too. }
+function LazChecks(AContext: TGittanProjectContext; const ALpi: string;
+  const AProject: TLazProject; const APackages: TStringArray;
+  AComplete: boolean): TGittanProjectChecks;
 var
-  Path, Lpi: string;
-  Project: TLazProject;
-  Packages: TStringArray;
+  Path: string;
   Subs: TGittanSubmodules;
   i: integer;
 begin
@@ -776,19 +846,35 @@ begin
     each, then the packages found nowhere. }
   Subs := AContext.Submodules;
   for i := 0 to High(Subs) do
-    if DirIsEmpty(RootFile(AContext.Root, Subs[i].Path)) then
+    if IsGitlink(Subs[i]) and DirIsEmpty(RootFile(AContext.Root, Subs[i].Path)) then
       AddProjectCheck(Result, ProjectCheck(Format(rsSubmoduleEmpty, [Subs[i].Path]),
         Subs[i].Path));
-  Lpi := DependencyFile(AContext.Root);
-  if Lpi = '' then
+  if (ALpi = '') or not AComplete then
     Exit;
-  Project := ReadLazProject(TextOf(AContext.Root, Lpi));
-  Packages := FindLazPackages(AContext.Root);
-  for i := 0 to High(Project.Packages) do
-    if not IsLazarusPackage(Project.Packages[i].Name) and
-      (PackageFile(Project.Packages[i].Name, Packages) = '') then
-      AddProjectCheck(Result, ProjectCheck(Format(rsPackageMissing, [Project.Packages[i].Name]),
+  for i := 0 to High(AProject.Packages) do
+    if not IsLazarusPackage(AProject.Packages[i].Name) and
+      (PackageFile(AProject.Packages[i].Name, APackages) = '') then
+      AddProjectCheck(Result, ProjectCheck(Format(rsPackageMissing, [AProject.Packages[i].Name]),
         ''));
+end;
+
+class function TGittanLazarusKind.Checks(AContext: TGittanProjectContext): TGittanProjectChecks;
+var
+  Lpi: string;
+  Project: TLazProject;
+  Packages: TStringArray;
+  Complete: boolean;
+begin
+  Lpi := DependencyFile(AContext.Root);
+  Project := Default(TLazProject);
+  Packages := nil;
+  Complete := True;
+  if Lpi <> '' then
+  begin
+    Project := ReadLazProject(TextOf(AContext.Root, Lpi));
+    Packages := ContextPackages(AContext, Complete);
+  end;
+  Result := LazChecks(AContext, Lpi, Project, Packages, Complete);
 end;
 
 { A minimum version as shown: "any" for none. }
@@ -851,6 +937,7 @@ var
   Pkg: TLazPackage;
   Cell, Note, Button: TGittanProjectCell;
   ModeHint, NameText: string;
+  Complete: boolean;
   i, k, s, n: integer;
 begin
   Result := Default(TGittanProjectSection);
@@ -924,7 +1011,7 @@ begin
 
   { The packages and where each comes from; the moves since the tag. }
   ReadDependencies(Self, AContext, Deps, Changes);
-  Packages := FindLazPackages(AContext.Root);
+  Packages := ContextPackages(AContext, Complete);
   Subs := AContext.Submodules;
   Pkgs := ProjectBlock(pbTable, rsPackages);
   Pkgs.Columns := [rsColPackage, rsColRequires, rsColSource, rsColVersion, ''];
@@ -965,6 +1052,8 @@ begin
     end
     else if IsLazarusPackage(Deps[i].Name) then
       Cell := ProjectCell(rsFromLazarus, psDim)
+    else if not Complete then
+      Cell := ProjectCell(rsNotSearched, psDim, rsNotSearchedHint)
     else
       Cell := ProjectCell(rsNotFound, psWarn);
     for k := 0 to High(Changes) do
@@ -1004,7 +1093,7 @@ begin
       Result.StateStyle := psLink;
     end;
   end;
-  AddBlock(Result, ChecksBlock(Checks(AContext)));
+  AddBlock(Result, ChecksBlock(LazChecks(AContext, Lpi, Project, Packages, Complete)));
 end;
 
 initialization

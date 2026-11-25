@@ -37,6 +37,7 @@ type
     procedure TestLargeOutput;
     procedure TestTagWithSigningOn;
     procedure TestNoEditor;
+    procedure TestClearGitEnvironment;
     procedure TestInsteadOf;
     procedure TestChangeKind;
     procedure TestStageFlags;
@@ -1023,6 +1024,9 @@ begin
   AssertTrue('returned in ' + IntToStr(GetTickCount64 - Started) + ' ms',
     GetTickCount64 - Started < 2500);
   {$ENDIF}
+  {$IFNDEF UNIX}
+  Ignore('not on Windows');
+  {$ENDIF}
 end;
 
 { A process started through SpawnProcess keeps its pipes from what is
@@ -1059,6 +1063,9 @@ begin
   finally
     P.Free;
   end;
+  {$ENDIF}
+  {$IFNDEF UNIX}
+  Ignore('not on Windows');
   {$ENDIF}
 end;
 
@@ -2439,6 +2446,15 @@ begin
     AssertTrue(FRepo.HeadMessage(Text));
     AssertEquals(Text, 1, Pos('amended'#10#10'Signed-off-by: ', Text));
     AssertEquals('M  staged.txt'#0, Git(['status', '--porcelain', '-z']));
+    AssertEquals('', FRepo.CommitNote);
+
+    { Committed, but another git holds the index: said. }
+    WriteFile('a.txt', 'ONE'#10'two'#10'four'#10);
+    Parts[0].Text := 'ONE'#10'two'#10'four'#10;
+    WriteFile('.git/index.lock', '');
+    AssertTrue(FRepo.Error, FRepo.Commit('locked', Paths, False, Id, Parts, [coNoVerify]));
+    AssertTrue(FRepo.CommitNote, Pos('index.lock', FRepo.CommitNote) > 0);
+    DeleteFile(IncludeTrailingPathDelimiter(FDir) + SetDirSeparators('.git/index.lock'));
   finally
     Paths.Free;
   end;
@@ -5235,6 +5251,7 @@ begin
 end;
 {$ELSE}
 begin
+  Ignore('not on Windows');
 end;
 {$ENDIF}
 
@@ -5285,6 +5302,22 @@ begin
     if Was <> '' then
       SetTestVariable('GIT_EDITOR', Was);
   end;
+end;
+
+{ What a git alias that starts Gittan exports is gone from what Gittan
+  starts, so git works in the folder it is run in. }
+procedure TGitRepoTest.TestClearGitEnvironment;
+var
+  Output, Err: string;
+begin
+  MakeHistory;
+  SetTestVariable('GIT_DIR', FDir + PathDelim + 'nowhere');
+  SetTestVariable('GIT_PREFIX', 'sub/');
+  ClearGitEnvironment;
+  AssertEquals('', EnvironmentVariable('GIT_DIR'));
+  AssertEquals('', EnvironmentVariable('GIT_PREFIX'));
+  AssertTrue('the others stay', EnvironmentVariable('GIT_CONFIG_GLOBAL') <> '');
+  AssertTrue(Err, RunGitIn(FDir, ['rev-parse', 'HEAD'], Output, Err));
 end;
 
 procedure TGitRepoTest.TestParseGitVersion;
@@ -5805,6 +5838,7 @@ begin
 end;
 {$else}
 begin
+  Ignore('not on Windows');
 end;
 {$endif}
 
@@ -5899,6 +5933,9 @@ begin
   AssertTrue(FRepo.Error, FRepo.SetRemoteUrls('origin', 'https://example.invalid/d2.git', 'three'));
   AssertEquals('three'#10'two'#10, Git(['config', '--get-all', 'remote.origin.pushurl']));
   AssertTrue(FRepo.Error, FRepo.SetRemoteUrls('origin', 'https://example.invalid/d.git', ''));
+  AssertEquals('cleared, the URL itself', 'https://example.invalid/d.git'#10'two'#10,
+    Git(['config', '--get-all', 'remote.origin.pushurl']));
+  Git(['config', '--unset-all', 'remote.origin.pushurl']);
   AssertTrue('without a push URL to unset', FRepo.SetRemoteUrls('origin',
     'https://example.invalid/d.git', 'https://example.invalid/d.git'));
   { The URLs as the config has them, not rewritten: an edit writes

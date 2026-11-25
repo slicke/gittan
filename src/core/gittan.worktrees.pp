@@ -41,6 +41,9 @@ function ParseWorktreeList(const AText: string): TGittanWorktrees;
 function ListWorktrees(const ARoot: string; out AList: TGittanWorktrees;
   out AError: string): boolean;
 
+{** Whether ABranch is checked out in one of ATrees. }
+function BranchInWorktree(const ATrees: TGittanWorktrees; const ABranch: string): boolean;
+
 {** Adds a worktree at APath (absolute, or from ARoot): on ABranch when
   one is named, made first from AStart (HEAD when empty) with ANew,
   else checked out there as it is; without a branch, git makes one
@@ -135,6 +138,16 @@ begin
   finally
     Lines.Free;
   end;
+end;
+
+function BranchInWorktree(const ATrees: TGittanWorktrees; const ABranch: string): boolean;
+var
+  i: integer;
+begin
+  for i := 0 to High(ATrees) do
+    if ATrees[i].Branch = ABranch then
+      Exit(True);
+  Result := False;
 end;
 
 function ListWorktrees(const ARoot: string; out AList: TGittanWorktrees;

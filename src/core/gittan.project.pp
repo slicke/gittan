@@ -1743,8 +1743,10 @@ function ShellName(const AName: string): string;
 var
   i: integer;
 begin
+  { zsh reads a leading = as the path of the command after it. }
   for i := 1 to Length(AName) do
-    if not (AName[i] in ['A'..'Z', 'a'..'z', '0'..'9', '_', '-', '.', '/', '+', '=', ':', ',']) then
+    if not (AName[i] in ['A'..'Z', 'a'..'z', '0'..'9', '_', '-', '.', '/', '+', '=', ':', ',']) or
+      ((i = 1) and (AName[i] = '=')) then
       {$IFDEF WINDOWS}
       { cmd.exe reads no \" (a name like x" & calc & " ran calc): a quote
         is doubled, which turns cmd's quoting off and on again and is one

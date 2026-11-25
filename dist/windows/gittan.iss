@@ -191,6 +191,17 @@ begin
   end;
 end;
 
+// The files of a running Gittan are locked and would be left behind. The
+// installer closes it by itself (CloseApplications), which the uninstaller
+// cannot; AppMutex would make both ask, so only this one looks.
+function InitializeUninstall: Boolean;
+begin
+  Result := True;
+  while Result and CheckForMutexes('GittanRunning') do
+    Result := SuppressibleMsgBox('Gittan is running. Close it, then click OK to remove it.',
+      mbError, MB_OKCANCEL, IDCANCEL) = IDOK;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then

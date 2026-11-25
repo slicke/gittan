@@ -29,7 +29,7 @@ type
     FBranch: string;
     FRest: TGittanCommitParts;
     FOk, FBack: boolean;
-    FId: string;
+    FId, FNote: string;
   protected
     procedure Execute; override;
   public
@@ -59,6 +59,9 @@ type
     property Back: boolean read FBack;
     {** The new commit, when Ok. }
     property Id: string read FId;
+    {** When Ok, what the user is to know of the index after the commit
+      (TGittanRepo.CommitNote); '' for nothing. }
+    property Note: string read FNote;
     {** Why nothing was committed (a hook's output, say), when not Ok. }
     property Error: string read FError;
   end;
@@ -104,6 +107,8 @@ begin
       FOk := Repo.MoveToBranch(FBranch, FMessage, FPaths, FId, FBack, FParts, FRest, FOptions)
     else
       FOk := Repo.Commit(FMessage, FPaths, FAmend, FId, FParts, FOptions);
+    if FOk then
+      FNote := Repo.CommitNote;
     { A move that is back may still have a file it could not write. }
     if not FOk or (FBranch <> '') then
       FError := Repo.Error;

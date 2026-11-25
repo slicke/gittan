@@ -379,7 +379,7 @@ begin
   except
     on E: Exception do
     begin
-      AError := E.Message;
+      AError := ShortError(E.Message);
       Result := nil;
     end;
   end;
@@ -583,7 +583,7 @@ var
       begin
         F.Text := '';
         F.Commands := nil;
-        F.Error := E.Message;
+        F.Error := ShortError(E.Message);
       end;
     end;
     if AMain then

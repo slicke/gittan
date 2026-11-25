@@ -25,6 +25,7 @@ type
     procedure TestParse;
     procedure TestWrongTypes;
     procedure TestTooDeep;
+    procedure TestShortError;
     procedure TestLimits;
     procedure TestNotToml;
     procedure TestRead;
@@ -105,6 +106,21 @@ begin
   AssertEquals('#(\d+)', C.Issues.LogRegex);
   C := ParseRepoConfig('[issues]'#10'url = "HTTP://t.test/%BUGID%"'#10);
   AssertEquals('HTTP://t.test/%BUGID%', C.Issues.Url);
+end;
+
+procedure TRepoConfigTest.TestShortError;
+var
+  C: TGittanRepoConfig;
+begin
+  AssertEquals('as it is', 'Line 3: no', ShortError('Line 3: no'));
+  AssertEquals('one line', 'a b [31m', ShortError('a'#10'b'#27'[31m'));
+  AssertEquals(MaxErrorText + Length('…'), Length(ShortError(StringOfChar('x', 5000))));
+  { Not in the middle of a character. }
+  AssertEquals(StringOfChar('x', MaxErrorText - 1) + '…',
+    ShortError(StringOfChar('x', MaxErrorText - 1) + 'åå'));
+  C := ParseRepoConfig('a = 1' + StringOfChar('z', 20000));
+  AssertTrue('an error', C.Error <> '');
+  AssertTrue('a short one', Length(C.Error) <= MaxErrorText + Length('…'));
 end;
 
 procedure TRepoConfigTest.TestTooDeep;

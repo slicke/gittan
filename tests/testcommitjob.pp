@@ -395,6 +395,9 @@ begin
   finally
     Job.Free;
   end;
+  {$IFNDEF UNIX}
+  Ignore('not on Windows');
+  {$ENDIF}
 end;
 
 { A push stopped ends its git at once, is told as any other and gives no
@@ -442,6 +445,9 @@ begin
   finally
     Job.Free;
   end;
+  {$IFNDEF UNIX}
+  Ignore('not on Windows');
+  {$ENDIF}
 end;
 
 initialization

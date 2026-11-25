@@ -36,6 +36,7 @@ type
     { Held while the thread refreshes the index, which takes index.lock;
       Detach waits on it. }
     FIndexLock: TRTLCriticalSection;
+    FHeld: boolean;
     FSnapshot: TGittanRepoSnapshot;
     FOnChange: TNotifyEvent;
     procedure Notify;
@@ -56,6 +57,10 @@ type
       repository, which writes the index: a refresh under way is waited
       for, and none starts after. }
     procedure Detach;
+    {** While AHold, the thread starts no index refresh, which writes the
+      index under index.lock: for a commit or a pull that runs beside the
+      watching. A refresh under way is waited for. }
+    procedure HoldIndex(AHold: boolean);
     {** Polls at once instead of when the current interval runs out. }
     procedure Poll;
     {** Called in the main thread after the repository changed. }
@@ -173,6 +178,8 @@ const
     generator, unzip, rsync, a sync client): 20 000 such files took
     half a second a poll, 27 ms once the index knew their times. }
   SlowPollMs = 300;
+  { Slow polls between two refreshes of the index: a minute's. }
+  RefreshEvery = 30;
 var
   Fingerprint: string;
   Ok: boolean;
@@ -198,15 +205,18 @@ begin
         Inc(FSlowPolls)
       else
         FSlowPolls := 0;
-      { Once, until the polls are quick again. }
-      if FSlowPolls = 2 then
+      { Then now and again while they stay slow: the files may have been
+        touched again since, or too lately for the index to trust. }
+      if (FSlowPolls >= 2) and ((FSlowPolls - 2) mod RefreshEvery = 0) then
       begin
         { Terminated asked under the lock, so a Detach that has passed
           it sees no refresh begin. }
         EnterCriticalSection(FIndexLock);
         try
-          if not Terminated then
-            FRepo.RefreshIndex;
+          { One held off, or that met the lock of another git, comes
+            with the next slow polls. }
+          if not Terminated and (FHeld or not FRepo.RefreshIndex) then
+            FSlowPolls := 0;
         finally
           LeaveCriticalSection(FIndexLock);
         end;
@@ -258,6 +268,13 @@ begin
   FOnChange := nil;
   Terminate;
   EnterCriticalSection(FIndexLock);
+  LeaveCriticalSection(FIndexLock);
+end;
+
+procedure TGittanWatcher.HoldIndex(AHold: boolean);
+begin
+  EnterCriticalSection(FIndexLock);
+  FHeld := AHold;
   LeaveCriticalSection(FIndexLock);
 end;
 

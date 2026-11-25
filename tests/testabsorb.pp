@@ -405,6 +405,9 @@ begin
     Plan.Free;
   end;
   {$ENDIF}
+  {$IFNDEF UNIX}
+  Ignore('not on Windows');
+  {$ENDIF}
 end;
 
 { A change of a commit that is a fixup of one not on the branch goes
