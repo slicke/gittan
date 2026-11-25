@@ -109,6 +109,10 @@ type
     FKept: array[TGittanSignFormat] of string;
     FGpgProgram: string;
     FGpgLooked: boolean;
+    { The signing as the dialog opened with it, which a save leaves. }
+    FOpened: boolean;
+    FWasSign: integer;
+    FWasKey: string;
     { The key of an X.509 setup (gpgsm), which the dialog shows under
       GPG; '' for any other. }
     FX509Key: string;
@@ -120,6 +124,7 @@ type
     procedure FillKeys;
     function ChosenFormat: TGittanSignFormat;
     function FormatToSave: TGittanSignFormat;
+    function SigningKept: boolean;
     function KeyValue: string;
     function KeyValueFor(AFormat: TGittanSignFormat): string;
     procedure SetKeyValue(const AValue: string);
@@ -549,6 +554,11 @@ begin
   end;
 end;
 
+function TIdentityForm.SigningKept: boolean;
+begin
+  Result := FOpened and (FSign.ItemIndex = FWasSign) and (KeyValue = FWasKey);
+end;
+
 procedure TIdentityForm.Check(Sender: TObject);
 var
   Signing: boolean;
@@ -558,7 +568,7 @@ begin
   FChoose.Visible := ChosenFormat = sfSsh;
   FTest.Enabled := Signing and (KeyValue <> '');
   FSaveButton.Enabled := (Trim(FName.Text) <> '') and (Trim(FEmail.Text) <> '') and
-    (not Signing or ((KeyValue <> '') and ((FormatToSave <> sfOpenPgp) or (FGpgProgram <> ''))));
+    (not Signing or SigningKept or ((KeyValue <> '') and ((FormatToSave <> sfOpenPgp) or (FGpgProgram <> ''))));
 end;
 
 function ChooseIdentity(var AName, AEmail: string; var ALocal: boolean;
@@ -566,8 +576,6 @@ function ChooseIdentity(var AName, AEmail: string; var ALocal: boolean;
   out ASigningChanged: boolean): boolean;
 var
   F: TIdentityForm;
-  WasSign: integer;
-  WasKey: string;
 begin
   ASigningChanged := False;
   F := TIdentityForm.Create(Screen.ActiveForm);
@@ -605,12 +613,14 @@ begin
     F.Check(nil);
     { As shown, the key FillKeys chose for an empty field included:
       only a choice made in the dialog counts as a change. }
-    WasSign := F.FSign.ItemIndex;
-    WasKey := F.KeyValue;
+    F.FWasSign := F.FSign.ItemIndex;
+    F.FWasKey := F.KeyValue;
+    F.FOpened := True;
+    F.Check(nil);
     Result := F.ShowModal = mrOK;
     if Result then
     begin
-      ASigningChanged := (F.FSign.ItemIndex <> WasSign) or (F.KeyValue <> WasKey);
+      ASigningChanged := not F.SigningKept;
       AName := Trim(F.FName.Text);
       AEmail := Trim(F.FEmail.Text);
       ALocal := F.FLocal.Checked;

@@ -433,6 +433,10 @@ begin
   AssertTrue(Cfg.Format = sfSsh);
   AssertFalse(RunGitIn(FDir, ['config', '--local', 'tag.gpgSign'], Id, Error));
 
+  { Off everywhere leaves the repository its format and key. }
+  AssertTrue(Error, WriteSigningSetup(FDir, Cfg, 'test@example.invalid', False, Error));
+  AssertEquals('ssh', Trim(Git(['config', '--local', 'gpg.format'])));
+
   { Off for this repository while the global config signs: unsetting
     the repository's own key would leave the global one on, so it is
     set to false here. The runner's global config is put back after. }
