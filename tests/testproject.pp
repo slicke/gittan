@@ -539,6 +539,20 @@ begin
   AssertEquals('moved', Ch[4].Name);
   AssertTrue(Ch[4].Kind = dcRemoved);
   AssertEquals('nothing against itself', 0, Length(DependencyChanges(New, New)));
+
+  { A lock file on one side alone: what is asked for is compared. }
+  Old := nil;
+  New := nil;
+  Dep(Old, 'same', '1', '', '');
+  Dep(Old, 'bumped', '1', '', '');
+  Dep(New, 'same', '1', '1.0.219', '');
+  Dep(New, 'bumped', '2', '2.0.1', '');
+  Ch := DependencyChanges(Old, New);
+  AssertEquals('only the one asked for anew', 1, Length(Ch));
+  AssertEquals('bumped', Ch[0].Name);
+  AssertEquals('1', Ch[0].OldVersion);
+  AssertEquals('2', Ch[0].NewVersion);
+  AssertEquals('the other way too', 1, Length(DependencyChanges(New, Old)));
 end;
 
 procedure TProjectTest.TestReportRust;

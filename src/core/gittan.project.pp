@@ -306,7 +306,8 @@ procedure ResolveDependencies(var ADependencies: TGittanDependencies;
   const ALocked: TGittanDependencies; AKind: TGittanProjectKindClass = nil);
 
 {** How ANew's dependencies differ from AOld's, by name and group: the
-  ones added and changed in ANew's order, then the ones removed. }
+  ones added and changed in ANew's order, then the ones removed. One
+  locked on one side alone is compared by what is asked for. }
 function DependencyChanges(const AOld, ANew: TGittanDependencies;
   AKind: TGittanProjectKindClass = nil): TGittanDependencyChanges;
 
@@ -1163,7 +1164,14 @@ begin
       if Same(AOld[j], ANew[i]) then
       begin
         Found := True;
-        if DependencyShown(AOld[j]) <> DependencyShown(ANew[i]) then
+        { Locked on one side alone (no lock file at the tag, or none now),
+          what is asked for is what can be compared. }
+        if (AOld[j].Resolved = '') <> (ANew[i].Resolved = '') then
+        begin
+          if AOld[j].Version <> ANew[i].Version then
+            Add(ANew[i].Name, ANew[i].Group, AOld[j].Version, ANew[i].Version, dcChanged);
+        end
+        else if DependencyShown(AOld[j]) <> DependencyShown(ANew[i]) then
           Add(ANew[i].Name, ANew[i].Group, DependencyShown(AOld[j]), DependencyShown(ANew[i]),
             dcChanged);
         Break;
@@ -1344,6 +1352,9 @@ begin
   FSince := ASince;
   FTracked := TStringList.Create;
   FTracked.CaseSensitive := True;
+  { By bytes, which TrackedUnder's search by prefix goes by; a locale may
+    put Lib/a after lib/. }
+  FTracked.UseLocale := False;
   if ATracked <> nil then
     FTracked.AddStrings(ATracked);
   FTracked.Sorted := True;
