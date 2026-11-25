@@ -766,7 +766,8 @@ begin
   Result := nil;
   Path := AContext.TrackedWithExt('.lps');
   if Path <> '' then
-    AddProjectCheck(Result, ProjectCheck(Format(rsLpsTracked, [Path]), Path, '*.lps'));
+    AddProjectCheck(Result, ProjectCheck(Format(rsLpsTracked, [Path]), Path, '*' +
+      ExtractFileExt(Path)));
   if AContext.TrackedUnder('lib/', Path) then
     AddProjectCheck(Result, ProjectCheck(rsLibTracked, Path, '/lib/'));
   if AContext.TrackedUnder('backup/', Path) then
@@ -861,6 +862,8 @@ begin
   if Lpi = '' then
   begin
     { A program alone: nothing to read beyond its commands. }
+    if AManifest = '' then
+      AddBlock(Result, PickedNoFileNote('.lpi'));
     AddBlock(Result, ChecksBlock(Checks(AContext)));
     Exit;
   end;

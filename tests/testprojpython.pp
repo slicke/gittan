@@ -31,6 +31,7 @@ type
     procedure TestPythonInfo;
     procedure TestPythonTool;
     procedure TestPythonSection;
+    procedure TestPycAndPicked;
   end;
 
 implementation
@@ -230,6 +231,41 @@ begin
   Put('poetry.lock', '');
   AssertEquals('poetry', PythonTool(FDir, RunPrefix));
   AssertEquals('poetry run ', RunPrefix);
+end;
+
+{ The pattern for a tracked .pyc covers it wherever it is, and a kind
+  picked by hand says which file is missing. }
+procedure TProjPythonTest.TestPycAndPicked;
+var
+  C: TGittanProjectContext;
+  Sec: TGittanProjectSection;
+
+  function Pattern(const APath: string): string;
+  var
+    L: TStringList;
+    Ctx: TGittanProjectContext;
+  begin
+    L := TStringList.Create;
+    L.Add(APath);
+    Ctx := TGittanProjectContext.Create(FDir, '', L);
+    Result := TGittanPythonKind.Checks(Ctx)[0].IgnorePattern;
+    Ctx.Free;
+    L.Free;
+  end;
+
+begin
+  AssertEquals('__pycache__/', Pattern('pkg/__pycache__/mod.pyc'));
+  AssertEquals('__pycache__/', Pattern('__pycache__/mod.pyc'));
+  AssertEquals('*.pyc', Pattern('pkg/mod.pyc'));
+  C := TGittanProjectContext.Create(FDir, '', nil);
+  try
+    Sec := TGittanPythonKind.Section(C, '');
+    AssertTrue('a note', Length(Sec.Blocks) > 0);
+    AssertTrue(Pos('pyproject.toml', Sec.Blocks[High(Sec.Blocks)].Text +
+      Sec.Blocks[0].Text) > 0);
+  finally
+    C.Free;
+  end;
 end;
 
 procedure TProjPythonTest.TestPythonSection;

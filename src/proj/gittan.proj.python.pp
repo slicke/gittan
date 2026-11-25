@@ -452,7 +452,7 @@ const
     over a constructor of strings wrong. }
   VenvFolders: array[0..1] of string = ('.venv/', 'venv/');
 var
-  Path, Folder: string;
+  Path, Folder, Pattern: string;
 begin
   Result := nil;
   for Folder in VenvFolders do
@@ -460,7 +460,14 @@ begin
       AddProjectCheck(Result, ProjectCheck(Format(rsVenvTracked, [Folder]), Path, '/' + Folder));
   Path := AContext.TrackedWithExt('.pyc');
   if Path <> '' then
-    AddProjectCheck(Result, ProjectCheck(Format(rsPycTracked, [Path]), Path, '__pycache__/'));
+  begin
+    { Beside its source (Python 2, compileall -b) no folder covers it. }
+    if (Pos('__pycache__/', Path) = 1) or (Pos('/__pycache__/', Path) > 0) then
+      Pattern := '__pycache__/'
+    else
+      Pattern := '*' + ExtractFileExt(Path);
+    AddProjectCheck(Result, ProjectCheck(Format(rsPycTracked, [Path]), Path, Pattern));
+  end;
 end;
 
 class function TGittanPythonKind.Section(AContext: TGittanProjectContext;

@@ -601,7 +601,12 @@ begin
   First := Copy(Names, 1, Pos(#0, Names + #0) - 1);
   if First = '' then
     Exit;
+  { diff-tree goes by none of the user's diff.* settings and log by all:
+    those that change a patch are said here as diff-tree has them. }
   if not RunGitIn(Root, ['log', '-p', '--full-diff', '--no-renames', '--no-ext-diff', '--no-merges',
+    '--no-textconv', '--no-color', '--no-show-signature', '--no-relative', '-U3',
+    '--inter-hunk-context=0', '--src-prefix=a/', '--dst-prefix=b/', '--submodule=short',
+    '--diff-algorithm=myers',
     '--format=commit %H', Base + '..' + ADefault, '--', ':(literal)' + First], Patch, Err) or
     (Patch = '') then
     Exit;

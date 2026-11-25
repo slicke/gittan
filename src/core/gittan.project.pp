@@ -354,6 +354,8 @@ function FilesWithExt(const ARoot, AExt: string): TStringArray;
   the shell reads, in single quotes for sh (a quote in it as '\''), in
   double quotes on Windows. }
 function ShellName(const AName: string): string;
+{** The note of a kind picked by hand whose file AFileName is not there. }
+function PickedNoFileNote(const AFileName: string): TGittanProjectBlock;
 {** Whether a name a repository's file gives can go on a command line
   through ShellName as itself. Not one that starts with - or @, which a
   tool takes for an option (fpc for a file of them), with a control
@@ -1585,11 +1587,13 @@ begin
     Result.Detail := rsPicked;
   Result.StateStyle := psDim;
   DepFile := DependencyFile(AContext.Root);
+  if (AManifest = '') and (DepFile = '') and (Length(DependencyFileNames) > 0) then
+    DepFile := DependencyFileNames[0];
   { A kind picked with no file of its own has nothing to read, but the
     checks that need no such file still hold. }
   if (DepFile <> '') and not HasFile(AContext.Root, DepFile) then
   begin
-    AddBlock(Result, ProjectNote(Format(rsPickedNoFile, [DepFile])));
+    AddBlock(Result, PickedNoFileNote(DepFile));
     AddBlock(Result, ChecksBlock(Checks(AContext)));
     Exit;
   end;
@@ -1706,6 +1710,11 @@ begin
   finally
     Names.Free;
   end;
+end;
+
+function PickedNoFileNote(const AFileName: string): TGittanProjectBlock;
+begin
+  Result := ProjectNote(Format(rsPickedNoFile, [AFileName]));
 end;
 
 function PlainName(const AName: string): boolean;

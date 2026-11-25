@@ -299,6 +299,14 @@ begin
   i := FindBranch(Repo, 'squash');
   AssertTrue(i >= 0);
   AssertTrue(Repo.Branches[i].Merge = gmSquashed);
+  { As well under settings that change a diff's text. }
+  Git(FWork, ['config', 'diff.noprefix', 'true']);
+  Git(FWork, ['config', 'diff.context', '1']);
+  Git(FWork, ['config', 'color.ui', 'always']);
+  Git(FWork, ['config', 'diff.algorithm', 'patience']);
+  Repo := ScanGoneRepo(FWork, '', True);
+  AssertTrue('under the user''s settings',
+    Repo.Branches[FindBranch(Repo, 'squash')].Merge = gmSquashed);
   i := FindBranch(Repo, 'wip');
   AssertTrue(i >= 0);
   AssertTrue(Repo.Branches[i].Merge = gmNotMerged);
