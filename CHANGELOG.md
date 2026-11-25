@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Added
+
+- The commit graph starts with a row for the uncommitted changes, joined to the commit you are on by a dashed line, which says how many files are included in the commit and how many are left out. A click on it shows them.
+- The commit graph shows every author's initials in a colored disc.
+
+### Changed
+
+- The lines of the commit graph turn in rounded corners where a branch leaves or joins another, instead of slanting.
+- Branches and tags in the commit graph have a column of their own left of the lines, in the color of their line. A branch and its remote branch on the same commit share one label, with a laptop and a cloud; labels that do not fit become a +N, where they were left out without a word, and the hint over them lists them all. The graph is wider to make room.
+
+## 1.0 (build-148, 2026-11-25)
+
 ### Changed
 
 - The Project page's dependency table shows a locked version as a badge when the lock file has moved past the version the manifest asks for, with a hint that names both; before, it looked like one still at the version asked for.

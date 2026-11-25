@@ -14,7 +14,7 @@ unit gittan.graph;
 
   A row is drawn as two halves: the top half from the top of the row to
   the commit's center, the bottom half from there to the bottom of the
-  row, each a list of straight lines from one lane to another. No LCL,
+  row, each a list of lines from one lane to another. No LCL,
   so it is tested on its own. }
 
 {$mode objfpc}{$H+}
@@ -35,6 +35,16 @@ type
     Kind: TGittanRefKind;
   end;
   TGittanGraphRefs = array of TGittanGraphRef;
+
+  {** A label of a commit's row: a ref, or a local branch together with
+    the remote branches of its name on the same commit. Local and Remote
+    say which of the two a branch is, both for such a pair. }
+  TGittanRefLabel = record
+    Name: string;
+    Kind: TGittanRefKind;
+    Local, Remote: boolean;
+  end;
+  TGittanRefLabels = array of TGittanRefLabel;
 
   {** A line within half a row, from lane FromLane to lane ToLane, in
     the lane color Color. }
@@ -94,6 +104,27 @@ function GraphWidth(const ACommits: TGittanGraphCommits): integer;
   refs/heads/main, refs/remotes/origin/main, tag: refs/tags/v1"), short
   names and kinds, in that order; a remote's HEAD is left out. }
 function ParseGraphRefs(const ADecoration: string): TGittanGraphRefs;
+
+{** The labels of ARefs, in their order: origin/main is told by the label
+  of main when both are there, and has one of its own otherwise. The
+  remote's name is what comes before the first slash, so a branch of a
+  remote with a slash in its name keeps its own label. }
+function GroupGraphRefs(const ARefs: TGittanGraphRefs): TGittanRefLabels;
+
+const
+  {** The Hash of the row for the uncommitted changes, which no commit
+    has. }
+  UncommittedHash = 'uncommitted';
+
+{** Puts a row for the uncommitted changes on top of ACommits, a child of
+  the commit HEAD is on, and lays them out again; false, with ACommits
+  as they were, when HEAD's commit is not among them. }
+function AddUncommitted(var ACommits: TGittanGraphCommits): boolean;
+
+{** The row down to whose commit the line of the uncommitted changes
+  (the first row) is theirs alone: HEAD's, or the first one a branch
+  off HEAD joins the line from, if that is above it. }
+function UncommittedEnd(const ACommits: TGittanGraphCommits): integer;
 
 {** Reads AText as words separated by spaces, double quotes keeping a
   phrase together ("path:my file.txt", or path:"my file.txt"), with
@@ -290,6 +321,85 @@ begin
       Result := Max(Result, Max(ACommits[r].BottomEdges[i].FromLane,
         ACommits[r].BottomEdges[i].ToLane) + 1);
   end;
+end;
+
+function GroupGraphRefs(const ARefs: TGittanGraphRefs): TGittanRefLabels;
+var
+  i, j, n: integer;
+  Found: boolean;
+begin
+  Result := nil;
+  SetLength(Result, Length(ARefs));
+  n := 0;
+  for i := 0 to High(ARefs) do
+    if ARefs[i].Kind <> grRemote then
+    begin
+      Result[n].Name := ARefs[i].Name;
+      Result[n].Kind := ARefs[i].Kind;
+      Result[n].Local := ARefs[i].Kind in [grHead, grBranch];
+      Result[n].Remote := False;
+      Inc(n);
+    end;
+  for i := 0 to High(ARefs) do
+    if ARefs[i].Kind = grRemote then
+    begin
+      Found := False;
+      for j := 0 to n - 1 do
+        if Result[j].Local and (Copy(ARefs[i].Name, Pos('/', ARefs[i].Name) + 1, MaxInt) =
+          Result[j].Name) then
+        begin
+          Result[j].Remote := True;
+          Found := True;
+        end;
+      if Found then
+        Continue;
+      Result[n].Name := ARefs[i].Name;
+      Result[n].Kind := grRemote;
+      Result[n].Local := False;
+      Result[n].Remote := True;
+      Inc(n);
+    end;
+  SetLength(Result, n);
+end;
+
+function HeadRow(const ACommits: TGittanGraphCommits): integer;
+var
+  i, j: integer;
+begin
+  for i := 0 to High(ACommits) do
+    for j := 0 to High(ACommits[i].Refs) do
+      if ACommits[i].Refs[j].Kind = grHead then
+        Exit(i);
+  Result := -1;
+end;
+
+function AddUncommitted(var ACommits: TGittanGraphCommits): boolean;
+var
+  Row: TGittanGraphCommit;
+  Head: integer;
+begin
+  Head := HeadRow(ACommits);
+  Result := Head >= 0;
+  if not Result then
+    Exit;
+  Row := Default(TGittanGraphCommit);
+  Row.Hash := UncommittedHash;
+  SetLength(Row.Parents, 1);
+  Row.Parents[0] := ACommits[Head].Hash;
+  Insert(Row, ACommits, 0);
+  LayoutGraph(ACommits);
+end;
+
+function UncommittedEnd(const ACommits: TGittanGraphCommits): integer;
+var
+  i, j, Head: integer;
+begin
+  Head := HeadRow(ACommits);
+  for i := 1 to Head - 1 do
+    for j := 0 to High(ACommits[i].BottomEdges) do
+      if (ACommits[i].BottomEdges[j].ToLane = 0) and (ACommits[i].BottomEdges[j].FromLane <> 0) then
+        Exit(i);
+  Result := Head;
 end;
 
 function ParseGraphRefs(const ADecoration: string): TGittanGraphRefs;

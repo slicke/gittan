@@ -23,6 +23,8 @@ type
     procedure TestDropMissingParents;
     procedure TestRefs;
     procedure TestFilter;
+    procedure TestLabels;
+    procedure TestUncommitted;
   end;
 
 implementation
@@ -236,6 +238,49 @@ begin
   AssertFalse('a longer name', MatchesGraphFilter(F, '', 'ann ba', D));
   AssertFalse('a name around it', MatchesGraphFilter(F, '', 'joann b', D));
   AssertTrue('nothing asked', MatchesGraphFilter(ParseGraphFilter(''), '', '', 0));
+end;
+
+procedure TGraphTest.TestLabels;
+var
+  L: TGittanRefLabels;
+begin
+  L := GroupGraphRefs(ParseGraphRefs('HEAD -> refs/heads/main, tag: refs/tags/v1, ' +
+    'refs/remotes/origin/main, refs/remotes/fork/main, refs/remotes/origin/x/main'));
+  AssertEquals(3, Length(L));
+  AssertEquals('main', L[0].Name);
+  AssertTrue('both', L[0].Local and L[0].Remote);
+  AssertEquals('v1', L[1].Name);
+  AssertFalse('a tag is no branch', L[1].Local or L[1].Remote);
+  AssertEquals('a longer name ending alike', 'origin/x/main', L[2].Name);
+  AssertTrue('remote alone', L[2].Remote and not L[2].Local);
+  L := GroupGraphRefs(ParseGraphRefs('tag: refs/tags/main, refs/remotes/origin/main'));
+  AssertEquals('a tag takes no branch', 2, Length(L));
+  AssertEquals(0, Length(GroupGraphRefs(nil)));
+end;
+
+procedure TGraphTest.TestUncommitted;
+begin
+  FCommits := nil;
+  Add('c', 'b');
+  Add('b', 'a');
+  Add('a', '');
+  AssertFalse('no HEAD', AddUncommitted(FCommits));
+  AssertEquals(3, Length(FCommits));
+  FCommits[1].Refs := ParseGraphRefs('HEAD -> refs/heads/main');
+  AssertTrue(AddUncommitted(FCommits));
+  AssertEquals(4, Length(FCommits));
+  AssertEquals(UncommittedHash, FCommits[0].Hash);
+  AssertEquals(0, FCommits[0].Lane);
+  AssertEquals('a tip beside it', 1, FCommits[1].Lane);
+  AssertEquals('HEAD under it', 0, FCommits[2].Lane);
+  AssertTrue('c joins', HasEdge(FCommits[1].BottomEdges, 1, 0));
+  AssertEquals(1, UncommittedEnd(FCommits));
+  FCommits := nil;
+  Add('b', 'a');
+  Add('a', '');
+  FCommits[0].Refs := ParseGraphRefs('HEAD');
+  AssertTrue('detached', AddUncommitted(FCommits));
+  AssertEquals(1, UncommittedEnd(FCommits));
 end;
 
 initialization

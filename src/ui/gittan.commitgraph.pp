@@ -99,6 +99,7 @@ type
       override;
     procedure MouseLeave; override;
     procedure KeyDown(var Key: word; Shift: TShiftState); override;
+    procedure DoOnShowHint(HintInfo: PHintInfo); override;
   end;
 
   { TGittanCommitGraph }
@@ -141,6 +142,19 @@ type
     { The search text the rows were last filtered with, which a pick
       keeps with them: the field may hold more not yet applied. }
     FAppliedText: string;
+    { By FCommits' index too: the labels of the refs, and the author's
+      initials and the number that picks the disc's color. }
+    FLabels: array of TGittanRefLabels;
+    FInitials: array of string;
+    FAuthorHues: TIntegerDynArray;
+    { The width of the labels' column, -1 until it is measured. }
+    FLabelWidth: integer;
+    { The uncommitted changes: how many files, how many of them go into
+      the commit (-1 when that is not chosen), whether FCommits starts
+      with their row, and the row their own line ends at. }
+    FPendingFiles, FPendingIncluded, FPendingEnd: integer;
+    FPending: boolean;
+    FOnPickChanges: TNotifyEvent;
     FLanes: integer;
     FMore, FAskedMore: boolean;
     FBranch: string;
@@ -249,8 +263,15 @@ type
     procedure ScrollIntoView;
     procedure PaintRows(ACanvas: TCanvas);
     procedure PaintRow(ACanvas: TCanvas; ARow, ATop: integer);
-    function PaintRefs(ACanvas: TCanvas; const ARefs: TGittanGraphRefs;
-      X, ACenterY, ARight: integer): integer;
+    function PaintRefs(ACanvas: TCanvas; AIndex, ACenterY: integer): integer;
+    procedure PaintPending(ACanvas: TCanvas; ACenterY: integer);
+    function LabelText(const ALabel: TGittanRefLabel): string;
+    function LabelExtra(const ALabel: TGittanRefLabel): integer;
+    function LabelColumn: integer;
+    function LabelHint(ARow: integer): string;
+    function CommitTotal: integer;
+    function IsPendingRow(ARow: integer): boolean;
+    function ShownCommits: TIntegerDynArray;
     function FitText(ACanvas: TCanvas; const AText: string; ARoom: integer): string;
     procedure Pick;
     procedure Dismiss;
@@ -314,6 +335,12 @@ type
       shield of a verified and of a bad signature. }
     procedure SetColors(ABack, AText, ADim, AHover, ALine, AAccent, ATag, AOk,
       AError: TColor);
+    {** The uncommitted changes, for a row on top that a click on raises
+      OnPickChanges from: AFiles of them (none, no row), AIncluded going
+      into the commit, -1 when that is not chosen. Set before Popup or
+      Replace. }
+    procedure SetPending(AFiles, AIncluded: integer);
+    property OnPickChanges: TNotifyEvent read FOnPickChanges write FOnPickChanges;
     {** The ids of the commits loaded, in their order. }
     function CommitHashes: TStringArray;
     {** What the owner found of the commits' signatures, those of
@@ -369,7 +396,8 @@ implementation
 
 uses
   Math, DateUtils, LazUTF8, LazFileUtils, LCLIntf, gittan.reviews, gittan.statusbar,
-  gittan.repoinfo, gittan.theme, gittan.signmark;
+  gittan.repoinfo, gittan.theme, gittan.signmark, gittan.smooth,
+  gittan.refmark;
 
 resourcestring
   rsGraphTitle = 'Commit Graph';
@@ -388,6 +416,11 @@ resourcestring
   rsGraphStats = 'Statistics';
   rsGraphFirstParent = 'First Parent';
   rsGraphNoMerges = 'No Merges';
+  rsGraphUncommitted = 'Uncommitted changes';
+  rsGraphOneFile = '1 file';
+  rsGraphFiles = '%d files';
+  rsGraphIncluded = '%d included';
+  rsGraphLeftOut = '%d left out';
   rsGraphTipDismiss = 'Don''t Show Again';
   rsStatsSummary = '%s commits by %s authors';
   rsStatsSummaryOne = '%s commits by one author';
@@ -401,13 +434,16 @@ resourcestring
 const
   { Room around the panel within the form, and its widest. }
   Margin = 40;
-  MaxPanelWidth = 1000;
+  MaxPanelWidth = 1200;
   HeaderHeight = 48;
   Pad = 16;
   Gap = 10;
   RowHeight = 28;
   ShieldSize = 11;
   LaneWidth = 16;
+  LineWidth = 2;
+  { How wide a line turns into another lane. }
+  BendRadius = 10;
   { The most lanes drawn; a commit further right sits at the last. }
   MaxLanes = 12;
   DotRadius = 4;
@@ -415,6 +451,13 @@ const
   ChipPadX = 6;
   ChipGap = 5;
   ChipMaxChars = 28;
+  MarkSize = 12;
+  MarkGap = 3;
+  { The labels' column at its widest, and at most this part of the rows. }
+  MaxLabelWidth = 240;
+  LabelPart = 4;
+  DiscSize = 18;
+  DashLength = 3;
   CloseSize = 24;
   EditWidth = 300;
   { Room at the right for the scroll bar, which overlays on macOS. }
@@ -464,6 +507,9 @@ begin
   if (Button = mbLeft) and not FGraph.FStatsOn then
   begin
     FGraph.FPressRow := FGraph.RowAt(Y);
+    { The uncommitted changes cannot be merged. }
+    if FGraph.IsPendingRow(FGraph.FPressRow) then
+      FGraph.FPressRow := -1;
     FGraph.FPressPoint := Point(X, Y);
   end;
 end;
@@ -485,6 +531,10 @@ begin
   Row := FGraph.RowAt(Y);
   if Row >= 0 then
     FGraph.SetCurrent(Row);
+  if (X < FGraph.LabelColumn) and (Row >= 0) then
+    Hint := FGraph.LabelHint(Row)
+  else
+    Hint := '';
   FGraph.SetFooterHot(FGraph.FooterAt(Y) and FGraph.FooterClickable);
 end;
 
@@ -543,6 +593,22 @@ begin
   FGraph.KeyInput(Key);
 end;
 
+{ Every ref of a row's labels, which may be cut short or left to the
+  count after them; a new hint for every row. }
+procedure TGittanGraphRows.DoOnShowHint(HintInfo: PHintInfo);
+var
+  Row: integer;
+begin
+  inherited DoOnShowHint(HintInfo);
+  Row := FGraph.RowAt(HintInfo^.CursorPos.Y);
+  HintInfo^.HintStr := '';
+  if (Row < 0) or (HintInfo^.CursorPos.X >= FGraph.LabelColumn) then
+    Exit;
+  HintInfo^.HintStr := FGraph.LabelHint(Row);
+  HintInfo^.CursorRect := Rect(0, Row * Px(RowHeight) - FGraph.RowShift,
+    FGraph.LabelColumn, (Row + 1) * Px(RowHeight) - FGraph.RowShift);
+end;
+
 { TGittanCommitGraph }
 
 constructor TGittanCommitGraph.Create(AOwner: TComponent);
@@ -580,6 +646,8 @@ begin
   FRows.Align := alTop;
   FRows.ControlStyle := FRows.ControlStyle + [csOpaque];
   FRows.TabStop := True;
+  FRows.ShowHint := True;
+  FLabelWidth := -1;
   FEdit := TEdit.Create(Self);
   FEdit.Parent := Self;
   FEdit.TextHint := rsGraphFilterHint;
@@ -654,7 +722,7 @@ end;
 
 function TGittanCommitGraph.LaneX(ALane: integer): integer;
 begin
-  Result := Px(Pad) + Min(ALane, MaxLanes - 1) * Px(LaneWidth) + Px(LaneWidth) div 2;
+  Result := LabelColumn + Px(Pad) + Min(ALane, MaxLanes - 1) * Px(LaneWidth) + Px(LaneWidth) div 2;
 end;
 
 { The rows are a flat list, a dot each and no lines: while a filter
@@ -677,7 +745,7 @@ end;
 { Where the text starts, right of the widest row's lanes. }
 function TGittanCommitGraph.GraphRight: integer;
 begin
-  Result := Px(Pad) + Max(1, Min(ShownLanes, MaxLanes)) * Px(LaneWidth) + Px(Gap);
+  Result := LabelColumn + Px(Pad) + Max(1, Min(ShownLanes, MaxLanes)) * Px(LaneWidth) + Px(Gap);
 end;
 
 { A last row for the cut of the log or the count of the matches. }
@@ -770,13 +838,13 @@ begin
   if FFiltered then
   begin
     if FMore then
-      Result := Format(rsGraphMatchesCut, [Length(FShown), Length(FCommits)])
+      Result := Format(rsGraphMatchesCut, [Length(FShown), CommitTotal])
     else
-      Result := Format(rsGraphMatches, [Length(FShown), Length(FCommits)]);
+      Result := Format(rsGraphMatches, [Length(FShown), CommitTotal]);
   end
   else
   begin
-    Result := Format(rsGraphMore, [Length(FCommits)]);
+    Result := Format(rsGraphMore, [CommitTotal]);
     if FooterClickable then
       Result := Result + ' · ' + rsGraphLoadAll;
   end;
@@ -802,8 +870,17 @@ procedure TGittanCommitGraph.Load(const ACommits: TGittanGraphCommits;
 var
   i, r: integer;
 begin
-  FCommits := ACommits;
-  FLanes := GraphWidth(ACommits);
+  { A copy: the row for the changes lays the commits out anew. }
+  FCommits := Copy(ACommits);
+  FPending := (FPendingFiles > 0) and not FNoMerges and AddUncommitted(FCommits);
+  FPendingEnd := -1;
+  if FPending then
+    FPendingEnd := UncommittedEnd(FCommits);
+  FLanes := GraphWidth(FCommits);
+  FLabelWidth := -1;
+  SetLength(FLabels, Length(FCommits));
+  SetLength(FInitials, Length(FCommits));
+  SetLength(FAuthorHues, Length(FCommits));
   FMore := AMore;
   SetLength(FMetaFull, Length(FCommits));
   SetLength(FMetaAge, Length(FCommits));
@@ -832,6 +909,11 @@ begin
     { As the statistics count authors (NameKey): case, accents and the
       two forms of an ö alike, on every system. }
     FAuthorKeys[r] := NameKey(FCommits[r].Author);
+    FLabels[r] := GroupGraphRefs(FCommits[r].Refs);
+    FInitials[r] := Initials(FCommits[r].Author);
+    FAuthorHues[r] := 0;
+    for i := 1 to Length(FAuthorKeys[r]) do
+      FAuthorHues[r] := (FAuthorHues[r] * 31 + Ord(FAuthorKeys[r][i])) and $FFFF;
     FSearch[r] := UTF8LowerCase(Composed(FCommits[r].Subject + #10 + FCommits[r].Body + #10 +
       FCommits[r].Note + #10 + FCommits[r].Author)) + #10 + FCommits[r].Hash;
     FShown[r] := r;
@@ -861,12 +943,37 @@ end;
 
 function TGittanCommitGraph.ShownHashes: TStringArray;
 var
+  Rows: TIntegerDynArray;
   i: integer;
 begin
   Result := nil;
-  SetLength(Result, Length(FShown));
-  for i := 0 to High(FShown) do
-    Result[i] := FCommits[FShown[i]].Hash;
+  Rows := ShownCommits;
+  SetLength(Result, Length(Rows));
+  for i := 0 to High(Rows) do
+    Result[i] := FCommits[Rows[i]].Hash;
+end;
+
+procedure TGittanCommitGraph.SetPending(AFiles, AIncluded: integer);
+begin
+  FPendingFiles := AFiles;
+  FPendingIncluded := AIncluded;
+end;
+
+{ How many commits are loaded, without the row for the changes. }
+function TGittanCommitGraph.CommitTotal: integer;
+begin
+  Result := Length(FCommits) - Ord(FPending);
+end;
+
+function TGittanCommitGraph.IsPendingRow(ARow: integer): boolean;
+begin
+  Result := FPending and (ARow >= 0) and (ARow <= High(FShown)) and (FShown[ARow] = 0);
+end;
+
+{ FShown without the row for the changes. }
+function TGittanCommitGraph.ShownCommits: TIntegerDynArray;
+begin
+  Result := Copy(FShown, Ord(IsPendingRow(0)), Length(FShown));
 end;
 
 function TGittanCommitGraph.FilterText: string;
@@ -918,9 +1025,9 @@ var
   r: integer;
 begin
   Result := nil;
-  SetLength(Result, Length(FCommits));
-  for r := 0 to High(FCommits) do
-    Result[r] := FCommits[r].Hash;
+  SetLength(Result, CommitTotal);
+  for r := 0 to High(Result) do
+    Result[r] := FCommits[r + Ord(FPending)].Hash;
 end;
 
 procedure TGittanCommitGraph.SetSignatures(const ACommits: TGittanSignedCommits; ACount: integer;
@@ -1062,7 +1169,7 @@ begin
   n := 0;
   if not ChangePending then
     for i := 0 to High(FCommits) do
-      if not FFiltered or (MatchesGraphFilter(FFilter, FSearch[i], FAuthorKeys[i],
+      if not FFiltered or ((not FPending or (i > 0)) and MatchesGraphFilter(FFilter, FSearch[i], FAuthorKeys[i],
         FCommits[i].Date) and ((Length(FFilter.Paths) = 0) or
         (FPathHashes.IndexOf(FCommits[i].Hash) >= 0)) and ((FChangeKey = '') or
         (FChangeHashes.IndexOf(FCommits[i].Hash) >= 0))) then
@@ -1071,6 +1178,7 @@ begin
       Inc(n);
     end;
   SetLength(FShown, n);
+  FLabelWidth := -1;
   FCurrent := -1;
   for i := 0 to High(FShown) do
     if FCommits[FShown[i]].Hash = Current then
@@ -1227,6 +1335,7 @@ end;
 procedure TGittanCommitGraph.Resize;
 begin
   inherited Resize;
+  FLabelWidth := -1;
   { The weeks that fit follow the width. }
   if FStatsOn then
     CountStats;
@@ -1253,7 +1362,8 @@ end;
 
 procedure TGittanCommitGraph.Context(const AScreenPos: TPoint);
 begin
-  if (FCurrent >= 0) and (FCurrent <= High(FShown)) and Assigned(FOnContext) then
+  if (FCurrent >= 0) and (FCurrent <= High(FShown)) and not IsPendingRow(FCurrent) and
+    Assigned(FOnContext) then
     FOnContext(Self, FCommits[FShown[FCurrent]], AScreenPos);
 end;
 
@@ -1265,7 +1375,12 @@ begin
   if Hash = '' then
     Exit;
   Dismiss;
-  if Assigned(FOnPick) then
+  if Hash = UncommittedHash then
+  begin
+    if Assigned(FOnPickChanges) then
+      FOnPickChanges(Self);
+  end
+  else if Assigned(FOnPick) then
     FOnPick(Self, Hash);
 end;
 
@@ -1789,6 +1904,46 @@ var
   i, Index, CenterY, Bottom, X, Right, TextY, Room: integer;
   IsHead: boolean;
   Meta, Mark: string;
+
+  { From a lane at the row's edge to the commit at its middle. }
+  procedure PaintBend(AEdgeX, AEdgeY, ADotX, AColor: integer);
+  begin
+    if AEdgeX <> ADotX then
+      SmoothBend(ACanvas, AEdgeX, AEdgeY, ADotX, CenterY, Px(BendRadius), LineWidth,
+        LaneColor(AColor), GetCanvasScaleFactor);
+  end;
+
+  { Filled, since a canvas puts a pen's line half a pixel beside the
+    bends on some systems. }
+  procedure PaintStraight(AFromX, AToX, AFromY, AToY, AColor: integer; ADashed: boolean);
+  var
+    DashY: integer;
+  begin
+    if AFromX <> AToX then
+      Exit;
+    ACanvas.Brush.Style := bsSolid;
+    ACanvas.Brush.Color := LaneColor(AColor);
+    Dec(AFromX, LineWidth div 2);
+    if not ADashed then
+    begin
+      ACanvas.FillRect(AFromX, AFromY, AFromX + LineWidth, AToY);
+      Exit;
+    end;
+    ACanvas.Brush.Color := FDim;
+    DashY := AFromY;
+    while DashY < AToY do
+    begin
+      ACanvas.FillRect(AFromX, DashY, AFromX + LineWidth, Min(AToY, DashY + Px(DashLength)));
+      Inc(DashY, 2 * Px(DashLength));
+    end;
+  end;
+
+  { The line of the uncommitted changes, before it becomes a branch's. }
+  function Dashed(const AEdge: TGittanGraphEdge; AUntil: integer): boolean;
+  begin
+    Result := FPending and (AEdge.FromLane = 0) and (AEdge.ToLane = 0) and (Index <= AUntil);
+  end;
+
 begin
   Index := FShown[ARow];
   C := FCommits[Index];
@@ -1814,23 +1969,37 @@ begin
     ACanvas.Pen.Width := 1;
   end;
 
+  Right := PaintRefs(ACanvas, Index, CenterY);
   if not Flat then
   begin
-    ACanvas.Pen.Width := 2;
+    { From the labels to the dot, under every line. }
+    if Right > 0 then
+    begin
+      ACanvas.Brush.Style := bsSolid;
+      ACanvas.Brush.Color := MixColor(FBack, LaneColor(C.Color), 0.5);
+      ACanvas.FillRect(Right, CenterY, LaneX(C.Lane), CenterY + 1);
+    end;
+    { The turns first, so a line that goes straight by stays whole, and
+      those from afar under the nearer ones they run along. }
+    for i := High(C.TopEdges) downto 0 do
+      PaintBend(LaneX(C.TopEdges[i].FromLane), ATop, LaneX(C.TopEdges[i].ToLane),
+        C.TopEdges[i].Color);
+    for i := High(C.BottomEdges) downto 0 do
+      PaintBend(LaneX(C.BottomEdges[i].ToLane), Bottom, LaneX(C.BottomEdges[i].FromLane),
+        C.BottomEdges[i].Color);
     for i := 0 to High(C.TopEdges) do
-    begin
-      ACanvas.Pen.Color := LaneColor(C.TopEdges[i].Color);
-      ACanvas.Line(LaneX(C.TopEdges[i].FromLane), ATop, LaneX(C.TopEdges[i].ToLane), CenterY);
-    end;
+      PaintStraight(LaneX(C.TopEdges[i].FromLane), LaneX(C.TopEdges[i].ToLane),
+        ATop, CenterY, C.TopEdges[i].Color, Dashed(C.TopEdges[i], FPendingEnd));
     for i := 0 to High(C.BottomEdges) do
-    begin
-      ACanvas.Pen.Color := LaneColor(C.BottomEdges[i].Color);
-      ACanvas.Line(LaneX(C.BottomEdges[i].FromLane), CenterY,
-        LaneX(C.BottomEdges[i].ToLane), Bottom);
-    end;
-    ACanvas.Pen.Width := 1;
+      PaintStraight(LaneX(C.BottomEdges[i].FromLane), LaneX(C.BottomEdges[i].ToLane),
+        CenterY, Bottom, C.BottomEdges[i].Color, Dashed(C.BottomEdges[i], FPendingEnd - 1));
   end;
 
+  if IsPendingRow(ARow) then
+  begin
+    PaintPending(ACanvas, CenterY);
+    Exit;
+  end;
   IsHead := False;
   for i := 0 to High(C.Refs) do
     if C.Refs[i].Kind = grHead then
@@ -1900,6 +2069,13 @@ begin
   end;
 
   X := GraphRight;
+  if FInitials[Index] <> '' then
+  begin
+    PaintInitials(ACanvas, X, CenterY - Px(DiscSize) div 2, Px(DiscSize), FInitials[Index],
+      LaneColor(FAuthorHues[Index]), GetCanvasScaleFactor);
+    ACanvas.Font := Font;
+    Inc(X, Px(DiscSize) + Px(Gap) - Px(Gap) div 4);
+  end;
   Meta := FMetaFull[Index];
   if Right - ACanvas.TextWidth(Meta) - Px(Gap) - X < FRows.Width div 3 then
     Meta := FMetaAge[Index];
@@ -1912,8 +2088,6 @@ begin
     Dec(Right, ACanvas.TextWidth(Meta) + Px(Gap) + Px(Gap) div 2);
   end;
 
-  X := PaintRefs(ACanvas, C.Refs, X, CenterY, Right);
-  ACanvas.Font := Font;
   Room := Right - X;
   if FSubjectRoom[Index] <> Room then
   begin
@@ -2036,7 +2210,7 @@ var
   L, R, i, j: integer;
 begin
   StatsPlot(L, R);
-  FStats := CommitStats(FCommits, FShown, Max(1, (R - L) div Px(MinWeekWidth)),
+  FStats := CommitStats(FCommits, ShownCommits, Max(1, (R - L) div Px(MinWeekWidth)),
     Now - LocalTimeToUniversal(Now));
   FStatsAuthorMax := 1;
   for i := 0 to High(FStats.Authors) do
@@ -2213,7 +2387,7 @@ begin
       Line := Line + ' · ' + FormatDateTime(DateFormat, FStats.Oldest) + ' – ' +
         FormatDateTime(DateFormat, FStats.Newest);
     if FMore then
-      Line := Line + ' · ' + Format(rsStatsCut, [Length(FCommits)]);
+      Line := Line + ' · ' + Format(rsStatsCut, [CommitTotal]);
     if FFiltered then
       Line := Line + ' · ' + rsStatsMatching;
   end;
@@ -2359,77 +2533,235 @@ begin
     Result := TrimRight(UTF8Copy(S, 1, Lo)) + '…';
 end;
 
-{ The refs as chips from X: the branch HEAD is on filled in the accent,
-  other local branches outlined in it, remote branches in the dim color,
-  tags in the tag color, a bisect's marks red for bad, green for good
-  and dim for skip, in shades that read on either background; a long
-  name is cut. The chips stop before
-  ARight less some room for the subject. Returns where the subject goes. }
-function TGittanCommitGraph.PaintRefs(ACanvas: TCanvas; const ARefs: TGittanGraphRefs;
-  X, ACenterY, ARight: integer): integer;
-var
-  i, W, H, TextH: integer;
-  RefName: string;
-  Edge, Fill, Ink: TColor;
-  Filled: boolean;
+function TGittanCommitGraph.LabelText(const ALabel: TGittanRefLabel): string;
 begin
-  Result := X;
-  if Length(ARefs) = 0 then
+  Result := ALabel.Name;
+  if UTF8Length(Result) > ChipMaxChars then
+    Result := UTF8Copy(Result, 1, ChipMaxChars - 1) + '…';
+end;
+
+{ The width of a label around its name. }
+function TGittanCommitGraph.LabelExtra(const ALabel: TGittanRefLabel): integer;
+begin
+  Result := 2 * Px(ChipPadX) + (Ord(ALabel.Local) + Ord(ALabel.Remote) +
+    Ord(ALabel.Kind = grTag)) * (Px(MarkSize) + Px(MarkGap));
+end;
+
+{ The column left of the lanes, as wide as the widest row's labels up to
+  a limit, with room after them; 0 when no row has any. }
+function TGittanCommitGraph.LabelColumn: integer;
+var
+  i, j, W, Most, Limit: integer;
+begin
+  if FLabelWidth >= 0 then
+    Exit(FLabelWidth);
+  if not FRows.HandleAllocated then
+    Exit(0);
+  Limit := Min(Px(MaxLabelWidth), FRows.Width div LabelPart);
+  Most := 0;
+  FRows.Canvas.Font := Font;
+  for i := 0 to High(FShown) do
+  begin
+    W := 0;
+    for j := 0 to High(FLabels[FShown[i]]) do
+    begin
+      if FLabels[FShown[i]][j].Kind = grHead then
+        FRows.Canvas.Font.Style := [fsBold]
+      else
+        FRows.Canvas.Font.Style := [];
+      Inc(W, FRows.Canvas.TextWidth(LabelText(FLabels[FShown[i]][j])) +
+        LabelExtra(FLabels[FShown[i]][j]) + Px(ChipGap));
+    end;
+    Most := Max(Most, W);
+    if Most >= Limit then
+      Break;
+  end;
+  if Most > 0 then
+    Most := Px(Pad) + Min(Most, Limit);
+  FLabelWidth := Most;
+  Result := Most;
+end;
+
+{ The refs of a row, a line each; '' without any. }
+function TGittanCommitGraph.LabelHint(ARow: integer): string;
+var
+  i: integer;
+begin
+  Result := '';
+  if (ARow < 0) or (ARow > High(FShown)) then
+    Exit;
+  for i := 0 to High(FCommits[FShown[ARow]].Refs) do
+  begin
+    if Result <> '' then
+      Result := Result + LineEnding;
+    Result := Result + FCommits[FShown[ARow]].Refs[i].Name;
+  end;
+end;
+
+{ The labels of a commit in their column: a branch in its lane's color
+  (the accent in a flat list, whose lanes mean nothing), filled with it
+  when HEAD is on it and tinted otherwise, fainter for one only on a
+  remote; tags in the tag color, a bisect's marks red for bad, green for
+  good and dim for skip. The first is cut to fit, those there is no room
+  for become a count. Returns where they end, 0 without any. }
+function TGittanCommitGraph.PaintRefs(ACanvas: TCanvas; AIndex, ACenterY: integer): integer;
+var
+  i, X, W, H, TextH, Limit, Rest: integer;
+  LabelName: string;
+  Hue, Fill, Ink: TColor;
+  Refs: TGittanRefLabels;
+
+  procedure Pill(AWidth: integer; AFill: TColor);
+  begin
+    SmoothRoundRect(ACanvas, Rect(X, ACenterY - H div 2, X + AWidth, ACenterY - H div 2 + H),
+      H, AFill, GetCanvasScaleFactor);
+    ACanvas.Brush.Style := bsClear;
+  end;
+
+  procedure Mark(AMark: TGittanRefMark; var AX: integer);
+  begin
+    PaintRefMark(ACanvas, AX, ACenterY - Px(MarkSize) div 2, Px(MarkSize), AMark, Ink,
+      GetCanvasScaleFactor);
+    Inc(AX, Px(MarkSize) + Px(MarkGap));
+  end;
+
+  procedure Names;
+  var
+    TextX: integer;
+  begin
+    TextX := X + Px(ChipPadX);
+    if Refs[i].Kind = grTag then
+      Mark(rmTag, TextX);
+    ACanvas.Brush.Style := bsClear;
+    ACanvas.Font.Color := Ink;
+    ACanvas.TextOut(TextX, ACenterY - TextH div 2, LabelName);
+    Inc(TextX, ACanvas.TextWidth(LabelName) + Px(MarkGap));
+    if Refs[i].Local then
+      Mark(rmLocal, TextX);
+    if Refs[i].Remote then
+      Mark(rmRemote, TextX);
+  end;
+
+begin
+  Result := 0;
+  Refs := FLabels[AIndex];
+  if Length(Refs) = 0 then
     Exit;
   ACanvas.Font := Font;
   TextH := ACanvas.TextHeight('Xg');
   H := TextH + 4;
-  for i := 0 to High(ARefs) do
+  X := Px(Pad);
+  Limit := LabelColumn - Px(ChipGap);
+  i := 0;
+  while i <= High(Refs) do
   begin
-    RefName := ARefs[i].Name;
-    if UTF8Length(RefName) > ChipMaxChars then
-      RefName := UTF8Copy(RefName, 1, ChipMaxChars - 1) + '…';
-    Filled := ARefs[i].Kind = grHead;
-    if Filled then
-      ACanvas.Font.Style := [fsBold]
-    else
-      ACanvas.Font.Style := [];
-    W := ACanvas.TextWidth(RefName) + 2 * Px(ChipPadX);
-    if X + W > ARight - 80 then
-      Break;
-    case ARefs[i].Kind of
-      grHead, grBranch: Edge := FAccent;
-      grRemote: Edge := FDim;
+    { Room for the count of those after this one. }
+    ACanvas.Font.Style := [];
+    Rest := 0;
+    if i < High(Refs) then
+      Rest := Px(ChipGap) + ACanvas.TextWidth('+' + IntToStr(High(Refs) - i)) + 2 * Px(ChipPadX);
+    if Refs[i].Kind = grHead then
+      ACanvas.Font.Style := [fsBold];
+    LabelName := LabelText(Refs[i]);
+    if X + ACanvas.TextWidth(LabelName) + LabelExtra(Refs[i]) + Rest > Limit then
+    begin
+      if i > 0 then
+        Break;
+      LabelName := FitText(ACanvas, LabelName, Limit - Rest - X - LabelExtra(Refs[i]));
+      if LabelName = '' then
+        Break;
+    end;
+    W := ACanvas.TextWidth(LabelName) + LabelExtra(Refs[i]);
+    case Refs[i].Kind of
+      grTag: Hue := FTag;
       grBisect:
-        if RefName = 'bad' then
-          Edge := RGBToColor(214, 76, 76)
-        else if RefName = 'good' then
-          Edge := RGBToColor(56, 158, 92)
+        if Refs[i].Name = 'bad' then
+          Hue := RGBToColor(214, 76, 76)
+        else if Refs[i].Name = 'good' then
+          Hue := RGBToColor(56, 158, 92)
         else
-          Edge := FDim;
+          Hue := FDim;
       else
-        Edge := FTag;
+        if not Flat then
+          Hue := LaneColor(FCommits[AIndex].Color)
+        else if Refs[i].Kind = grRemote then
+          Hue := FDim
+        else
+          Hue := FAccent;
     end;
-    if Filled then
+    Ink := FText;
+    if Refs[i].Kind = grHead then
     begin
-      Fill := FAccent;
-      Ink := FBack;
+      Fill := Hue;
+      Ink := InkOn(Hue);
     end
+    else if Refs[i].Kind = grRemote then
+      Fill := MixColor(FBack, Hue, 0.18)
     else
-    begin
-      Fill := FBack;
-      Ink := Edge;
-    end;
-    ACanvas.Pen.Color := Edge;
-    if Filled then
-    begin
-      ACanvas.Brush.Style := bsSolid;
-      ACanvas.Brush.Color := Fill;
-    end
-    else
-      ACanvas.Brush.Style := bsClear;
-    ACanvas.RoundRect(X, ACenterY - H div 2, X + W, ACenterY - H div 2 + H, H, H);
-    ACanvas.Brush.Style := bsClear;
-    ACanvas.Font.Color := Ink;
-    ACanvas.TextOut(X + Px(ChipPadX), ACenterY - TextH div 2, RefName);
+      Fill := MixColor(FBack, Hue, 0.35);
+    Pill(W, Fill);
+    Names;
+    Inc(X, W + Px(ChipGap));
+    Inc(i);
+  end;
+  if i <= High(Refs) then
+  begin
+    ACanvas.Font.Style := [];
+    LabelName := '+' + IntToStr(Length(Refs) - i);
+    W := ACanvas.TextWidth(LabelName) + 2 * Px(ChipPadX);
+    Pill(W, MixColor(FBack, FDim, 0.3));
+    ACanvas.Font.Color := FText;
+    ACanvas.TextOut(X + Px(ChipPadX), ACenterY - TextH div 2, LabelName);
     Inc(X, W + Px(ChipGap));
   end;
-  Result := X + Px(ChipGap);
+  Result := X - Px(ChipGap);
+end;
+
+{ The row of the uncommitted changes: a dashed ring, and how many files
+  go into the commit and are left out of it, or how many there are. }
+procedure TGittanCommitGraph.PaintPending(ACanvas: TCanvas; ACenterY: integer);
+var
+  X, TextH: integer;
+
+  procedure Count(const AText: string; AColor: TColor);
+  var
+    W, H: integer;
+  begin
+    W := ACanvas.TextWidth(AText) + 2 * Px(ChipPadX);
+    H := TextH + 4;
+    if X + W > FRows.Width - Px(Pad) then
+      Exit;
+    SmoothRoundRect(ACanvas, Rect(X, ACenterY - H div 2, X + W, ACenterY - H div 2 + H), H,
+      MixColor(FBack, AColor, 0.3), GetCanvasScaleFactor);
+    ACanvas.Brush.Style := bsClear;
+    ACanvas.Font.Color := FText;
+    ACanvas.TextOut(X + Px(ChipPadX), ACenterY - TextH div 2, AText);
+    Inc(X, W + Px(ChipGap));
+  end;
+
+begin
+  { The dashed line ends at the ring. }
+  SmoothEllipse(ACanvas, Rect(LaneX(0) - Px(HeadRadius), ACenterY - Px(HeadRadius),
+    LaneX(0) + Px(HeadRadius), ACenterY + Px(HeadRadius)), FBack, GetCanvasScaleFactor);
+  SmoothDashRing(ACanvas, LaneX(0), ACenterY, Px(HeadRadius), 1.5, FDim, GetCanvasScaleFactor);
+  ACanvas.Font := Font;
+  TextH := ACanvas.TextHeight('Xg');
+  X := GraphRight;
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.Font.Color := FText;
+  ACanvas.TextOut(X, ACenterY - TextH div 2, rsGraphUncommitted);
+  Inc(X, ACanvas.TextWidth(rsGraphUncommitted) + Px(Gap));
+  if FPendingIncluded >= 0 then
+  begin
+    if FPendingIncluded > 0 then
+      Count(Format(rsGraphIncluded, [FPendingIncluded]), FOk);
+    if FPendingFiles > FPendingIncluded then
+      Count(Format(rsGraphLeftOut, [FPendingFiles - FPendingIncluded]), FTag);
+  end
+  else if FPendingFiles = 1 then
+    Count(rsGraphOneFile, FTag)
+  else
+    Count(Format(rsGraphFiles, [FPendingFiles]), FTag);
 end;
 
 end.

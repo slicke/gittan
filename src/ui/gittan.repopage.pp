@@ -114,7 +114,7 @@ type
 implementation
 
 uses
-  Math, DateUtils, LazUTF8, gittan.reviews, gittan.statusbar, gittan.textfit, gittan.theme;
+  Math, DateUtils, LazUTF8, gittan.reviews, gittan.statusbar, gittan.textfit, gittan.theme, gittan.refmark;
 
 resourcestring
   rsRemotes = 'Remotes';
@@ -509,24 +509,6 @@ begin
         FitRight(Details[i], Inner));
   end;
   Inc(Y, Rows * TileH + (Rows - 1) * Px(TileGap));
-end;
-
-{ The initials of AName: the first letters of its first and last word,
-  in capitals. }
-function Initials(const AName: string): string;
-var
-  Words: TStringArray;
-  First, Last: string;
-begin
-  Words := Trim(AName).Split([' '], TStringSplitOptions.ExcludeEmpty);
-  if Length(Words) = 0 then
-    Exit('?');
-  First := UTF8Copy(Words[0], 1, 1);
-  if Length(Words) > 1 then
-    Last := UTF8Copy(Words[High(Words)], 1, 1)
-  else
-    Last := '';
-  Result := UTF8UpperCase(First + Last);
 end;
 
 { A row per author: a disc with their initials in their color, the name,

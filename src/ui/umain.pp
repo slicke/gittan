@@ -2056,6 +2056,8 @@ type
     procedure SummaryTrustClick(Sender: TObject);
     procedure MenuCommitGraphClick(Sender: TObject);
     procedure GraphPick(Sender: TObject; const AHash: string);
+    procedure GraphPickChanges(Sender: TObject);
+    procedure SetGraphPending;
     function MenuListAnchor: TRect;
     function CommitStepHash(AOlder: boolean): string;
     procedure GoToCommitStep(AOlder: boolean);
@@ -4787,6 +4789,7 @@ begin
   FGraph := TGittanCommitGraph.Create(Self);
   FGraph.Parent := Self;
   FGraph.OnPick := @GraphPick;
+  FGraph.OnPickChanges := @GraphPickChanges;
   FGraph.OnContext := @GraphContext;
   FGraph.OnTipDismiss := @GraphTipDismiss;
   FGraph.OnDrop := @GraphDrop;

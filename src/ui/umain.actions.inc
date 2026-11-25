@@ -2171,10 +2171,39 @@ end;
 function TRepoFrame.LoadGraphCommits(ALimit: integer; out ACommits: TGittanGraphCommits): boolean;
 begin
   FGraphLoadLimit := ALimit;
+  SetGraphPending;
   Result := FRepo.GraphCommits(ACommits, ALimit, App.Settings.GraphFirstParent,
     App.Settings.GraphNoMerges);
   if not Result and (FRepo.CommitId('HEAD') <> '') then
     BannerError(rsGraphLoadFailed, FRepo.Error);
+end;
+
+{ How many files are changed and, while files are picked for the commit,
+  how many go into it. With something else than HEAD compared with the
+  files listed are not the uncommitted ones, so git counts those. }
+procedure TRepoFrame.SetGraphPending;
+var
+  Output, Err: string;
+  i, Files, Included: integer;
+begin
+  Files := 0;
+  Included := -1;
+  if FRepo.Base = '' then
+  begin
+    Files := Length(FStats);
+    if CommitChoosing then
+    begin
+      Included := 0;
+      for i := 0 to High(FStats) do
+        if (FStats[i].Kind <> ckConflict) and CommitChosen(i) then
+          Inc(Included);
+    end;
+  end
+  else if RunGitIn(FRepo.Root, ['status', '--porcelain', '-z', '--no-renames'], Output, Err) then
+    for i := 1 to Length(Output) do
+      if Output[i] = #0 then
+        Inc(Files);
+  FGraph.SetPending(Files, Included);
 end;
 
 procedure TRepoFrame.GraphMore(Sender: TObject);
@@ -2565,6 +2594,14 @@ begin
   NavGraphPick(FGraphTrailFilter, AHash);
   ShowBlameCommit(AHash);
   ShowSummary;
+end;
+
+{ The row of the uncommitted changes: the working tree's summary. }
+procedure TRepoFrame.GraphPickChanges(Sender: TObject);
+begin
+  if FRepo.Base <> '' then
+    SetBase('');
+  MenuSummaryClick(Sender);
 end;
 
 { Where a list a menu item (or the palette, or its shortcut) drops opens:

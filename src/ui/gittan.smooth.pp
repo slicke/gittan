@@ -30,6 +30,15 @@ procedure SmoothEllipse(ACanvas: TCanvas; const R: TRect; AColor: TColor;
 procedure SmoothCheckDisc(ACanvas: TCanvas; X, Y, ASize: integer;
   AFill, AInk: TColor; APenWidth: single; AScale: double);
 
+{** A line AWidth wide that leaves AX, AY upright, turns in a quarter
+  circle of at most ARadius and reaches BX, BY level. }
+procedure SmoothBend(ACanvas: TCanvas; AX, AY, BX, BY, ARadius, AWidth: integer;
+  AColor: TColor; AScale: double);
+
+{** A ring of dashes around X, Y. }
+procedure SmoothDashRing(ACanvas: TCanvas; X, Y, ARadius: integer; AWidth: single;
+  AColor: TColor; AScale: double);
+
 implementation
 
 uses
@@ -104,6 +113,83 @@ begin
     Bmp.DrawPolyLineAntialias([PointF(D * 0.27, D * 0.5),
       PointF(D * 0.44, D * 0.67), PointF(D * 0.74, D * 0.33)],
       Pixel(AInk), APenWidth * S);
+    Bmp.Draw(ACanvas, R, False);
+  finally
+    Bmp.Free;
+  end;
+end;
+
+procedure SmoothBend(ACanvas: TCanvas; AX, AY, BX, BY, ARadius, AWidth: integer;
+  AColor: TColor; AScale: double);
+const
+  Steps = 12;
+var
+  Bmp: TBGRABitmap;
+  R: TRect;
+  S, Turn, DX, DY, A: single;
+  Points: array[0..Steps + 2] of TPointF;
+  i: integer;
+
+  { A point of the canvas in the bitmap, whose pixels have their middle
+    at whole numbers. }
+  function At(X, Y: single): TPointF;
+  begin
+    Result := PointF((X - R.Left) * S - 0.5, (Y - R.Top) * S - 0.5);
+  end;
+
+begin
+  { Not past AY, where the next piece of the line begins. }
+  R := Rect(Min(AX, BX) - AWidth, Min(AY, BY - AWidth), Max(AX, BX) + AWidth,
+    Max(AY, BY + AWidth));
+  DX := Sign(BX - AX);
+  DY := Sign(BY - AY);
+  Turn := Min(ARadius, Min(Abs(BX - AX), Abs(BY - AY)));
+  Bmp := NewLayer(R, AScale, S);
+  try
+    Points[0] := At(AX, AY);
+    for i := 0 to Steps do
+    begin
+      A := Pi / 2 * i / Steps;
+      Points[i + 1] := At(AX + DX * Turn * (1 - Cos(A)), BY - DY * Turn * (1 - Sin(A)));
+    end;
+    Points[Steps + 2] := At(BX, BY);
+    Bmp.LineCap := pecFlat;
+    Bmp.JoinStyle := pjsRound;
+    Bmp.DrawPolyLineAntialias(Points, Pixel(AColor), AWidth * S);
+    Bmp.Draw(ACanvas, R, False);
+  finally
+    Bmp.Free;
+  end;
+end;
+
+procedure SmoothDashRing(ACanvas: TCanvas; X, Y, ARadius: integer; AWidth: single;
+  AColor: TColor; AScale: double);
+const
+  Dashes = 6;
+  Steps = 4;
+var
+  Bmp: TBGRABitmap;
+  R: TRect;
+  S, C, A: single;
+  Points: array[0..Steps] of TPointF;
+  i, k: integer;
+begin
+  R := Rect(X - ARadius - 1, Y - ARadius - 1, X + ARadius + 1, Y + ARadius + 1);
+  Bmp := NewLayer(R, AScale, S);
+  try
+    C := (Bmp.Width - 1) / 2;
+    Bmp.LineCap := pecFlat;
+    Bmp.JoinStyle := pjsRound;
+    for i := 0 to Dashes - 1 do
+    begin
+      for k := 0 to Steps do
+      begin
+        A := 2 * Pi * (i + 0.6 * k / Steps) / Dashes;
+        Points[k] := PointF(C + Cos(A) * (ARadius - AWidth / 2) * S,
+          C + Sin(A) * (ARadius - AWidth / 2) * S);
+      end;
+      Bmp.DrawPolyLineAntialias(Points, Pixel(AColor), AWidth * S);
+    end;
     Bmp.Draw(ACanvas, R, False);
   finally
     Bmp.Free;
