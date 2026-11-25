@@ -46,6 +46,8 @@ const
   CommandsPath = CommandsFolder + '/' + CommandsFile;
   {** The committed commands files that are parsed, in bytes together. }
   MaxCommandsBytes = 512 * 1024;
+  {** The longest description kept, in bytes. }
+  MaxDescription = 200;
   {** The folder inside it whose .toml files are commands files too, a
     section of the page each. }
   CommandsSubFolder = 'commands';
@@ -302,6 +304,22 @@ resourcestring
   The commands file
   --------------------------------------------------------------------------- }
 
+{ AText on one line, at most MaxDescription bytes of it: a description
+  stands above the shell line in a tile's hint, and may not push it off
+  the screen. }
+function OneLine(const AText: string): string;
+var
+  i: integer;
+begin
+  Result := AText;
+  for i := 1 to Length(Result) do
+    if (Result[i] < ' ') or (Result[i] = #127) then
+      Result[i] := ' ';
+  Result := Trim(Result);
+  if Length(Result) > MaxDescription then
+    Result := TrimRight(Utf8Clean(Copy(Result, 1, MaxDescription))) + '…';
+end;
+
 function KeyOf(const AValue: string): char;
 var
   S: string;
@@ -475,7 +493,7 @@ begin
         if TTOMLTable(Value).TryGetValue('terminal', Field) and (Field is TTOMLBoolean) then
           Cmd.Terminal := Field.AsBoolean;
         if TTOMLTable(Value).TryGetValue('description', Field) and (Field is TTOMLString) then
-          Cmd.Description := Trim(Field.AsString);
+          Cmd.Description := OneLine(Field.AsString);
         if TTOMLTable(Value).TryGetValue('confirm', Field) then
           if Field is TTOMLBoolean then
             Cmd.Confirm := Field.AsBoolean

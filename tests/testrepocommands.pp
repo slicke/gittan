@@ -28,6 +28,7 @@ type
     procedure TearDown; override;
   published
     procedure TestParseToml;
+    procedure TestDescriptionOneLine;
     procedure TestParseTomlNotToml;
     procedure TestParseTomlFields;
     procedure TestParseTomlPerSystem;
@@ -342,6 +343,18 @@ begin
   AssertEquals(1, Length(F[1].Commands));
   AssertTrue('the last is not', F[12].Error <> '');
   AssertEquals(0, Length(F[12].Commands));
+end;
+
+procedure TRepoCommandsTest.TestDescriptionOneLine;
+var
+  C: TGittanRepoCommands;
+  Error: string;
+begin
+  C := ParseCommandsToml('[commands.a]'#10'run = "x"'#10'description = "Lints\n\n\tall | of it"'#10 +
+    '[commands.b]'#10'run = "y"'#10'description = "' + StringOfChar('d', MaxDescription + 50) + '"', Error);
+  AssertEquals('', Error);
+  AssertEquals('Lints   all | of it', C[0].Description);
+  AssertEquals(StringOfChar('d', MaxDescription) + '…', C[1].Description);
 end;
 
 procedure TRepoCommandsTest.TestPersonalFile;

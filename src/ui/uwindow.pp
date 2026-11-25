@@ -73,6 +73,8 @@ type
       message boxes of ATSynEdit and EControl) is centered on the window
       instead, as Gittan's own dialogs are. }
     procedure ModalBegin(Sender: TObject);
+    procedure ShowWholeHint(var HintStr: string; var CanShow: boolean;
+      var HintInfo: THintInfo);
     procedure FormDropFiles(Sender: TObject; const FileNames: array of string);
   private
     FFrames: TList;
@@ -240,6 +242,7 @@ begin
   FClosing := TList.Create;
   PlaceWindow;
   Application.AddOnModalBeginHandler(@ModalBegin);
+  Application.AddOnShowHintHandler(@ShowWholeHint);
   KeyPreview := True;
   OnKeyDown := @FormKeyDown;
   {$IFDEF LCLGtk3}
@@ -285,6 +288,35 @@ begin
   Application.QueueAsyncCall(@LoadExtensionsAsync, 0);
 end;
 
+{ The LCL shows a hint up to its first |, what follows being for a status
+  bar. Gittan's hints have no second part, but hold shell lines, branch
+  names and code, where a pipe cut off the rest of what would run. A
+  control that gave a text of its own keeps it. }
+procedure TGittanWindow.ShowWholeHint(var HintStr: string; var CanShow: boolean;
+  var HintInfo: THintInfo);
+var
+  Control: TControl;
+  Short: string;
+begin
+  Control := HintInfo.HintControl;
+  Short := '';
+  while (Control <> nil) and (Short = '') do
+  begin
+    Short := GetShortHint(Control.Hint);
+    Control := Control.Parent;
+  end;
+  if HintStr <> Short then
+    Exit;
+  Control := HintInfo.HintControl;
+  while (Control <> nil) and (Control.Hint = '') do
+    Control := Control.Parent;
+  if Control = nil then
+    Exit;
+  HintInfo.HideTimeout := HintInfo.HideTimeout +
+    Application.HintHidePausePerChar * (Length(Control.Hint) - Length(HintStr));
+  HintStr := Control.Hint;
+end;
+
 { ShowModal tells the application before it shows the form, and the
   form is placed as it shows, so a hidden form still to be centered on
   the screen is the one about to show: centered on the window
@@ -310,6 +342,7 @@ var
   Frame: TRepoFrame;
 begin
   Application.RemoveOnModalBeginHandler(@ModalBegin);
+  Application.RemoveOnShowHintHandler(@ShowWholeHint);
   Application.RemoveAsyncCalls(Self);
   { The host is gone before the frames it reaches. }
   SetExtHost(nil);

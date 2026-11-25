@@ -44,7 +44,7 @@ Each table under `[commands]` is one command:
 - `run` is the shell line. It runs from the repository root through your login shell, so your PATH is the one your terminal has. It can be a table with a line per system: `macos`, `windows`, `linux`, `freebsd`, `haiku`, then `unix` for any system but Windows, then `default`. A command with no line for the system you are on is shown dimmed.
 - `key` is one letter or digit. The command then runs with Ctrl+Cmd and that key on macOS, or Ctrl+Alt and that key elsewhere, from anywhere in Gittan. If two commands ask for the same key, the first one gets it.
 - `terminal = true` opens the command in a terminal window instead of under the page. Use it for anything that keeps running or asks questions, such as a dev server, a watch or a REPL.
-- `description` is a line shown in the tile's tooltip.
+- `description` is a line shown in the tile's tooltip, up to 200 bytes of it.
 - `confirm = true` asks before the command runs. A string asks your own question instead.
 - `hidden = true` leaves the command off the page.
 
