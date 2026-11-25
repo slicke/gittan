@@ -73,6 +73,7 @@ type
     procedure TestContextTracked;
     procedure TestGitContext;
     procedure TestShellName;
+    procedure TestPlainName;
     procedure TestChecksLazarus;
     procedure TestChecksNode;
     procedure TestChecksRustGo;
@@ -1052,6 +1053,22 @@ begin
   finally
     C.Free;
   end;
+end;
+
+procedure TProjectTest.TestPlainName;
+begin
+  AssertTrue(PlainName('No Ext (Release)'));
+  AssertTrue(PlainName('it''s'));
+  AssertTrue(PlainName('a-b@c'));
+  AssertFalse(PlainName(''));
+  AssertFalse('an option', PlainName('--eval=x'));
+  AssertFalse('a file of options', PlainName('@x'));
+  AssertFalse('a \ in fish''s single quotes', PlainName('a\''; echo x #'));
+  AssertFalse(PlainName('a'#10'b'));
+  AssertFalse(PlainName('a'#0));
+  AssertFalse(PlainName('a'#127));
+  AssertEquals('Run', ProjectNameButton('tool', 'Run', 'run:tool', 'x tool').Text);
+  AssertEquals('', ProjectNameButton('-tool', 'Run', 'run:-tool', 'x -tool').CommandName);
 end;
 
 procedure TProjectTest.TestShellName;

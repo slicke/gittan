@@ -662,7 +662,9 @@ begin
   begin
     { A program without a project: fpc builds it. }
     for FileName in FilesWithExt(ARoot, '.lpr') do
-      if Length(FilesWithExt(ARoot, '.lpr')) > 1 then
+      if not PlainName(FileName) then
+        Continue
+      else if Length(FilesWithExt(ARoot, '.lpr')) > 1 then
         AddProjectCommand(Result, ProjectCommand('build:' + ChangeFileExt(FileName, ''),
           'fpc ' + ShellName(FileName)))
       else
@@ -673,18 +675,22 @@ begin
   begin
     { Several projects: each in its default mode. }
     for FileName in Names do
-      AddProjectCommand(Result, ProjectCommand('build:' + ChangeFileExt(FileName, ''),
-        LazBuildCommand(FileName, '')));
+      if PlainName(FileName) then
+        AddProjectCommand(Result, ProjectCommand('build:' + ChangeFileExt(FileName, ''),
+          LazBuildCommand(FileName, '')));
     Exit;
   end;
   { One project: a command per build mode, grouped under build. }
+  if not PlainName(Names[0]) then
+    Exit;
   Project := ReadLazProject(TextOf(ARoot, Names[0]));
   if Length(Project.Modes) <= 1 then
     AddProjectCommand(Result, ProjectCommand('build', LazBuildCommand(Names[0], '')))
   else
     for i := 0 to High(Project.Modes) do
-      AddProjectCommand(Result, ProjectCommand('build:' + Project.Modes[i].Name,
-        LazBuildCommand(Names[0], Project.Modes[i].Name)));
+      if PlainName(Project.Modes[i].Name) then
+        AddProjectCommand(Result, ProjectCommand('build:' + Project.Modes[i].Name,
+          LazBuildCommand(Names[0], Project.Modes[i].Name)));
 end;
 
 class function TGittanLazarusKind.DependencyFile(const ARoot: string): string;
@@ -842,7 +848,7 @@ var
   Deps: TGittanDependencies;
   Changes: TGittanDependencyChanges;
   Pkg: TLazPackage;
-  Cell, Note: TGittanProjectCell;
+  Cell, Note, Button: TGittanProjectCell;
   ModeHint, NameText: string;
   i, k, s, n: integer;
 begin
@@ -894,6 +900,11 @@ begin
         ModeHint := rsDefaultModeHint;
     end;
     NameText := Project.Modes[i].Name;
+    if PlainName(Lpi) then
+      Button := ProjectNameButton(NameText, rsBuild, 'build:' + NameText,
+        LazBuildCommand(Lpi, NameText))
+    else
+      Button := ProjectCell('');
     Cell := ProjectCell(NameText, psStrong, ModeHint);
     Hint := Project.Modes[i].UnitOutput;
     AddRow(Modes, ProjectRow([Cell,
@@ -901,8 +912,7 @@ begin
       ProjectCell(PlatformOf(Project.Modes[i]), psDim),
       ProjectCell(CodeOf(Project.Modes[i]), psDim),
       ProjectCell(DebugOf(Project.Modes[i]), psDim),
-      ProjectButton(rsBuild, 'build:' + Project.Modes[i].Name,
-        LazBuildCommand(Lpi, Project.Modes[i].Name))]));
+      Button]));
     if Project.Modes[i].IsDefault and (Length(Project.Modes) > 1) and
       not SameText(NameText, 'Default') then
       Modes.Rows[High(Modes.Rows)].Cells[0].Text := NameText + ' · ' + rsDefaultMode;

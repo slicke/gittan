@@ -658,22 +658,6 @@ end;
   package.json and the Makefile
   --------------------------------------------------------------------------- }
 
-{ A script name the command line can carry: ShellName quotes it, but a
-  control character (a line feed starts a second command in sh) is
-  refused, and on Windows a " or a %, which cmd reads inside quotes. }
-function PlainScript(const AName: string): boolean;
-var
-  i: integer;
-begin
-  if AName = '' then
-    Exit(False);
-  for i := 1 to Length(AName) do
-    if (AName[i] < ' ') or (AName[i] = #127)
-      {$IFDEF WINDOWS} or (AName[i] in ['"', '%']){$ENDIF} then
-      Exit(False);
-  Result := True;
-end;
-
 function ParsePackageScripts(const AJson: string): TGittanRepoCommands;
 var
   Data: TJSONData;
@@ -696,7 +680,7 @@ begin
       Exit;
     for i := 0 to TJSONObject(Scripts).Count - 1 do
       if (TJSONObject(Scripts).Items[i].JSONType = jtString) and
-        PlainScript(TJSONObject(Scripts).Names[i]) then
+        PlainName(TJSONObject(Scripts).Names[i]) then
       begin
         SetLength(Result, Length(Result) + 1);
         Result[High(Result)] := Default(TGittanRepoCommand);
@@ -809,11 +793,50 @@ begin
   end;
 end;
 
+function ReadIfExists(const AFileName: string): string;
+begin
+  if FileExists(AFileName) then
+    Result := ReadFileBytes(AFileName)
+  else
+    Result := '';
+end;
+
+{ The tool the packageManager field of package.json names ("pnpm@9"),
+  which the Install button goes by too, '' for none of the four. }
+function NamedPackageManager(const AFileName: string): string;
+var
+  Data: TJSONData;
+  Text: string;
+begin
+  Result := '';
+  Text := ReadIfExists(AFileName);
+  if (Trim(Text) = '') or JsonTooDeep(Text) then
+    Exit;
+  try
+    Data := GetJSON(Text);
+  except
+    Exit;
+  end;
+  try
+    if (Data is TJSONObject) and (TJSONObject(Data).Find('packageManager') is TJSONString) then
+      Result := TJSONObject(Data).Find('packageManager').AsString;
+  finally
+    Data.Free;
+  end;
+  if Pos('@', Result) > 1 then
+    Result := Copy(Result, 1, Pos('@', Result) - 1);
+  if (Result <> 'npm') and (Result <> 'pnpm') and (Result <> 'yarn') and (Result <> 'bun') then
+    Result := '';
+end;
+
 function PackageRunner(const ARoot: string): string;
 var
   Root: string;
 begin
   Root := IncludeTrailingPathDelimiter(ARoot);
+  Result := NamedPackageManager(Root + 'package.json');
+  if Result <> '' then
+    Exit(Result + ' run');
   if FileExists(Root + 'pnpm-lock.yaml') then
     Result := 'pnpm run'
   else if FileExists(Root + 'yarn.lock') then
@@ -822,14 +845,6 @@ begin
     Result := 'bun run'
   else
     Result := 'npm run';
-end;
-
-function ReadIfExists(const AFileName: string): string;
-begin
-  if FileExists(AFileName) then
-    Result := ReadFileBytes(AFileName)
-  else
-    Result := '';
 end;
 
 function CommandByKey(const ACommands: TGittanRepoCommands; AKey: char): integer;
@@ -944,7 +959,7 @@ var
         if First then
         begin
           ACommand.Key := FileOnes[k].Key;
-          ACommand.Terminal := FileOnes[k].Terminal;
+          ACommand.Terminal := ACommand.Terminal or FileOnes[k].Terminal;
           if FileOnes[k].Description <> '' then
             ACommand.Description := FileOnes[k].Description;
           ACommand.Confirm := FileOnes[k].Confirm;
@@ -1275,8 +1290,12 @@ begin
     if Shell = '' then
       Shell := 'cmd.exe';
     P.Executable := Shell;
+    { /s takes the outer quotes off and leaves the line between them as
+      it is. Not ProcessArg, whose \" for a quote cmd hands on: a program
+      at "C:\x y" was not found, and a quoted name came out cut. }
+    P.Parameters.Add('/s');
     P.Parameters.Add('/c');
-    P.Parameters.Add(ProcessArg(FCommand));
+    P.Parameters.Add('"' + FCommand + '"');
     {$else}
     Shell := EnvironmentVariable('SHELL');
     if (Shell = '') or not FileExists(Shell) then

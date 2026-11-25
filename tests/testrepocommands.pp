@@ -531,6 +531,10 @@ begin
   DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'yarn.lock');
   Put('bun.lock', '');
   AssertEquals('bun run', PackageRunner(FDir));
+  Put('package.json', '{"packageManager": "pnpm@9.1.0"}');
+  AssertEquals('the field wins, as for Install', 'pnpm run', PackageRunner(FDir));
+  Put('package.json', '{"packageManager": "rm -rf"}');
+  AssertEquals('one of the four alone', 'bun run', PackageRunner(FDir));
 end;
 
 procedure TRepoCommandsTest.TestDiscoverOrder;

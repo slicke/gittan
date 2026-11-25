@@ -471,6 +471,23 @@ var
   Std: TGittanProjectSection;
   Tool, Run: string;
   i: integer;
+
+  { Only through a tool that runs the project's own scripts (with pip
+    alone the name would be whatever program has it), and only a plain
+    name, not a path. }
+  function RunButton(const AName: string): TGittanProjectCell;
+  var
+    k: integer;
+  begin
+    Result := ProjectCell('');
+    if (Run = '') or not PlainName(AName) then
+      Exit;
+    for k := 1 to Length(AName) do
+      if not (AName[k] in ['A'..'Z', 'a'..'z', '0'..'9', '.', '_', '-']) then
+        Exit;
+    Result := ProjectButton(rsRun, 'run:' + AName, Run + ShellName(AName));
+  end;
+
 begin
   Std := StandardSection(AContext, AManifest);
   Result := Std;
@@ -492,8 +509,7 @@ begin
   Scripts.RightLast := True;
   for i := 0 to High(Info.Scripts) do
     AddRow(Scripts, ProjectRow([ProjectCell(Info.Scripts[i].Name, psStrong),
-      ProjectCell(Info.Scripts[i].Target, psDim), ProjectButton(rsRun,
-      'run:' + Info.Scripts[i].Name, Run + ShellName(Info.Scripts[i].Name))]));
+      ProjectCell(Info.Scripts[i].Target, psDim), RunButton(Info.Scripts[i].Name)]));
   AddBlock(Result, Scripts);
   for i := 0 to High(Std.Blocks) do
     if Std.Blocks[i].Kind = pbChecks then

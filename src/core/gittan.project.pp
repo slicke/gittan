@@ -354,6 +354,18 @@ function FilesWithExt(const ARoot, AExt: string): TStringArray;
   the shell reads, in single quotes for sh (a quote in it as '\''), in
   double quotes on Windows. }
 function ShellName(const AName: string): string;
+{** Whether a name a repository's file gives can go on a command line
+  through ShellName as itself. Not one that starts with - or @, which a
+  tool takes for an option (fpc for a file of them), with a control
+  character (a line feed starts a second command in sh, a NUL ends the
+  line on Windows) or with a \, which fish, the login shell of some,
+  reads inside single quotes; on Windows not with a " or a % either,
+  which cmd reads inside its quotes. }
+function PlainName(const AName: string): boolean;
+{** A button that runs ACommandLine, or an empty cell when AName, which
+  goes on it, is no PlainName. }
+function ProjectNameButton(const AName, AText, ACommandName,
+  ACommandLine: string): TGittanProjectCell;
 
 implementation
 
@@ -1694,6 +1706,28 @@ begin
   finally
     Names.Free;
   end;
+end;
+
+function PlainName(const AName: string): boolean;
+var
+  i: integer;
+begin
+  if (AName = '') or (AName[1] in ['-', '@']) then
+    Exit(False);
+  for i := 1 to Length(AName) do
+    if (AName[i] < ' ') or (AName[i] in [#127, '\'])
+      {$IFDEF WINDOWS} or (AName[i] in ['"', '%']){$ENDIF} then
+      Exit(False);
+  Result := True;
+end;
+
+function ProjectNameButton(const AName, AText, ACommandName,
+  ACommandLine: string): TGittanProjectCell;
+begin
+  if PlainName(AName) then
+    Result := ProjectButton(AText, ACommandName, ACommandLine)
+  else
+    Result := ProjectCell('');
 end;
 
 function ShellName(const AName: string): string;

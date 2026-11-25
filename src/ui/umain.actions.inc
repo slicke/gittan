@@ -2790,7 +2790,9 @@ begin
     if ACommand = '' then
       RunDetached('wt.exe', ['-d', ARoot])
     else
-      RunDetached('wt.exe', ['-d', ARoot, 'cmd.exe', '/K', ACommand]);
+      { wt starts another tab at a ;, inside quotes too, but for \;. }
+      RunDetached('wt.exe', ['-d', ARoot, 'cmd.exe', '/K',
+        StringReplace(ACommand, ';', '\;', [rfReplaceAll])]);
   end
   else if ACommand = '' then
     RunDetached('cmd.exe', ['/C', 'start', 'cmd.exe'], ARoot)
