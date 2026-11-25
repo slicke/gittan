@@ -1589,7 +1589,9 @@ function ResolveReturns(const AText: string): string;
 {** Puts in AList the local branches of the repository in ADir that track
   a branch no longer on its remote: git ls-remote asks each remote once,
   since the remote-tracking ref stays until a fetch with --prune. A
-  remote that cannot be reached counts none of its branches as gone.
+  remote that cannot be reached counts none of its branches as gone, and
+  a branch that follows something else there (a pull request's
+  refs/pull/7/head) is not asked about.
   For threads: it goes to the network. }
 procedure GoneUpstreamsIn(const ADir: string; AList: TStrings);
 
@@ -2941,25 +2943,62 @@ begin
   end;
 end;
 
-{ Each line of for-each-ref is "branch<TAB>remote<TAB>refs/heads/x",
-  the last two empty without an upstream; each of ls-remote's is
+{ Whether a line of AFetch (remote.<name>.fetch) other than one for
+  branches writes ATracking: refs/pull/*/head:refs/remotes/origin/pr/*
+  writes refs/remotes/origin/pr/7. }
+function FetchedFromElsewhere(AFetch: TStrings; const ATracking: string): boolean;
+var
+  i, p: integer;
+  Spec, Dest, Tail: string;
+begin
+  for i := 0 to AFetch.Count - 1 do
+  begin
+    Spec := Trim(AFetch[i]);
+    if (Spec <> '') and (Spec[1] = '+') then
+      Delete(Spec, 1, 1);
+    p := Pos(':', Spec);
+    if (p = 0) or (Copy(Spec, 1, Length('refs/heads/')) = 'refs/heads/') then
+      Continue;
+    Dest := Copy(Spec, p + 1, MaxInt);
+    p := Pos('*', Dest);
+    if p = 0 then
+    begin
+      if Dest = ATracking then
+        Exit(True);
+      Continue;
+    end;
+    Tail := Copy(Dest, p + 1, MaxInt);
+    if (Length(ATracking) >= Length(Dest)) and
+      (Copy(ATracking, 1, p - 1) = Copy(Dest, 1, p - 1)) and
+      (Copy(ATracking, Length(ATracking) - Length(Tail) + 1, MaxInt) = Tail) then
+      Exit(True);
+  end;
+  Result := False;
+end;
+
+{ Each line of for-each-ref is "branch<TAB>remote<TAB>refs/heads/x<TAB>
+  refs/remotes/origin/x", the last three empty without an upstream; a
+  branch that follows another kind of ref (refs/pull/7/head), or whose
+  remote-tracking ref is fetched from one, is left to git's own [gone],
+  as ls-remote is asked for the branches alone; each of ls-remote's is
   "<id><TAB>refs/heads/x". Split at tabs alone: DelimitedText reads a
   quote, which a branch name may hold. }
 procedure GoneUpstreamsIn(const ADir: string; AList: TStrings);
 var
   Output, Err, Line, Remote: string;
   Fields: TStringArray;
-  Tracks, Heads, Asked: TStringList;
+  Tracks, Heads, Asked, Fetch: TStringList;
   i: integer;
 begin
   AList.Clear;
   if not RunGitIn(ADir, ['for-each-ref',
-    '--format=%(refname:lstrip=2)%09%(upstream:remotename)%09%(upstream:remoteref)',
-    'refs/heads'], Output, Err) then
+    '--format=%(refname:lstrip=2)%09%(upstream:remotename)%09%(upstream:remoteref)' +
+    '%09%(upstream)', 'refs/heads'], Output, Err) then
     Exit;
   Tracks := TStringList.Create;
   Heads := TStringList.Create;
   Asked := TStringList.Create;
+  Fetch := TStringList.Create;
   try
     Tracks.Text := Output;
     { Branch and remote names are case-sensitive: Feature gone while
@@ -2970,7 +3009,8 @@ begin
     for i := 0 to Tracks.Count - 1 do
     begin
       Fields := Tracks[i].Split([#9]);
-      if (Length(Fields) < 3) or (Fields[1] = '') or (Fields[2] = '') then
+      if (Length(Fields) < 4) or (Fields[1] = '') or
+        (Copy(Fields[2], 1, Length('refs/heads/')) <> 'refs/heads/') then
         Continue;
       Remote := Fields[1];
       if Asked.IndexOf(Remote) < 0 then
@@ -2989,12 +3029,20 @@ begin
       end;
       if (Heads.IndexOf(Remote + #9#9) < 0) and
         (Heads.IndexOf(Remote + #9 + Fields[2]) < 0) then
-        AList.Add(Fields[0]);
+      begin
+        Fetch.Clear;
+        if RunGitIn(ADir, ['config', '--get-all', 'remote.' + Remote + '.fetch'],
+          Output, Err) then
+          Fetch.Text := Output;
+        if not FetchedFromElsewhere(Fetch, Fields[3]) then
+          AList.Add(Fields[0]);
+      end;
     end;
   finally
     Tracks.Free;
     Heads.Free;
     Asked.Free;
+    Fetch.Free;
   end;
 end;
 

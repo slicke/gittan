@@ -4899,6 +4899,17 @@ begin
       Fail('could not delete the branch on the remote');
     AssertTrue(Trim(Git(['rev-parse', 'origin/' + Branch])) <> '');
     AssertEquals('deleted on the remote', Branch, GoneText);
+    { Pull requests fetched as branches: theirs are not among the heads. }
+    Git(['push', '-q', 'origin', 'loose:refs/pull/7/head']);
+    Git(['config', '--add', 'remote.origin.fetch', '+refs/pull/*/head:refs/remotes/origin/pr/*']);
+    Git(['fetch', '-q', 'origin']);
+    Git(['branch', 'pr7', 'loose']);
+    Git(['config', 'branch.pr7.remote', 'origin']);
+    Git(['config', 'branch.pr7.merge', 'refs/pull/7/head']);
+    Git(['branch', 'pr/7', 'loose']);
+    Git(['config', 'branch.pr/7.remote', 'origin']);
+    Git(['config', 'branch.pr/7.merge', 'refs/heads/pr/7']);
+    AssertEquals('a pull request is not gone', Branch, GoneText);
   finally
     RemoveTree(Remote);
   end;
