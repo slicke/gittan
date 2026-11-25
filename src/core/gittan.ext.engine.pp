@@ -3866,8 +3866,9 @@ begin
 end;
 
 { What a command of an extension granted AGranted gets of its context:
-  without data no file's path and no selected code, and no repository's
-  root unless exec or forge gives it anyway (git and programs, and the
+  without forge no login of the user's on the forge, as Gittan.forges
+  gives it; without data no file's path and no selected code, and no
+  repository's root or name unless exec or forge gives it anyway (git and programs, and the
   forge's tool, run there, which a Batch operation with either alone
   needs to name its repository: forge-overview.js asks gh of each). }
 function CommandContextFor(AGranted: TExtPermSet; const AJson: string): string;
@@ -3875,7 +3876,7 @@ var
   Data: TJSONData;
   Key: string;
 begin
-  if epData in AGranted then
+  if [epData, epForge] * AGranted = [epData, epForge] then
     Exit(AJson);
   Result := '{}';
   try
@@ -3886,8 +3887,13 @@ begin
   try
     if not (Data is TJSONObject) then
       Exit;
-    for Key in TStringArray.Create('path', 'selection', 'repo') do
-      if (Key <> 'repo') or ([epExec, epForge] * AGranted = []) then
+    if not (epForge in AGranted) then
+      TJSONObject(Data).Delete('login');
+    if not (epData in AGranted) then
+      for Key in TStringArray.Create('path', 'selection') do
+        TJSONObject(Data).Delete(Key);
+    if [epData, epExec, epForge] * AGranted = [] then
+      for Key in TStringArray.Create('repo', 'name') do
         TJSONObject(Data).Delete(Key);
     Result := Data.AsJSON;
   finally

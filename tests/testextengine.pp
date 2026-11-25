@@ -356,12 +356,12 @@ end;
 
 { Without data a command learns neither the file nor the code; exec and
   forge keep the repository's root, which they could run git or gh in
-  anyway. }
+  anyway, and its name; the login is forge's alone. }
 procedure TExtEngineTest.TestCommandContextNeedsData;
 const
   Script = 'Gittan.commands.register({id: "c", title: "C", run: function (c) {' +
-    ' globalThis.ran = [c.repo, c.path, c.selection, c.line].join("|"); }});';
-  Ctx = '{"repo": "/r", "path": "a.txt", "selection": "code", "line": 3}';
+    ' globalThis.ran = [c.repo, c.path, c.selection, c.line, c.name, c.login].join("|"); }});';
+  Ctx = '{"repo": "/r", "path": "a.txt", "selection": "code", "line": 3, "name": "r", "login": "me"}';
 var
   Plain, Exec, Forge, Data: PExtContextInfo;
 begin
@@ -377,10 +377,10 @@ begin
   AssertTrue(FEngine.RunCommand(TGittanExtRegistry.CommandKey('exec', 'c'), Ctx));
   AssertTrue(FEngine.RunCommand(TGittanExtRegistry.CommandKey('forge', 'c'), Ctx));
   AssertTrue(FEngine.RunCommand(TGittanExtRegistry.CommandKey('data', 'c'), Ctx));
-  AssertEquals('plain', '|||3', EvalIn(Plain^.Ctx, 'globalThis.ran'));
-  AssertEquals('exec', '/r|||3', EvalIn(Exec^.Ctx, 'globalThis.ran'));
-  AssertEquals('forge', '/r|||3', EvalIn(Forge^.Ctx, 'globalThis.ran'));
-  AssertEquals('data', '/r|a.txt|code|3', EvalIn(Data^.Ctx, 'globalThis.ran'));
+  AssertEquals('plain', '|||3||', EvalIn(Plain^.Ctx, 'globalThis.ran'));
+  AssertEquals('exec', '/r|||3|r|', EvalIn(Exec^.Ctx, 'globalThis.ran'));
+  AssertEquals('forge', '/r|||3|r|me', EvalIn(Forge^.Ctx, 'globalThis.ran'));
+  AssertEquals('data', '/r|a.txt|code|3|r|', EvalIn(Data^.Ctx, 'globalThis.ran'));
 end;
 
 procedure TExtEngineTest.TestCommandUnregister;
@@ -906,7 +906,7 @@ begin
     '  if (c.repo === "/loop") { var o = {}; o.self = o; return o; }' +
     '  return c.repo + "!"; }});' +
     'globalThis.typeOk = typeof Gittan._deliver + typeof Gittan.registerBatch +' +
-    '  typeof Gittan.registerForgeTab;', PermBaseline + [epExec]);
+    '  typeof Gittan.registerForgeTab;', PermBaseline + [epExec, epForge]);
   AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
   AssertEquals('deliver and the raw natives out of reach', 'undefinedundefinedundefined',
     EvalIn(Info^.Ctx, 'globalThis.typeOk'));

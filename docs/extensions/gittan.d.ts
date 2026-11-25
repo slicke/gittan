@@ -77,7 +77,7 @@ declare namespace Gittan {
 
   /** A command of a repository gets CommandContext; one of the GitHub view (where "forge") gets ForgeContext, and one in both either. */
   interface CommandContext { repo: string; path: string; line: number; selection: string }
-  interface ForgeContext { forge: string; login: string }
+  interface ForgeContext { forge: string; /** With the forge permission. */ login?: string }
   type RepoWhere = "menu" | "file" | "editor";
   const commands: {
     register(cmd: { id: string; title: string; where: "forge" | ["forge"]; run(ctx: ForgeContext): void }): boolean;
@@ -94,7 +94,7 @@ declare namespace Gittan {
     register(tab: { id: string; title: string; description?: string; render(ctx: ForgeContext): TabModel | TabRow[] | string | Promise<TabModel | TabRow[] | string>; action?(id: string, row: TabRow, ctx: ForgeContext): any }): boolean;
     unregister(id: string): boolean;
   };
-  interface BatchContext extends ForgeContext { repo: string; name: string; forge: string }
+  interface BatchContext extends ForgeContext { /** With data, exec or forge, as name. */ repo?: string; name?: string; forge: string }
   /** null, undefined, false, true, 0 and "" say nothing; url is an http(s) address. Not answered within 300 s is an error. */
   type BatchResult = string | number | boolean | { text: string; severity?: Severity; url?: string } | null | undefined;
   /** An operation of the Batch tab, run once for each repository picked, in turn. */

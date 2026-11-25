@@ -45,7 +45,7 @@ Gittan.commands.register({
 });
 ```
 
-In the GitHub view's own Extensions menu, `where: "forge"`; such a command gets `{forge, login}`: the forge's name and your login on it.
+In the GitHub view's own Extensions menu, `where: "forge"`; such a command gets `{forge, login}`: the forge's name and, with the `forge` permission, your login on it.
 
 ## Events
 
@@ -160,7 +160,7 @@ Gittan.forgeTabs.register({
   id: "waiting",
   title: "Waiting",
   description: "Your pull requests with no update in two weeks.",
-  render: async function (ctx) {               // ctx: {forge, login}; as the tab is shown, on Refresh and for another account
+  render: async function (ctx) {               // ctx: {forge, login (with forge)}; as the tab is shown, on Refresh and for another account
     return {
       text: "",                                // a paragraph over the rows
       rows: [{title: "acme/app#12 Fix", detail: "Updated 2026-09-01", tag: "draft", severity: "warn",
@@ -181,7 +181,7 @@ Gittan.batch.register({
   id: "open",
   title: "Open on GitHub",
   description: "How many pull requests are open in each.",
-  run: async function (ctx) {                  // ctx: {repo, name, forge, login}
+  run: async function (ctx) {                  // ctx: {repo, name, forge, login}; repo and name with data, exec or forge, login with forge
     var r = await Gittan.forges.gh.run(["pr", "list", "--json", "number"], {repo: ctx.repo});
     if (!r.ok) return {text: r.stderr, severity: "error"};
     var n = JSON.parse(r.stdout).length;
