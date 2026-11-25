@@ -27,6 +27,7 @@ type
     procedure TestGoSection;
     procedure TestGoRunTests;
     procedure TestGoAbsoluteReplace;
+    procedure TestGoNetworkReplace;
   end;
 
 implementation
@@ -187,6 +188,22 @@ begin
     AssertEquals('the absolute path is read as it is, the missing one warned of', 1,
       Length(TGittanGoKind.Checks(Ctx)));
     AssertTrue(Pos('-gone', TGittanGoKind.Checks(Ctx)[0].Text) > 0);
+  finally
+    Ctx.Free;
+  end;
+end;
+
+{ A share is not looked for, so nothing is said of it being missing. }
+procedure TProjGoTest.TestGoNetworkReplace;
+var
+  Ctx: TGittanProjectContext;
+begin
+  Put('go.mod', 'module x' + LE + 'replace a.b/c => \\no-such-host\share' + LE +
+    'replace d.e/f => //no-such-host/share' + LE + 'replace g.h/i => \??\UNC\no-such-host\x' + LE);
+  Put('go.sum', '');
+  Ctx := TGittanProjectContext.Create(FDir, '', nil);
+  try
+    AssertEquals(0, Length(TGittanGoKind.Checks(Ctx)));
   finally
     Ctx.Free;
   end;
