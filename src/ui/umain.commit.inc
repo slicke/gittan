@@ -1311,8 +1311,16 @@ begin
   else
     StatusNote(Format(rsCommitted, [Copy(Job.Id, 1, 7), Subject]));
   { A fetch, pull or push that waited for the background fetch and then
-    for this commit; last, so its busy note is not written over. }
-  if FPendingRemote and (FAutoFetchJob = nil) then
+    for this commit; last, so its busy note is not written over. One
+    that waits goes with a commit that failed, also when the background
+    fetch still runs: a push would go without the commit, and its end
+    close the notice that says why. }
+  if FPendingRemote and not Job.Ok then
+  begin
+    FPendingRemote := False;
+    StatusNote(rsWaitingDropped, True);
+  end
+  else if FPendingRemote and (FAutoFetchJob = nil) then
     RunPendingRemote;
 end;
 

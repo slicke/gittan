@@ -3403,6 +3403,7 @@ resourcestring
   rsGraphDragTip = 'Drag a commit onto %s to merge it.';
   rsGraphLoadFailed = 'Could not read the history';
   rsOpenFileFailed = 'Could not open %s';
+  rsOpenFileGone = 'The file is no longer there.';
   rsBmCommitPick = 'Pick a Commit in the Graph...';
   rsBmNewItem = '&New Branch...';
   rsToBranchMoveIncludedItem = 'Move &Included Files to New Branch...';
@@ -3794,6 +3795,7 @@ resourcestring
   rsNoticeLfsDownloading = 'Downloading %s from Git LFS';
   rsLfsDownloaded = 'Downloaded %s';
   rsLfsDownloadFailed = 'The Git LFS download failed';
+  rsWaitingDropped = 'The waiting fetch, pull or push was dropped, as the commit failed';
   rsWaitingForFetch = 'Waiting for the background fetch...';
   rsAlreadyWaiting = 'Another action is already waiting for the background fetch.';
   rsLfsMissingTitle = 'Git LFS is not installed';
@@ -6795,11 +6797,23 @@ end;
 { AFileName is not a const: callers pass FEditPath, which LeaveEdit
   clears, and a const would then name freed memory. }
 procedure TRepoFrame.OpenFile(AFileName: string);
+var
+  Failure: string;
 begin
   { A file dropped while a repository opens is shown instead. }
   AbandonOpenJob;
   FlushEdit;
   LeaveEdit;
+  { The editor's LoadFromFile does nothing for a missing file and raises
+    nothing: the text of the view before would pass for the file's, open
+    to edits and to a save over its name. }
+  if not FileExists(AFileName) then
+  begin
+    ShowSummary;
+    UpdateChangeNav;
+    BannerError(Format(rsOpenFileFailed, [ExtractFileName(AFileName)]), rsOpenFileGone);
+    Exit;
+  end;
   if FTranslations and IsPoPath(AFileName) then
   begin
     ShowTranslationFile(AFileName);
@@ -6819,23 +6833,32 @@ begin
   { A large file's load pumps messages for its progress, where the tab
     may be closed (InNestedLoop) or the watcher's refresh come. }
   HoldRefresh;
+  Failure := '';
   try
     try
       Edit.LoadFromFile(AFileName, []);
     except
-      { No permission, locked by another program on Windows, or gone
-        since it was listed: the view stays read-only, and says why. }
+      { No permission, or locked by another program on Windows. }
       on E: Exception do
       begin
-        Edit.ModeReadOnly := True;
-        BannerError(Format(rsOpenFileFailed, [ExtractFileName(AFileName)]), E.Message);
-        Exit;
+        Failure := E.Message;
+        if Failure = '' then
+          Failure := E.ClassName;
       end;
     end;
   finally
     ReleaseRefresh;
   end;
   Edit.ModeReadOnly := True;
+  { The load emptied the editor before it failed: the view before cannot
+    stay, so the summary comes. }
+  if Failure <> '' then
+  begin
+    ShowSummary;
+    UpdateChangeNav;
+    BannerError(Format(rsOpenFileFailed, [ExtractFileName(AFileName)]), Failure);
+    Exit;
+  end;
   SetLineStatesBand(Edit, False);
   Edit.FileName := AFileName;
   FHeader.SetFile(AFileName, -1);
