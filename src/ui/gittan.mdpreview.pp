@@ -98,7 +98,7 @@ implementation
 uses
   LCLIntf, URIParser, Math, BGRABitmap, BGRABitmapTypes, BGRASVG, BGRACanvas2D,
   InkMarkdown, gittan.imagediff, gittan.richdiff, gittan.theme, gittan.git,
-  gittan.repofiles;
+  gittan.repofiles, gittan.svgguard, gittan.textfile;
 
 resourcestring
   rsCannotReadSvg = 'The SVG cannot be read.';
@@ -158,14 +158,14 @@ var
   Svg: TBGRASVG;
 begin
   Result := PointF(0, 0);
-  if AText = '' then
+  if (AText = '') or XmlTooDeep(AText) then
     Exit;
   try
     Svg := TBGRASVG.CreateFromString(AText);
     try
       Result := SvgSize(Svg);
       { Too large to draw: shown as one that cannot be read. }
-      if ImageTooLarge(Result.X, Result.Y) then
+      if ImageTooLarge(Result.X, Result.Y) or SvgTooHeavy(Svg) then
         Result := PointF(0, 0);
     finally
       Svg.Free;
@@ -176,7 +176,7 @@ begin
 end;
 
 { AText, an SVG, drawn AZoom times its size; nil when it cannot be read,
-  has no size or would be over MaxImagePixels. }
+  has no size, would be over MaxImagePixels or is too heavy to draw. }
 function SvgBitmap(const AText: string; AZoom: single): TBGRABitmap;
 var
   Svg: TBGRASVG;
@@ -185,11 +185,14 @@ var
 begin
   Result := nil;
   Svg := nil;
+  if XmlTooDeep(AText) then
+    Exit;
   try
     try
       Svg := TBGRASVG.CreateFromString(AText);
       Size := SvgSize(Svg);
-      if (Size.X < 1) or (Size.Y < 1) or ImageTooLarge(Size.X * AZoom, Size.Y * AZoom) then
+      if (Size.X < 1) or (Size.Y < 1) or ImageTooLarge(Size.X * AZoom, Size.Y * AZoom) or
+        SvgTooHeavy(Svg) then
         Exit;
       Result := TBGRABitmap.Create(Ceil(Size.X * AZoom), Ceil(Size.Y * AZoom));
       C2d := TBGRACanvas2D.Create(Result);
