@@ -36,7 +36,7 @@ type
 
   TGittanMarkdownPreview = class(TInkPage)
   private
-    FFileName, FText, FOldText: string;
+    FFileName, FText, FOldText, FRoot: string;
     FCompare: boolean;
     FSvgSerial, FSvgZoom: integer;
     FBack, FFore, FDim, FLink: TColor;
@@ -48,6 +48,7 @@ type
     procedure ShowSvg(const AText: string);
     procedure ShowSvgChange;
     procedure ShowRichDiff;
+    function MayRead(const APath: string): boolean;
     procedure PageResource(Sender: TObject; const URL: string; Destination: TStream;
       var Handled: boolean);
     procedure PageLinkActivate(Sender: TObject; const Link: TInkLinkInfo;
@@ -74,6 +75,9 @@ type
       code are measured from. }
     procedure SetFontSize(ASize: integer);
     property FileName: string read FFileName;
+    {** The repository's folder. A page reads images and style sheets
+      below it and below its own folder, and nothing else. }
+    property Root: string read FRoot write FRoot;
     property OnOpenFile: TGittanOpenFileEvent read FOnOpenFile write FOnOpenFile;
   end;
 
@@ -93,7 +97,8 @@ implementation
 
 uses
   LCLIntf, URIParser, Math, BGRABitmap, BGRABitmapTypes, BGRASVG, BGRACanvas2D,
-  InkMarkdown, gittan.imagediff, gittan.richdiff, gittan.theme, gittan.git;
+  InkMarkdown, gittan.imagediff, gittan.richdiff, gittan.theme, gittan.git,
+  gittan.repofiles;
 
 resourcestring
   rsCannotReadSvg = 'The SVG cannot be read.';
@@ -518,10 +523,21 @@ begin
   LoadHTML(Html, FilenameToURI(FFileName));
 end;
 
+{ Whether the page may read the file APath: one of the repository's, or
+  in the folder of the page's file. A page of a cloned repository names
+  any path, and on Windows looking one up on //host/share signs in to
+  that host. }
+function TGittanMarkdownPreview.MayRead(const APath: string): boolean;
+begin
+  Result := LiesInFolder(FRoot, APath) or
+    LiesInFolder(ExtractFileDir(FFileName), APath);
+end;
+
 { The SVG file shown, both sides of a changed one, and an SVG image of a
   page, drawn as a PNG: the file at the screen's pixels at the width
   ShowSvg or ShowSvgChange set, an image at its own size, since the
-  page draws it at the PNG's. }
+  page draws it at the PNG's. A file the page may not read is handled
+  with nothing in it, since LazInk would open it by itself. }
 procedure TGittanMarkdownPreview.PageResource(Sender: TObject; const URL: string;
   Destination: TStream; var Handled: boolean);
 var
@@ -536,7 +552,14 @@ begin
       Handled := RenderSvg(FText, FSvgZoom * GetCanvasScaleFactor, Destination);
     Exit;
   end;
-  if not URIToFilename(URL, Path) or not FileExists(Path) then
+  if not URIToFilename(URL, Path) then
+    Exit;
+  if not MayRead(Path) then
+  begin
+    Handled := True;
+    Exit;
+  end;
+  if not FileExists(Path) then
     Exit;
   if not IsSvgPath(Path) then
   begin
@@ -626,6 +649,9 @@ begin
   end;
   if URIToFilename(Url, Path) then
   begin
+    { No file on another host either. }
+    if (Copy(Path, 1, 2) = PathDelim + PathDelim) and not MayRead(Path) then
+      Exit;
     if Assigned(FOnOpenFile) and FileExists(Path) then
       FOnOpenFile(Self, Path);
     Exit;

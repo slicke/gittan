@@ -26,6 +26,7 @@ type
     procedure TestListSkipsFolderLinks;
     procedure TestListSkipsFileLinks;
     procedure TestNoWriteThroughLink;
+    procedure TestLiesInFolder;
     procedure TestPatterns;
     procedure TestIsRepoFile;
     procedure TestAddMakesFile;
@@ -189,6 +190,25 @@ end;
 begin
 end;
 {$ENDIF}
+
+procedure TRepoFilesTest.TestLiesInFolder;
+var
+  Root: string;
+begin
+  Root := IncludeTrailingPathDelimiter(FDir);
+  AssertTrue(LiesInFolder(FDir, Root + 'a.png'));
+  AssertTrue('a trailing delimiter', LiesInFolder(Root, Root + 'img' + PathDelim + 'a.png'));
+  AssertTrue('back inside', LiesInFolder(FDir, Root + 'docs' + PathDelim + '..' +
+    PathDelim + 'a.png'));
+  AssertFalse('above', LiesInFolder(FDir, Root + '..' + PathDelim + 'a.png'));
+  AssertFalse('a folder with a longer name', LiesInFolder(FDir, FDir + 'x' +
+    PathDelim + 'a.png'));
+  AssertFalse('another host', LiesInFolder(FDir, PathDelim + PathDelim + 'host' +
+    PathDelim + 'share' + PathDelim + 'x.png'));
+  AssertFalse('forward slashes', LiesInFolder(FDir, '//host/share/x.png'));
+  AssertFalse(LiesInFolder('', Root + 'a.png'));
+  AssertFalse(LiesInFolder(FDir, ''));
+end;
 
 procedure TRepoFilesTest.TestListEmpty;
 var

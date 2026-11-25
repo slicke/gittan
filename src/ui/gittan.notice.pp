@@ -88,6 +88,8 @@ type
     procedure StylePage;
     procedure PageLinkActivate(Sender: TObject; const Link: TInkLinkInfo;
       var Handled: boolean);
+    procedure PageResource(Sender: TObject; const URL: string;
+      Destination: TStream; var Handled: boolean);
     procedure Outside;
     procedure Reveal;
     procedure Place;
@@ -204,6 +206,7 @@ begin
   FPage.BorderStyle := bsNone;
   FPage.TabStop := False;
   FPage.OnLinkActivate := @PageLinkActivate;
+  FPage.OnResource := @PageResource;
   FMarkColor := clHighlight;
   FTimer := TTimer.Create(Self);
   FTimer.Enabled := False;
@@ -271,6 +274,14 @@ begin
     'pre, code { background: ' + Css(MixColor(FBack, FText, 0.08)) + '; }' +
     'code { padding: 0.1em 0; }' +
     'pre code { background: transparent; padding: 0; }';
+end;
+
+{ An agent's answer shows no files: it may repeat a path a repository
+  planted, and LazInk opens any it names. }
+procedure TGittanNotice.PageResource(Sender: TObject; const URL: string;
+  Destination: TStream; var Handled: boolean);
+begin
+  Handled := True;
 end;
 
 { An answer's links to the web go to the browser, any other to OnLink;
