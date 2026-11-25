@@ -2201,7 +2201,10 @@ end;
   Windows (whose variable is "Path", and whose PATH is kept as it is).
   Windows takes a name in any case, so there ASkip is matched so too:
   Copilot_Allow_All is the COPILOT_ALLOW_ALL it would read. }
-{$ifndef windows}
+{$ifdef windows}
+function SetEnvironmentVariableW(AName, AValue: PWideChar): LongBool; stdcall;
+  external 'kernel32' name 'SetEnvironmentVariableW';
+{$else}
 function libc_unsetenv(AName: PChar): cint; cdecl; external 'c' name 'unsetenv';
 {$endif}
 
