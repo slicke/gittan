@@ -24,7 +24,8 @@ const
   RemoteAliveInterval = 15;
   RemoteAliveCount = 4;
   {** A transfer over HTTP below RemoteLowSpeedLimit bytes a second for
-    RemoteLowSpeedTime seconds is given up: one that has stalled. }
+    RemoteLowSpeedTime seconds is given up: one that has stalled. Not a
+    push, where a server may be as silent while it runs its hooks. }
   RemoteLowSpeedLimit = 1;
   RemoteLowSpeedTime = 60;
 
@@ -607,8 +608,9 @@ type
       RemoteLowSpeedLimit bytes a second for RemoteLowSpeedTime seconds
       is given up (GIT_HTTP_LOW_SPEED_LIMIT and _TIME), unless the
       environment or the config (http.lowSpeedLimit or lowSpeedTime,
-      for any URL) sets either. }
-    function RemoteEnvironment: TStringArray;
+      for any URL) sets either; not for a push (APush), whose server may
+      be silent for long and which the user stops instead. }
+    function RemoteEnvironment(APush: boolean = False): TStringArray;
     {** Whether AName may name a branch (`git check-ref-format --branch`). }
     function IsBranchName(const AName: string): boolean;
     {** Whether AName may name a tag (`git check-ref-format refs/tags/<name>`). }
@@ -1235,9 +1237,9 @@ type
       thread. }
     property OnOutput: TGittanOutputEvent read FOnOutput write FOnOutput;
     {** Asked as a fetch runs (Fetch, FetchPullRequest, the download of
-      LfsDownload); True ends its git, which then fails with no reason.
-      Called in the caller's thread. A pull, a push or a checkout is
-      never ended halfway, so only a job that fetches sets it. }
+      LfsDownload) or a push; True ends its git, which then fails with no
+      reason. Called in the caller's thread. A pull or a checkout is
+      never ended halfway, so only a job that fetches or pushes sets it. }
     property Cancel: TGittanCancelEvent read FCancel write FCancel;
     {** Pushes, the deletions on a remote among them, without the
       pre-push hook (`git push --no-verify`). }
@@ -1545,10 +1547,10 @@ function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
   besides Gittan's own: ssh in batch mode with AConnectTimeout seconds
   to connect and keepalives, unless the environment or the config read
   in ADir (the repository's, else the user's) says how to run ssh, and
-  a lowest speed over HTTP, unless they set one (see
-  TGittanRepo.RemoteEnvironment). }
-function RemoteEnvironmentIn(const ADir: string;
-  AConnectTimeout: integer = 0): TStringArray;
+  a lowest speed over HTTP, unless they set one or it is for a push
+  (APush) (see TGittanRepo.RemoteEnvironment). }
+function RemoteEnvironmentIn(const ADir: string; AConnectTimeout: integer = 0;
+  APush: boolean = False): TStringArray;
 
 {** Clones the repository at AUrl into the folder ATarget (`git clone
   --progress`, with --recurse-submodules when ASubmodules is set), which
@@ -4915,7 +4917,8 @@ end;
   Fetch, pull and push go to the network: they run with
   RemoteEnvironment, and their output on stderr (progress, "To ...") is
   no failure. }
-function RemoteEnvironmentIn(const ADir: string; AConnectTimeout: integer): TStringArray;
+function RemoteEnvironmentIn(const ADir: string; AConnectTimeout: integer;
+  APush: boolean): TStringArray;
 var
   Output, Err, Line, Key: string;
   OwnSsh, OwnSpeed: boolean;
@@ -4927,7 +4930,7 @@ begin
     AConnectTimeout := RemoteConnectTimeout;
   OwnSsh := (EnvironmentVariable('GIT_SSH_COMMAND') <> '') or
     (EnvironmentVariable('GIT_SSH') <> '');
-  OwnSpeed := (EnvironmentVariable('GIT_HTTP_LOW_SPEED_LIMIT') <> '') or
+  OwnSpeed := APush or (EnvironmentVariable('GIT_HTTP_LOW_SPEED_LIMIT') <> '') or
     (EnvironmentVariable('GIT_HTTP_LOW_SPEED_TIME') <> '');
   { One git for both: the keys come lowercased but for a URL's part. }
   if (ADir <> '') and not (OwnSsh and OwnSpeed) and RunGitIn(ADir,
@@ -4961,9 +4964,9 @@ begin
       'GIT_HTTP_LOW_SPEED_TIME=' + IntToStr(RemoteLowSpeedTime)]);
 end;
 
-function TGittanRepo.RemoteEnvironment: TStringArray;
+function TGittanRepo.RemoteEnvironment(APush: boolean): TStringArray;
 begin
-  Result := RemoteEnvironmentIn(FRoot);
+  Result := RemoteEnvironmentIn(FRoot, 0, APush);
 end;
 
 { git clone runs in the parent, so a relative URL means what it says
@@ -5080,17 +5083,19 @@ var
   Output, Err: string;
   Args: TStringArray;
   i: integer;
+  IsPush: boolean;
 begin
   Args := nil;
   SetLength(Args, Length(AArgs));
   for i := 0 to High(AArgs) do
     Args[i] := AArgs[i];
-  if FNoVerify and (Length(Args) > 0) and (Args[0] = 'push') then
+  IsPush := (Length(Args) > 0) and (Args[0] = 'push');
+  if FNoVerify and IsPush then
     Insert('--no-verify', Args, 1);
   Asked := nil;
   if ACancellable then
     Asked := FCancel;
-  Result := (FRoot <> '') and RunGitEnv(FRoot, Args, RemoteEnvironment, Output, Err, '',
+  Result := (FRoot <> '') and RunGitEnv(FRoot, Args, RemoteEnvironment(IsPush), Output, Err, '',
     FOnOutput, Asked);
   if not Result then
     FError := Err;

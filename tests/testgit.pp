@@ -3053,6 +3053,8 @@ begin
       '-o ServerAliveInterval=15 -o ServerAliveCountMax=4', Env[0]);
     AssertEquals('GIT_HTTP_LOW_SPEED_LIMIT=1', Env[1]);
     AssertEquals('GIT_HTTP_LOW_SPEED_TIME=60', Env[2]);
+    Env := FRepo.RemoteEnvironment(True);
+    AssertEquals('a push has no lowest speed', 1, Length(Env));
     Env := RemoteEnvironmentIn(FDir, 20);
     AssertTrue('a shorter time to connect',
       Pos(' -o ConnectTimeout=20 ', Env[0]) > 0);

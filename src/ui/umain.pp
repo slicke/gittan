@@ -668,7 +668,8 @@ type
     FRemoteJob: TGittanRemoteJob;
     FRemoteAhead: integer;
     FRemoteHead: string;
-    FFetchItem, FPullItem, FPushItem, FForcePushItem, FPushNoVerifyItem: TMenuItem;
+    FFetchItem, FPullItem, FPushItem, FForcePushItem, FPushNoVerifyItem,
+      FStopPushItem: TMenuItem;
     { Commit > Commit abc1234: the commit menu of the commit shown, and in
       its place Pick a Commit in the Graph... while none is. }
     FBranchCommitMenu, FPickCommitItem: TMenuItem;
@@ -1040,6 +1041,11 @@ type
     FNotice: TGittanNotice;
     FNoticeTimer: TTimer;
     FNoticeHook: boolean;
+    { Looks each second whether a push has gone silent: past
+      PushSilentFrom the status bar and the notice count the seconds,
+      past PushStopFrom the notice has a Stop button. }
+    FPushTimer: TTimer;
+    FPushSilent, FPushStop: boolean;
     { The notice tells of a failed commit: its first button commits
       again. }
     FNoticeCommit: boolean;
@@ -2401,6 +2407,10 @@ type
     procedure RemoteJobDone(Sender: TObject);
     procedure RemoteJobOutput(Sender: TObject);
     procedure NoticeTimerTimer(Sender: TObject);
+    procedure PushTimerTimer(Sender: TObject);
+    procedure StopPush;
+    procedure ShowPushBusy;
+    procedure MenuStopPushClick(Sender: TObject);
     procedure NoticeButton(Sender: TObject; AIndex: integer);
     procedure ShowRemoteFailure(AJob: TGittanRemoteJob; AHookFailed: boolean);
     procedure ShowRemoteNotice;
@@ -3146,6 +3156,13 @@ resourcestring
   rsNoticeDeleting = 'Deleting %s on the remote';
   rsHookFailed = 'The pre-push hook failed';
   rsPushAgain = 'Push Again';
+  rsPushSilent = 'Waiting for the server, %s';
+  rsPushHookSilent = 'Running the pre-push hook, %s without output';
+  rsStopPushMenu = 'Stop Push';
+  rsStopAction = 'Stop';
+  rsStoppingPush = 'Stopping the push...';
+  rsPushStopped = 'The push was stopped';
+  rsPushStoppedDetail = 'The server may have taken it already; a fetch shows whether it did.';
   rsPushNoVerifyMenu = 'Push Without Hooks';
   rsPushNoVerifyAction = 'Push Without Hooks';
   rsNoVerifyLfsTitle = 'Push Without Hooks';
@@ -4266,6 +4283,10 @@ const
   PillPause = 250;
   { Before the notice shows for a fetch, pull or push without a hook. }
   NoticeDelay = 1000;
+  { How long a push may be silent before the seconds are counted, and
+    before it can be stopped from the notice, in milliseconds. }
+  PushSilentFrom = 10000;
+  PushStopFrom = 60000;
   { How often the timer looks whether a background fetch is due. }
   AutoFetchCheck = 60000;
   { How long one parse may take before a lookup or the indexer gives up
@@ -4854,6 +4875,10 @@ begin
   FNoticeTimer.Enabled := False;
   FNoticeTimer.Interval := NoticeDelay;
   FNoticeTimer.OnTimer := @NoticeTimerTimer;
+  FPushTimer := TTimer.Create(Self);
+  FPushTimer.Enabled := False;
+  FPushTimer.Interval := 1000;
+  FPushTimer.OnTimer := @PushTimerTimer;
   FAutoFetchTimer := TTimer.Create(Self);
   FAutoFetchTimer.Interval := AutoFetchCheck;
   FAutoFetchTimer.OnTimer := @AutoFetchTimerTimer;
@@ -6136,6 +6161,7 @@ begin
   FForcePushItem := AddItem(RepoMenu, rsForcePushMenu, ShortCut(VK_P, [ssModifier, ssShift,
     ssAlt]), @MenuForcePushClick);
   FPushNoVerifyItem := AddItem(RepoMenu, rsPushNoVerifyMenu, 0, @MenuPushNoVerifyClick);
+  FStopPushItem := AddItem(RepoMenu, rsStopPushMenu, 0, @MenuStopPushClick);
   FFetchItem := AddItem(RepoMenu, rsFetchMenu, ShortCut(VK_F, [ssModifier, ssAlt]),
     @MenuFetchClick);
   RepoMenu.Add(NewLine);

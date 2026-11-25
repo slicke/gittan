@@ -41,6 +41,8 @@ begin
   FPushItem.Enabled := Can;
   FForcePushItem.Enabled := Can and FHasUpstream;
   FPushNoVerifyItem.Enabled := Can;
+  FStopPushItem.Enabled := (FRemoteJob <> nil) and FRemoteJob.Stoppable and
+    not FRemoteJob.Stopped;
   FRemotesItem.Enabled := Can;
   FIssueTrackerItem.Enabled := Can;
   FCloneItem.Enabled := (FRemoteJob = nil) and (FCommitJob = nil);
@@ -112,24 +114,16 @@ begin
   FRemoteJob.OnOutput := @RemoteJobOutput;
   if AKind = rkLfsFetch then
     FRemoteJob.Refs := FLfsRefs;
+  FPushSilent := False;
+  FPushStop := False;
   FRemoteJob.Start;
-  if FNoticeHook then
-    FStatus.ShowBusy(rsRunningHook)
+  FPushTimer.Enabled := FRemoteJob.Stoppable;
+  if FRemoteJob.Stoppable then
+    ShowPushBusy
   else
     case AKind of
       rkFetch: FStatus.ShowBusy(rsFetching, HintFetch);
       rkPull: FStatus.ShowBusy(rsPulling, HintDown);
-      rkPush: FStatus.ShowBusy(rsPushing, HintUp);
-      rkForcePush: FStatus.ShowBusy(rsForcePushing, HintUp);
-      rkPushBranch:
-        FStatus.ShowBusy(Format(rsPushingTo, [AArg, ARemote]), HintUp);
-      rkPushTag:
-        if AArg = '' then
-          FStatus.ShowBusy(Format(rsPushingTags, [ARemote]), HintUp)
-        else
-          FStatus.ShowBusy(Format(rsPushingTo, [AArg, ARemote]), HintUp);
-      rkDeleteRemote, rkDeleteRemoteTag:
-        FStatus.ShowBusy(Format(rsDeletingRemote, [AArg]), HintUp);
       rkSubmoduleUpdate:
         if AArg = '' then
           FStatus.ShowBusy(rsSubUpdatingAll)
@@ -151,11 +145,108 @@ begin
   UpdateCommitState;
 end;
 
+{ What the status bar says of the push or the deletion under way. }
+procedure TRepoFrame.ShowPushBusy;
+begin
+  if FNoticeHook then
+  begin
+    FStatus.ShowBusy(rsRunningHook);
+    Exit;
+  end;
+  case FRemoteJob.Kind of
+    rkPush: FStatus.ShowBusy(rsPushing, HintUp);
+    rkForcePush: FStatus.ShowBusy(rsForcePushing, HintUp);
+    rkPushBranch:
+      FStatus.ShowBusy(Format(rsPushingTo, [FRemoteJob.Arg, FRemoteJob.Remote]), HintUp);
+    rkPushTag:
+      if FRemoteJob.Arg = '' then
+        FStatus.ShowBusy(Format(rsPushingTags, [FRemoteJob.Remote]), HintUp)
+      else
+        FStatus.ShowBusy(Format(rsPushingTo, [FRemoteJob.Arg, FRemoteJob.Remote]), HintUp);
+    rkDeleteRemote, rkDeleteRemoteTag:
+      FStatus.ShowBusy(Format(rsDeletingRemote, [FRemoteJob.Arg]), HintUp);
+  end;
+end;
+
+{ A push has no time limit, as a server running its hooks may be as
+  silent as one that is gone: the silence is shown, and after a minute
+  the user may stop it. Nothing more is said until git writes again. }
+procedure TRepoFrame.PushTimerTimer(Sender: TObject);
+var
+  Ms: QWord;
+  Told: string;
+begin
+  if (FRemoteJob = nil) or not FRemoteJob.Stoppable or FRemoteJob.Stopped then
+  begin
+    FPushTimer.Enabled := False;
+    Exit;
+  end;
+  Ms := FRemoteJob.SilentMs;
+  if Ms < PushSilentFrom then
+  begin
+    if not FPushSilent then
+      Exit;
+    FPushSilent := False;
+    ShowPushBusy;
+    if FNotice.Visible and FNotice.Busy then
+      FNotice.Title := RemoteNoticeTitle;
+    if FPushStop then
+    begin
+      FPushStop := False;
+      if FNotice.Visible and FNotice.Busy then
+        FNotice.SetButtons([]);
+    end;
+    Exit;
+  end;
+  FPushSilent := True;
+  Told := RemoteNoticeTitle;
+  if FNoticeHook then
+    FStatus.ShowBusy(Told)
+  else
+    FStatus.ShowBusy(Told, HintUp);
+  { The notice comes back when it can stop the push, if it was closed. }
+  if not FPushStop and (Ms >= PushStopFrom) then
+  begin
+    FPushStop := True;
+    ShowRemoteNotice;
+  end
+  else if FNotice.Visible and FNotice.Busy then
+    FNotice.Title := Told;
+end;
+
+procedure TRepoFrame.StopPush;
+begin
+  if (FRemoteJob = nil) or not FRemoteJob.Stoppable then
+    Exit;
+  FRemoteJob.StopPush;
+  FPushTimer.Enabled := False;
+  FNoticeTimer.Enabled := False;
+  FNotice.Close;
+  FStatus.ShowBusy(rsStoppingPush, HintUp);
+  UpdateRemoteItems;
+end;
+
+procedure TRepoFrame.MenuStopPushClick(Sender: TObject);
+begin
+  StopPush;
+end;
+
 function TRepoFrame.RemoteNoticeTitle: string;
+var
+  Seconds: QWord;
 begin
   Result := '';
   if FRemoteJob = nil then
     Exit;
+  if FPushSilent then
+  begin
+    Seconds := FRemoteJob.SilentMs div 1000;
+    Result := Format('%d:%.2d', [Seconds div 60, Seconds mod 60]);
+    if FNoticeHook then
+      Exit(Format(rsPushHookSilent, [Result]))
+    else
+      Exit(Format(rsPushSilent, [Result]));
+  end;
   if FNoticeHook then
     Exit(rsNoticeHook);
   case FRemoteJob.Kind of
@@ -197,6 +288,8 @@ begin
     Exit;
   FNotice.DetailFont.Assign(Edit.Font);
   FNotice.Popup(RemoteNoticeTitle, FRemoteJob.Progress, True);
+  if FPushStop then
+    FNotice.SetButtons([rsStopAction]);
 end;
 
 procedure TRepoFrame.NoticeTimerTimer(Sender: TObject);
@@ -215,11 +308,15 @@ begin
   if FNoticeHook and PushTransferStarted(Job.Progress) then
   begin
     FNoticeHook := False;
-    if Job.Kind in [rkDeleteRemote, rkDeleteRemoteTag] then
-      FStatus.ShowBusy(Format(rsDeletingRemote, [Job.Arg]), HintUp)
-    else
-      FStatus.ShowBusy(rsPushing, HintUp);
+    { git has just written, so the count of a silent hook ends too. }
+    FPushSilent := False;
+    ShowPushBusy;
     FNotice.Title := RemoteNoticeTitle;
+    if FPushStop then
+    begin
+      FPushStop := False;
+      FNotice.SetButtons([]);
+    end;
   end;
   if FNotice.Visible then
     FNotice.Detail := Job.Progress;
@@ -230,7 +327,7 @@ end;
 procedure TRepoFrame.RemoteJobDone(Sender: TObject);
 var
   Job: TGittanRemoteJob;
-  HookFailed, Always: boolean;
+  HookFailed, Always, Stopped: boolean;
   Count: integer;
   Msg: string;
   Choice: TModalResult;
@@ -243,6 +340,9 @@ begin
     pre-push hook said no. }
   HookFailed := FNoticeHook and not PushTransferStarted(Job.Progress);
   FNoticeHook := False;
+  FPushTimer.Enabled := False;
+  FPushSilent := False;
+  FPushStop := False;
   FRemoteJob := nil;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
@@ -264,11 +364,26 @@ begin
   RefreshRepository;
   UpdateRemoteItems;
   UpdateCommitState;
+  { git was ended, and gives no reason; one that failed on its own as it
+    was stopped does, and is told below. }
+  Stopped := Job.Stopped and not Job.Ok and (Job.Error = '');
   if Job.Kind in [rkPush, rkForcePush, rkPushBranch, rkPushTag] then
-    ExtEmit('push.after', TJSONObject.Create(['ok', Job.Ok, 'error', Job.Error,
-      'kind', ExtRemoteKind(Job.Kind)]))
+    ExtEmit('push.after', TJSONObject.Create(['ok', Job.Ok, 'error',
+      BoolToStr(Stopped, rsPushStopped, Job.Error), 'kind', ExtRemoteKind(Job.Kind)]))
   else if Job.Kind = rkPull then
     ExtEmit('pull.after', TJSONObject.Create(['ok', Job.Ok, 'error', Job.Error]));
+  if Stopped then
+  begin
+    FAfterFetchRef := '';
+    FStatus.ShowMessage('', stNormal, 0);
+    { A hook still at work has let nothing through to the server. }
+    if HookFailed then
+      StatusNote(rsPushStopped)
+    else
+      FBanner.AddAction(rsPushStopped, rsPushStoppedDetail, bkInfo, 0, rsFetchItem,
+        @MenuFetchClick);
+    Exit;
+  end;
   if Job.Kind = rkFetchPull then
   begin
     PullFetchDone(Job);
@@ -541,6 +656,12 @@ end;
 
 procedure TRepoFrame.NoticeButton(Sender: TObject; AIndex: integer);
 begin
+  { The notice of a push under way has Stop alone. }
+  if FNotice.Busy then
+  begin
+    StopPush;
+    Exit;
+  end;
   case AIndex of
     0:
       begin
@@ -586,7 +707,8 @@ end;
 { A fetch (the background one, or one the user started) is given up,
   its git ended, as nothing is lost with it; any other job goes on
   without a handler when the repository changes, and quitting waits for
-  it, as a pull or a push stopped halfway would leave a mess. }
+  it, as a pull stopped halfway would leave a mess; a push is waited for
+  until it has been silent for a minute (TGittanRemoteJob.Leave). }
 procedure TRepoFrame.StopRemoteJob(AWait: boolean);
 begin
   FPendingRemote := False;
@@ -607,6 +729,9 @@ begin
   if FRemoteJob = nil then
     Exit;
   FNoticeTimer.Enabled := False;
+  FPushTimer.Enabled := False;
+  FPushSilent := False;
+  FPushStop := False;
   FNotice.Close;
   FAfterFetchRef := '';
   if FRemoteJob.Abortable then
@@ -616,6 +741,7 @@ begin
   end
   else
   begin
+    FRemoteJob.Leave(AWait, FNoticeHook);
     FRemoteJob.Stop(AWait);
     if AWait then
       FRemoteJob.Free
