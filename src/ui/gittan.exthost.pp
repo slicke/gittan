@@ -30,10 +30,10 @@ type
     constructor Create(AWindow: TRepoWindow);
     procedure Alert(const AName, AText: string); override;
     function Confirm(const AName, AText: string): boolean; override;
-    function Prompt(const ACaption, AText, ADefault: string; out AValue: string): boolean; override;
+    function Prompt(const AName, ACaption, AText, ADefault: string; out AValue: string): boolean; override;
     function Message(const AName, ATitle, AText: string; AKind: TExtMessageKind;
       const AButtons: array of string; ADefault, ACancel: integer): integer; override;
-    function Select(const ACaption, AText: string; const AOptions: array of string): integer; override;
+    function Select(const AName, ACaption, AText: string; const AOptions: array of string): integer; override;
     procedure ShowLog(const AName, ATitle, AText: string); override;
     procedure ReportError(const ATitle, ADetail: string); override;
     function AskPermission(const AName, AFile, AAuthor: string;
@@ -46,7 +46,7 @@ type
     procedure AddCard(const ARoot: string; const ACard: TGittanReviewThread); override;
     procedure ClearCards(const ARoot, AExtId: string); override;
     procedure SetStatus(const ARoot, AText: string; ASeconds: integer); override;
-    procedure Notify(const ARoot, ATitle, ADetail: string; AError: boolean); override;
+    procedure Notify(const ARoot, AName, ATitle, ADetail: string; AError: boolean); override;
     procedure OpenFile(const ARoot, APath: string; ALine: integer); override;
     procedure CommandsChanged; override;
     function ForgeViewForge: string; override;
@@ -125,11 +125,11 @@ begin
     FromLine(AName)) = mrYes;
 end;
 
-function TGittanExtUIHost.Prompt(const ACaption, AText, ADefault: string;
+function TGittanExtUIHost.Prompt(const AName, ACaption, AText, ADefault: string;
   out AValue: string): boolean;
 begin
   AValue := ADefault;
-  Result := AskText(ACaption, AText, AValue, nil, '', '', True);
+  Result := AskText(ACaption, AText, AValue, nil, '', FromLine(AName), True);
   if not Result then
     AValue := '';
 end;
@@ -223,7 +223,7 @@ begin
     Result := -1;
 end;
 
-function TGittanExtUIHost.Select(const ACaption, AText: string;
+function TGittanExtUIHost.Select(const AName, ACaption, AText: string;
   const AOptions: array of string): integer;
 var
   List: TStringList;
@@ -233,7 +233,8 @@ begin
   try
     for Option in AOptions do
       List.Add(Option);
-    Result := InputCombo(ACaption, AText, List);
+    { First, where no text of the extension's can push it off. }
+    Result := InputCombo(ACaption, FromLine(AName) + LineEnding + AText, List);
   finally
     List.Free;
   end;
@@ -250,7 +251,8 @@ var
   Frame: TRepoFrame;
 begin
   Frame := FrameOf('');
-  if Frame <> nil then
+  { The forge view lies over the frame's banner, as for Notify. }
+  if (Frame <> nil) and (FWindow.ForgeViewForge = '') then
     Frame.ExtNotify(ATitle, ADetail, True)
   else
     TellDlg(rsExtError, ATitle + LineEnding + ADetail, mtError);
@@ -360,10 +362,11 @@ begin
     Frame.ExtSetStatus(AText, ASeconds);
 end;
 
-procedure TGittanExtUIHost.Notify(const ARoot, ATitle, ADetail: string; AError: boolean);
+procedure TGittanExtUIHost.Notify(const ARoot, AName, ATitle, ADetail: string; AError: boolean);
 var
   Frame: TRepoFrame;
   Text: string;
+  Kind: TMsgDlgType;
 begin
   { The forge view has no banner, and the frame's is under it. }
   if (FWindow <> nil) and (FWindow.ForgeViewForge <> '') and (ARoot = ActiveRoot) then
@@ -372,9 +375,10 @@ begin
     if ADetail <> '' then
       Text := Text + LineEnding + LineEnding + ADetail;
     if AError then
-      TellDlg(rsExtMessage, Text, mtError)
+      Kind := mtError
     else
-      TellDlg(rsExtMessage, Text, mtInformation);
+      Kind := mtInformation;
+    AskDlgFrom(rsExtMessage, Text, Kind, [mrOK, 'IsDefault', 'IsCancel'], FromLine(AName));
     Exit;
   end;
   Frame := FrameOf(ARoot);

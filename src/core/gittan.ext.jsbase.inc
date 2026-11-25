@@ -40,6 +40,32 @@ begin
   res^ := JS_UNDEFINED;
 end;
 
+{ The extension ctx belongs to. From the context and not from Instance,
+  which is nil while the extensions are unloaded, when their unload
+  listeners may still ask. }
+function NameOfContext(ctx: JSContext): string;
+var
+  eng: TGittanExtEngine;
+begin
+  eng := TGittanExtEngine(JS_GetContextOpaque(ctx));
+  if eng <> nil then
+    Result := eng.ExtensionNameForContext(ctx)
+  else
+    Result := '';
+end;
+
+procedure AlertFrom(ctx: JSContext; const AText: string);
+var
+  Wait: TJSWait;
+begin
+  Wait := JSWaitBegin;
+  try
+    ExtHost.Alert(NameOfContext(ctx), AText);
+  finally
+    JSWaitEnd(Wait);
+  end;
+end;
+
 {** Show an informational alert dialog with concatenated text.
     Stringifies all arguments and displays them using the engine’s alert.
 
@@ -58,14 +84,14 @@ begin
   res^ := JS_UNDEFINED;
   if argc <= 0 then
   begin
-    TGittanExtEngine.Instance.alert('', TGittanExtEngine.Instance.ExtensionNameForContext(ctx));
+    AlertFrom(ctx, '');
     Exit;
   end;
   // One conversion an argument: a toString may answer differently each time
   output := '';
   for i := 0 to argc - 1 do
     output := output + ctx^.ToUtf8(argv^[i]);
-  TGittanExtEngine.Instance.alert(Output, TGittanExtEngine.Instance.ExtensionNameForContext(ctx));
+  AlertFrom(ctx, string(Output));
 end;
 
 {** Confirmation dialog that returns a boolean to JavaScript.
@@ -93,7 +119,7 @@ begin
 
     Wait := JSWaitBegin;
     try
-      Yes := ExtHost.Confirm(TGittanExtEngine.Instance.ExtensionNameForContext(ctx), output);
+      Yes := ExtHost.Confirm(NameOfContext(ctx), output);
     finally
       JSWaitEnd(Wait);
     end;
@@ -141,7 +167,7 @@ begin
   def := ctx^.ToUtf8(argv^[2]);
   Wait := JSWaitBegin;
   try
-    if not ExtHost.Prompt(Caption, desc, def, response) then
+    if not ExtHost.Prompt(NameOfContext(ctx), Caption, desc, def, response) then
       response := '';
   finally
     JSWaitEnd(Wait);
@@ -184,7 +210,7 @@ begin
   desc := ctx^.ToUtf8(argv^[1]);
   Wait := JSWaitBegin;
   try
-    response := ExtHost.Select(Caption, desc, vals.ToStringArray(2, argc - 1));
+    response := ExtHost.Select(NameOfContext(ctx), Caption, desc, vals.ToStringArray(2, argc - 1));
   finally
     JSWaitEnd(Wait);
   end;

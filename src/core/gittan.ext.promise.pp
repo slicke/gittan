@@ -428,6 +428,21 @@ begin
   try
     // Convert and resolve/reject the promise
     xres := JSValueValToValue(FContext, FResult);
+    // A result the JS heap has no room for: the promise is rejected, and
+    // the out of memory error is not left for the next native to throw.
+    if xres.IsException or JS_HasException(FContext) then
+    begin
+      JS_DropException(FContext);
+      JS_FreeValue(FContext, xres);
+      FSuccess := false;
+      xres := JS_NewString(FContext, RawUtf8(FPromise.func +
+        ': the result does not fit in the extension''s memory'));
+      if xres.IsException then
+      begin
+        JS_DropException(FContext);
+        xres := JS_UNDEFINED;
+      end;
+    end;
     if FSuccess then
       callRes := JS_Call(FContext, funcs[JprResolve], JS_UNDEFINED, 1, @xres)
     else

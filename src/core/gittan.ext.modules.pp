@@ -289,7 +289,10 @@ begin
 
   // The check above is textual; a symlink or junction inside the folder could
   // still lead out of it, so refuse module paths that pass through one.
-  if PathHasLinkBelowRoot(rootDir, candidate) then
+  // Not the entry's own file, whose text the loader read and hashed: an
+  // extension may be a link to where it is written.
+  if not ((Entry <> '') and SamePathText(candidate, ExpandFileName(Entry))) and
+    PathHasLinkBelowRoot(rootDir, candidate) then
     Exit(Format('cannot import "%s": modules may not be reached through a ' +
       'symbolic link', [Name]));
 
@@ -358,9 +361,18 @@ begin
     'export default T;' + LineEnding +
     'export const api = T.api;' + LineEnding +
     'export const permissions = T.permissions;' + LineEnding +
-    'export const data = T.data;' + LineEnding +
+    'export const repo = T.repo;' + LineEnding +
+    'export const git = T.git;' + LineEnding +
+    'export const exec = T.exec;' + LineEnding +
     'export const net = T.net;' + LineEnding +
+    'export const ui = T.ui;' + LineEnding +
+    'export const commands = T.commands;' + LineEnding +
     'export const storage = T.storage;' + LineEnding +
+    'export const settings = T.settings;' + LineEnding +
+    'export const app = T.app;' + LineEnding +
+    'export const forge = T.forge;' + LineEnding +
+    'export const forgeTabs = T.forgeTabs;' + LineEnding +
+    'export const batch = T.batch;' + LineEnding +
     'export const on = (event, fn) => T.on(event, fn);' + LineEnding +
     'export const off = (event, fn) => T.off(event, fn);' + LineEnding;
 end;

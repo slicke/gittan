@@ -577,6 +577,8 @@ public
         which is not loaded but would otherwise keep its listeners,
         commands and timers. }
   procedure DropExtensionContext(Ext: PExtContextInfo);
+    {** How many timers of ctx are set. }
+  function TimersOf(ctx: JSContext): integer;
     {** Module-shaped extensions are evaluated through @code(import());
         called by @code(ExtExecuteFile) when the file has static
         @code(import)/@code(export) statements. }
@@ -1878,35 +1880,49 @@ const
     '    },' + LineEnding +
     '    unregister: function (id) { return t.unregisterCommand(String(id)); }' + LineEnding +
     '  };' + LineEnding +
+    { Everything the answer is made with is taken here, before the
+      extension's script can put its own in its place, or a tab would stay
+      on Loading and a run never end. await looks nothing up. }
     '  var deliver = t._deliver, ANSWER_SECONDS = 300;' + LineEnding +
     '  delete t._deliver;' + LineEnding +
+    '  var apply = Reflect.apply, stringify = JSON.stringify, text = String;' + LineEnding +
+    '  var set = globalThis.setTimeout, clear = globalThis.clearTimeout, mine = { __proto__: null };' + LineEnding +
+    '  if (typeof clear === "function")' + LineEnding +
+    '    globalThis.clearTimeout = globalThis.clearInterval = function (id) { if (!mine[+id]) clear(id); };' + LineEnding +
     { The raw natives would keep a function that never answers, and the
       run or the tab would wait for ever: only the shim's way is left. }
     '  var registerForgeTab = t.registerForgeTab, registerBatch = t.registerBatch;' + LineEnding +
     '  delete t.registerForgeTab;' + LineEnding +
     '  delete t.registerBatch;' + LineEnding +
-    '  var said = function (e) { try { return String((e && e.message) || e); } catch (x) { return "The extension failed"; } };' + LineEnding +
-    '  var answer = function (seq, p) {' + LineEnding +
+    '  var said = function (e) { try { return text((e && e.message) || e); } catch (x) { return "The extension failed"; } };' + LineEnding +
+    '  var answer = async function (seq, p) {' + LineEnding +
     '    var done = false, timer = null;' + LineEnding +
     '    var send = function (o) {' + LineEnding +
     '      if (done) return;' + LineEnding +
     '      done = true;' + LineEnding +
-    '      if (timer !== null && typeof clearTimeout === "function") clearTimeout(timer);' + LineEnding +
+    '      if (timer !== null) { clear(timer); delete mine[timer]; }' + LineEnding +
     '      var s;' + LineEnding +
-    '      try { s = JSON.stringify(o); } catch (e) { s = JSON.stringify({ error: "The answer is not JSON: " + said(e) }); }' + LineEnding +
-    '      deliver(Number(seq), s);' + LineEnding +
+    '      try { s = stringify(o); } catch (e) {' + LineEnding +
+    '        try { s = stringify({ error: "The answer is not JSON: " + said(e) }); }' + LineEnding +
+    '        catch (x) { s = ''{"error":"The answer is not JSON"}''; }' + LineEnding +
+    '      }' + LineEnding +
+    '      deliver(+seq, s);' + LineEnding +
     '    };' + LineEnding +
-    '    if (typeof setTimeout === "function")' + LineEnding +
-    '      timer = setTimeout(function () { send({ error: "The extension did not answer within " + ANSWER_SECONDS + " seconds" }); }, ANSWER_SECONDS * 1000);' + LineEnding +
-    '    Promise.resolve().then(p).then(' + LineEnding +
-    '      function (v) { send({ value: v === undefined ? null : v }); },' + LineEnding +
-    '      function (e) { send({ error: said(e) }); });' + LineEnding +
+    '    try {' + LineEnding +
+    '      if (typeof set === "function") {' + LineEnding +
+    '        timer = set(function () { send({ error: "The extension did not answer within " + ANSWER_SECONDS + " seconds" }); }, ANSWER_SECONDS * 1000);' + LineEnding +
+    '        mine[timer] = true;' + LineEnding +
+    '      }' + LineEnding +
+    '      await undefined;' + LineEnding +
+    '      var v = await p();' + LineEnding +
+    '      send({ value: v === undefined ? null : v });' + LineEnding +
+    '    } catch (e) { send({ error: said(e) }); }' + LineEnding +
     '  };' + LineEnding +
     '  t.forgeTabs = {' + LineEnding +
     '    register: function (o) {' + LineEnding +
     '      if (!o || typeof o.render !== "function" || !o.id)' + LineEnding +
     '        throw new TypeError("Gittan.forgeTabs.register: {id, title, render} expected");' + LineEnding +
-    '      return registerForgeTab.call(t, String(o.id), String(o.title || o.id), String(o.description || ""), function (ctx) {' + LineEnding +
+    '      return apply(registerForgeTab, t, [text(o.id), text(o.title || o.id), text(o.description || ""), function (ctx) {' + LineEnding +
     '        var seq = ctx.seq; delete ctx.seq;' + LineEnding +
     '        if (ctx.kind === "action") {' + LineEnding +
     '          var a = ctx.action, row = ctx.row; delete ctx.kind; delete ctx.action; delete ctx.row;' + LineEnding +
@@ -1915,7 +1931,7 @@ const
     '          delete ctx.kind;' + LineEnding +
     '          answer(seq, function () { return o.render(ctx); });' + LineEnding +
     '        }' + LineEnding +
-    '      });' + LineEnding +
+    '      }]);' + LineEnding +
     '    },' + LineEnding +
     '    unregister: function (id) { return t.unregisterForgeTab(String(id)); }' + LineEnding +
     '  };' + LineEnding +
@@ -1923,10 +1939,10 @@ const
     '    register: function (o) {' + LineEnding +
     '      if (!o || typeof o.run !== "function" || !o.id)' + LineEnding +
     '        throw new TypeError("Gittan.batch.register: {id, title, run} expected");' + LineEnding +
-    '      return registerBatch.call(t, String(o.id), String(o.title || o.id), String(o.description || ""), function (ctx) {' + LineEnding +
+    '      return apply(registerBatch, t, [text(o.id), text(o.title || o.id), text(o.description || ""), function (ctx) {' + LineEnding +
     '        var seq = ctx.seq; delete ctx.seq;' + LineEnding +
     '        answer(seq, function () { return o.run(ctx); });' + LineEnding +
-    '      });' + LineEnding +
+    '      }]);' + LineEnding +
     '    },' + LineEnding +
     '    unregister: function (id) { return t.unregisterBatch(String(id)); }' + LineEnding +
     '  };' + LineEnding +
@@ -1958,14 +1974,15 @@ begin
   addClassFunctionIf(epUI, 'registerBatch',      @JSBatchRegister,      4);
   addClassFunctionIf(epUI, 'unregisterBatch',    @JSBatchUnregister,    1);
   addClassFunctionIf(epUI, '_deliver',           @JSDeliver,            2);
-  if CanRegister(epUI) then
-    ExecuteInCurrent(COMMANDS_SHIM, '<commands shim>');
-
-  // Timer family → timers group (baseline, always granted today).
+  // Timer family → timers group (baseline, always granted today),
+  // before the shim, which takes them.
   addFunctionIf(epTimers, 'setTimeout',    @JSSetTimeout,  2);
   addFunctionIf(epTimers, 'setInterval',   @JSSetInterval, 2);
   addFunctionIf(epTimers, 'clearTimeout',  @JSClearTimer,  1);
   addFunctionIf(epTimers, 'clearInterval', @JSClearTimer,  1);
+
+  if CanRegister(epUI) then
+    ExecuteInCurrent(COMMANDS_SHIM, '<commands shim>');
 
   // console.log/push/logs object — UI group. RegisterConsoleLog writes into ctx directly.
   if CanRegister(epUI) then
@@ -2501,6 +2518,17 @@ begin
   end;
 end;
 
+function TGittanExtEngine.TimersOf(ctx: JSContext): integer;
+var
+  i: integer;
+begin
+  Result := 0;
+  if Assigned(FJSTimers) then
+    for i := 0 to FJSTimers.Count - 1 do
+      if FJSTimers.Data[i]^.Context = ctx then
+        Inc(Result);
+end;
+
 procedure TGittanExtEngine.DropTimersOf(ctx: JSContext);
 var
   i: integer;
@@ -2884,8 +2912,15 @@ begin
   else
   begin
     ResultStr := JS_ToCString(ctx, EvalResult.Raw);
-    Result := ResultStr;
-    JS_FreeCString(ctx, ResultStr);
+    if ResultStr <> nil then
+    begin
+      Result := ResultStr;
+      JS_FreeCString(ctx, ResultStr);
+    end
+    else
+      // A value that cannot be a string (a Symbol, an object without a
+      // prototype) is no failure of the script.
+      JS_DropException(ctx);
   end;
   ctx^.Free(EvalResult);
 
@@ -2964,8 +2999,15 @@ begin
   begin
     // Convert non-exception value to string
     ResultStr := JS_ToCString(FContext, EvalResult.Raw);
-    Result := ResultStr;
-    JS_FreeCString(FContext, ResultStr);
+    if ResultStr <> nil then
+    begin
+      Result := ResultStr;
+      JS_FreeCString(FContext, ResultStr);
+    end
+    else
+      // A value that cannot be a string (a Symbol, an object without a
+      // prototype) is no failure of the script.
+      JS_DropException(FContext);
   end;
 
   // Release evaluation result

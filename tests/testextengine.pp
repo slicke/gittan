@@ -48,8 +48,8 @@ type
     destructor Destroy; override;
     procedure Alert(const AName, AText: string); override;
     function Confirm(const AName, AText: string): boolean; override;
-    function Prompt(const ACaption, AText, ADefault: string; out AValue: string): boolean; override;
-    function Select(const ACaption, AText: string; const AOptions: array of string): integer; override;
+    function Prompt(const AName, ACaption, AText, ADefault: string; out AValue: string): boolean; override;
+    function Select(const AName, ACaption, AText: string; const AOptions: array of string): integer; override;
     function Message(const AName, ATitle, AText: string; AKind: TExtMessageKind;
       const AButtons: array of string; ADefault, ACancel: integer): integer; override;
     procedure ShowLog(const AName, ATitle, AText: string); override;
@@ -60,7 +60,7 @@ type
     procedure AddCard(const ARoot: string; const ACard: TGittanReviewThread); override;
     procedure ClearCards(const ARoot, AExtId: string); override;
     procedure SetStatus(const ARoot, AText: string; ASeconds: integer); override;
-    procedure Notify(const ARoot, ATitle, ADetail: string; AError: boolean); override;
+    procedure Notify(const ARoot, AName, ATitle, ADetail: string; AError: boolean); override;
     procedure CommandsChanged; override;
     function ForgeViewForge: string; override;
     procedure Deliver(ASeq: integer; const AExtId, AJson: string); override;
@@ -79,6 +79,8 @@ type
     { The result of a load is the script's last value; an error starts
       with Error:. }
     procedure AssertLoaded(const AMsg, AResult: string);
+    function BigTask(const ctx: PJSContext; const func: string;
+      const params: JSParameters; out res: JSValueVal): boolean;
     function SlowTask(const ctx: PJSContext; const func: string;
       const params: JSParameters; out res: JSValueVal): boolean;
   protected
@@ -114,6 +116,10 @@ type
     procedure TestLogGoesToConsole;
     procedure TestNoExceptionCrossesExtensions;
     procedure TestTasksCapped;
+    procedure TestValuesThatCannotBeShown;
+    procedure TestResultTooLarge;
+    procedure TestAnswerOutOfReach;
+    procedure TestDialogsWhileUnloading;
   end;
 
 implementation
@@ -166,14 +172,14 @@ begin
   Result := ConfirmAnswer;
 end;
 
-function TFakeExtHost.Prompt(const ACaption, AText, ADefault: string;
+function TFakeExtHost.Prompt(const AName, ACaption, AText, ADefault: string;
   out AValue: string): boolean;
 begin
   AValue := PromptAnswer;
   Result := PromptAnswer <> '';
 end;
 
-function TFakeExtHost.Select(const ACaption, AText: string;
+function TFakeExtHost.Select(const AName, ACaption, AText: string;
   const AOptions: array of string): integer;
 begin
   Result := SelectAnswer;
@@ -242,7 +248,7 @@ begin
   Status := AText + '|' + IntToStr(ASeconds);
 end;
 
-procedure TFakeExtHost.Notify(const ARoot, ATitle, ADetail: string; AError: boolean);
+procedure TFakeExtHost.Notify(const ARoot, AName, ATitle, ADetail: string; AError: boolean);
 begin
   Notified.Add(ATitle + '|' + ADetail + '|' + IntToStr(Ord(AError)));
 end;
@@ -935,6 +941,115 @@ begin
   AssertEquals('the tab stays', 1, Length(FEngine.Registry.CommandsIn(cwForgeTab)));
   AssertEquals('then the tab', 'true', EvalIn(Info^.Ctx, 'String(Gittan.forgeTabs.unregister("prs"))'));
   AssertEquals('the operation stays', 1, FEngine.Registry.CommandCount);
+end;
+
+{ A thrown or a last value that cannot be a string leaves nothing pending:
+  the next extension's listener still cancels, and loads. }
+procedure TExtEngineTest.TestValuesThatCannotBeShown;
+var
+  Msg: string;
+  Info: PExtContextInfo;
+begin
+  LoadResult('last1', 'var a = Object.create(null); a;');
+  AssertLoaded('the next loads', LoadResult('last2', 'Symbol("x");'));
+  AssertLoaded('and the next', LoadResult('thrower',
+    'Gittan.on("commit.before", function () { throw Symbol("s"); });'));
+  AssertLoaded('guard', LoadResult('guard',
+    'Gittan.on("commit.before", function () { return "subject too long"; });'));
+  FHost.Errors.Clear;
+  AssertFalse('the guard is heard', FEngine.Fire('commit.before', '{}', Msg));
+  AssertEquals('subject too long', Msg);
+  AssertEquals('the throw is reported', 1, FHost.Errors.Count);
+  Info := Load('stacker', 'Gittan.on("push.before", function () {' +
+    ' var e = new Error("x"); Object.defineProperty(e, "stack",' +
+    ' {get: function () { throw 1; }}); throw e; });', PermBaseline);
+  AssertLoaded('stacker', string(FEngine.ExtExecuteFile(Info)));
+  AssertTrue(FEngine.Fire('push.before', '{}', Msg));
+  AssertFalse('nothing pending', JS_HasException(Info^.Ctx));
+end;
+
+function TExtEngineTest.BigTask(const ctx: PJSContext; const func: string;
+  const params: JSParameters; out res: JSValueVal): boolean;
+begin
+  res := StringToValueVal(StringOfChar('x', 80 * 1024 * 1024));
+  Result := True;
+end;
+
+{ A result past the JS heap's limit rejects its promise and leaves no
+  error behind. }
+procedure TExtEngineTest.TestResultTooLarge;
+var
+  Info: PExtContextInfo;
+  GiveUpAt: QWord;
+begin
+  {$IFDEF HAIKU}
+  Ignore('QuickJS cannot measure its allocations on Haiku');
+  {$ENDIF}
+  Info := Load('big', '', PermBaseline);
+  FEngine.BeginRegistration(Info);
+  try
+    FEngine.AddPromise('bigTask', @BigTask, 0, 0, True);
+  finally
+    FEngine.EndRegistration;
+  end;
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  EvalIn(Info^.Ctx, 'globalThis.r = ""; bigTask().then(' +
+    'function (v) { globalThis.r = "resolved " + typeof v; },' +
+    'function (e) { globalThis.r = "rejected " + e; });');
+  GiveUpAt := GetTickCount64 + 10000;
+  while (EvalIn(Info^.Ctx, 'globalThis.r') = '') and (GetTickCount64 < GiveUpAt) do
+  begin
+    CheckSynchronize(10);
+    FEngine.PumpJobs;
+  end;
+  AssertEquals('rejected bigTask: the result does not fit in the extension''s memory',
+    EvalIn(Info^.Ctx, 'globalThis.r'));
+  AssertFalse('nothing pending', JS_HasException(Info^.Ctx));
+end;
+
+{ A tab or an operation answers whatever the extension puts in place of
+  the built-ins, also with every timer taken. }
+procedure TExtEngineTest.TestAnswerOutOfReach;
+var
+  Info: PExtContextInfo;
+begin
+  Info := Load('meddler', 'Function.prototype.call = function () { throw 1; };' +
+    'JSON.stringify = function () { throw 2; }; globalThis.setTimeout = undefined;' +
+    'Promise.prototype.then = function () {}; globalThis.Promise = undefined;' +
+    'Gittan.batch.register({id: "b", run: function (c) { return c.repo + "!"; }}); "ok";',
+    PermBaseline + [epExec]);
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  FHost.Delivered.Clear;
+  FEngine.RunCommand(TGittanExtRegistry.KindKey('meddler', 'b', cwBatch), '{"seq": 1, "repo": "/r"}');
+  AssertEquals('1|meddler|{"value":"/r!"}', FHost.Delivered.Text.Trim);
+  Info := Load('full', 'Gittan.batch.register({id: "b", run: function (c) { return 1; }});' +
+    'try { for (;;) setTimeout(function () {}, 600000); } catch (e) {} "ok";', PermBaseline);
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  FHost.Delivered.Clear;
+  FEngine.RunCommand(TGittanExtRegistry.KindKey('full', 'b', cwBatch), '{"seq": 2, "repo": "/r"}');
+  AssertEquals('answered', 1, FHost.Delivered.Count);
+  AssertTrue(FHost.Delivered[0], Pos('2|full|{"error":', FHost.Delivered[0]) = 1);
+  Info := Load('sweeper', 'Gittan.batch.register({id: "b", run: function () {' +
+    ' var id = setTimeout(function () {}, 600000);' +
+    ' for (var i = 0; i <= id; i++) clearTimeout(i); return new Promise(function () {}); }}); "ok";',
+    PermBaseline);
+  AssertLoaded('loads', string(FEngine.ExtExecuteFile(Info)));
+  FEngine.RunCommand(TGittanExtRegistry.KindKey('sweeper', 'b', cwBatch), '{"seq": 3, "repo": "/r"}');
+  AssertEquals('the shim''s timer is left', 1, FEngine.TimersOf(Info^.Ctx));
+end;
+
+{ alert and confirm from a job that an unload listener queued. }
+procedure TExtEngineTest.TestDialogsWhileUnloading;
+begin
+  FHost.ConfirmAnswer := True;
+  AssertLoaded('loads', LoadResult('bye', 'Gittan.on("unload", function () {' +
+    ' Promise.resolve().then(function () { Gittan.alert("saved"); Gittan.confirm("sure?"); }); }); "ok";'));
+  FHost.Alerts.Clear;
+  FHost.Errors.Clear;
+  FEngine.UnloadExtensions;
+  AssertEquals('saved,confirm:sure?', FHost.Alerts.CommaText);
+  AssertEquals('bye', FHost.AlertNames[FHost.AlertNames.Count - 1]);
+  AssertEquals(0, FHost.Errors.Count);
 end;
 
 { A command whose id looks like a tab's or an operation's key is found
