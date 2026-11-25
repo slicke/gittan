@@ -5878,6 +5878,14 @@ begin
   AssertTrue(FRepo.Error, FRepo.SetRemoteUrls('origin', 'https://example.invalid/d.git', ''));
   AssertTrue(ReadRemotes(FDir, R, Err));
   AssertEquals('https://example.invalid/d.git', R[0].PushUrl);
+  { Two push URLs: only the first is the one edited. }
+  Git(['config', '--add', 'remote.origin.pushurl', 'one']);
+  Git(['config', '--add', 'remote.origin.pushurl', 'two']);
+  AssertTrue(FRepo.Error, FRepo.SetRemoteUrls('origin', 'https://example.invalid/d2.git', 'one'));
+  AssertEquals('one'#10'two'#10, Git(['config', '--get-all', 'remote.origin.pushurl']));
+  AssertTrue(FRepo.Error, FRepo.SetRemoteUrls('origin', 'https://example.invalid/d2.git', 'three'));
+  AssertEquals('three'#10'two'#10, Git(['config', '--get-all', 'remote.origin.pushurl']));
+  AssertTrue(FRepo.Error, FRepo.SetRemoteUrls('origin', 'https://example.invalid/d.git', ''));
   AssertTrue('without a push URL to unset', FRepo.SetRemoteUrls('origin',
     'https://example.invalid/d.git', 'https://example.invalid/d.git'));
   { The URLs as the config has them, not rewritten: an edit writes

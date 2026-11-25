@@ -5569,13 +5569,33 @@ end;
 { git config exits with 5 when there is no push URL to unset. }
 function TGittanRepo.SetRemoteUrls(const AName, AUrl, APushUrl: string): boolean;
 var
-  Output, Err: string;
+  Output, Err, Key: string;
+  Urls: TStringList;
+  i: integer;
 begin
   Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'set-url', '--', AName, AUrl], Output);
   if not Result then
     Exit;
-  if RunGitIn(FRoot, ['config', '--get-all', 'remote.' + AName + '.pushurl'], Output, Err) then
-    Result := RunGit(FRoot, ['config', '--unset-all', 'remote.' + AName + '.pushurl'], Output);
+  Key := 'remote.' + AName + '.pushurl';
+  Urls := TStringList.Create;
+  try
+    if RunGitIn(FRoot, ['config', '-z', '--get-all', Key], Output, Err) then
+      SplitNul(Output, Urls);
+    { A remote may push to several URLs; the first is the one edited. }
+    if (Urls.Count > 0) and (Urls[0] = APushUrl) then
+      Exit;
+    if Urls.Count > 0 then
+      Result := RunGit(FRoot, ['config', '--unset-all', Key], Output);
+    if Result and (Urls.Count > 1) and (APushUrl <> '') and (APushUrl <> AUrl) then
+    begin
+      Urls[0] := APushUrl;
+      for i := 0 to Urls.Count - 1 do
+        Result := RunGit(FRoot, ['config', '--add', Key, Urls[i]], Output) and Result;
+      Exit;
+    end;
+  finally
+    Urls.Free;
+  end;
   if Result and (APushUrl <> '') and (APushUrl <> AUrl) then
     Result := RunGit(FRoot, ['remote', 'set-url', '--push', '--', AName, APushUrl], Output);
 end;

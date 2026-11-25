@@ -199,6 +199,9 @@ end;
 procedure TCoAuthorsForm.PersonChange(Sender: TObject);
 begin
   FAddButton.Enabled := IsPerson(FPerson.Text);
+  { Return is the field's while it holds text (PersonKeyPress); the
+    default button would be pressed by it all the same. }
+  FOKButton.Default := Trim(FPerson.Text) = '';
 end;
 
 { Return in the field adds, rather than pressing OK. }
