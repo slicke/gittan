@@ -40,9 +40,20 @@ function UnescapeC(const S: string): string;
   catches, so a deeper text is refused before it is parsed. }
 const
   MaxNesting = 200;
+  {** The largest TOML file of .gittan that is parsed, in bytes. toml-fp
+    takes time that grows with the square of a number's length (its
+    underscores are deleted one by one) and memory a hundred times the
+    text's size, and the files are read on the main thread with every
+    snapshot. }
+  MaxTomlBytes = 64 * 1024;
 
 resourcestring
   rsNestedTooDeep = 'Nested deeper than %d levels.';
+  rsTomlTooLarge = 'The file is too large to be read here (over %d KB).';
+
+{** The bytes of the TOML file AFileName, as ReadFileBytes gives them; an
+  exception when there are more than MaxTomlBytes, before any is read. }
+function ReadTomlBytes(const AFileName: string): RawByteString;
 
 {** Whether AJson nests arrays and objects deeper than MaxNesting, its
   strings left out. }
@@ -307,6 +318,23 @@ begin
     end;
   end;
   SetLength(Result, Out);
+end;
+
+function ReadTomlBytes(const AFileName: string): RawByteString;
+var
+  F: TFileStream;
+begin
+  Result := '';
+  F := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+  try
+    if F.Size > MaxTomlBytes then
+      raise Exception.CreateFmt(rsTomlTooLarge, [MaxTomlBytes div 1024]);
+    SetLength(Result, F.Size);
+    if Result <> '' then
+      F.ReadBuffer(Result[1], Length(Result));
+  finally
+    F.Free;
+  end;
 end;
 
 function GetJSONLimited(const AJson: string): TJSONData;

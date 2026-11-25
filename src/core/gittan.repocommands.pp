@@ -44,6 +44,8 @@ const
   CommandsFile = 'commands.toml';
   {** The file as a path relative to the root, with "/". }
   CommandsPath = CommandsFolder + '/' + CommandsFile;
+  {** The committed commands files that are parsed, in bytes together. }
+  MaxCommandsBytes = 512 * 1024;
   {** The folder inside it whose .toml files are commands files too, a
     section of the page each. }
   CommandsSubFolder = 'commands';
@@ -293,6 +295,9 @@ uses
   Process, fpjson, jsonparser, TOML.Types, TOML.Parser, gittan.git, gittan.textfile,
   gittan.sha256, gittan.repoconfig;
 
+resourcestring
+  rsCommandsTooLarge = 'The commands files are too large together to be read (over %d KB).';
+
 { ---------------------------------------------------------------------------
   The commands file
   --------------------------------------------------------------------------- }
@@ -534,6 +539,7 @@ var
   Names: TStringList;
   Info: TSearchRec;
   i: integer;
+  Total: int64;
 
   procedure AddFile(const APath, AFileName: string; AMain, APersonal: boolean);
   var
@@ -543,9 +549,16 @@ var
     F := Default(TGittanCommandsFile);
     F.Path := APath;
     F.Personal := APersonal;
-    { A file that cannot be read gives no commands and says why. }
+    { A file that cannot be read, or comes after MaxCommandsBytes of
+      others, gives no commands and says why. }
     try
-      F.Text := ReadFileBytes(AFileName);
+      F.Text := ReadTomlBytes(AFileName);
+      if not APersonal then
+      begin
+        Inc(Total, Length(F.Text));
+        if Total > MaxCommandsBytes then
+          raise Exception.CreateFmt(rsCommandsTooLarge, [MaxCommandsBytes div 1024]);
+      end;
       F.Commands := ParseCommandsToml(F.Text, F.Error);
     except
       on E: Exception do
@@ -568,6 +581,7 @@ var
 
 begin
   Result := nil;
+  Total := 0;
   if ARoot = '' then
     Exit;
   Root := IncludeTrailingPathDelimiter(ARoot);

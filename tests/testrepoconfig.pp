@@ -10,7 +10,8 @@ unit testrepoconfig;
 interface
 
 uses
-  Classes, SysUtils, StrUtils, fpcunit, testregistry, gittan.repoconfig, testhelpers;
+  Classes, SysUtils, StrUtils, fpcunit, testregistry, gittan.repoconfig, gittan.textfile,
+  testhelpers;
 
 type
   TRepoConfigTest = class(TTestCase)
@@ -183,6 +184,17 @@ begin
   C := ReadRepoConfig(FDir);
   AssertTrue(C.Exists);
   AssertTrue(BranchProtected(C, 'main'));
+  F := TStringList.Create;
+  try
+    F.Text := '[branches]'#10'protected = ["main"]'#10'#' + StringOfChar('x', MaxTomlBytes);
+    F.SaveToFile(FDir + PathDelim + '.gittan' + PathDelim + RepoConfigFile);
+  finally
+    F.Free;
+  end;
+  C := ReadRepoConfig(FDir);
+  AssertTrue('too large', C.Exists);
+  AssertTrue(C.Error <> '');
+  AssertFalse('and not parsed', BranchProtected(C, 'main'));
 end;
 
 procedure TRepoConfigTest.TestCheckSubject;

@@ -11,7 +11,7 @@ interface
 
 uses
   Classes, SysUtils, StrUtils, {$ifndef windows}BaseUnix,{$endif} fpcunit, testregistry,
-  gittan.repocommands, gittan.project, gittan.sha256, testhelpers;
+  gittan.repocommands, gittan.project, gittan.sha256, gittan.textfile, testhelpers;
 
 type
   TRepoCommandsTest = class(TTestCase)
@@ -33,6 +33,7 @@ type
     procedure TestParseTomlPerSystem;
     procedure TestTomlProjects;
     procedure TestCommandsFiles;
+    procedure TestCommandsFilesTooLarge;
     procedure TestCommandsFileNames;
     procedure TestCommandsFileUnreadable;
     procedure TestPersonalFile;
@@ -317,6 +318,30 @@ begin
   Put('.gittan/repo.toml', '[branches]'#10'protected = ["main"]'#10);
   AssertEquals('and without a project line leaves it to commands.toml', 1,
     Length(ProjectsOfRoot(FDir)));
+end;
+
+procedure TRepoCommandsTest.TestCommandsFilesTooLarge;
+var
+  F: TGittanCommandsFiles;
+  i: integer;
+begin
+  Put('.gittan/commands.toml', '[commands.a]'#10'run = "a"'#10'#' +
+    StringOfChar('x', MaxTomlBytes));
+  F := ReadCommandsFiles(FDir);
+  AssertEquals('listed', 1, Length(F));
+  AssertTrue('and why it gives nothing', F[0].Error <> '');
+  AssertEquals(0, Length(F[0].Commands));
+  AssertEquals('', F[0].Text);
+  { Many of a size that each is read: the last are past the total. }
+  for i := 0 to 11 do
+    Put(Format('.gittan/commands/%.2d.toml', [i]), '[commands.c]'#10'run = "c"'#10'#' +
+      StringOfChar('x', MaxTomlBytes - 100));
+  F := ReadCommandsFiles(FDir);
+  AssertEquals(13, Length(F));
+  AssertEquals('the first is read', '', F[1].Error);
+  AssertEquals(1, Length(F[1].Commands));
+  AssertTrue('the last is not', F[12].Error <> '');
+  AssertEquals(0, Length(F[12].Commands));
 end;
 
 procedure TRepoCommandsTest.TestPersonalFile;

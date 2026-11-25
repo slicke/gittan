@@ -275,7 +275,7 @@ begin
   if not FileExists(FileName) then
     Exit;
   try
-    Result := ParseRepoConfig(ReadFileBytes(FileName));
+    Result := ParseRepoConfig(ReadTomlBytes(FileName));
   except
     on E: Exception do
     begin
