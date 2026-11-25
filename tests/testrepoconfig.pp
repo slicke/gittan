@@ -10,7 +10,8 @@ unit testrepoconfig;
 interface
 
 uses
-  Classes, SysUtils, StrUtils, fpcunit, testregistry, gittan.repoconfig, testhelpers;
+  Classes, SysUtils, StrUtils, fpcunit, testregistry, gittan.repoconfig, gittan.textfile,
+  testhelpers;
 
 type
   TRepoConfigTest = class(TTestCase)
@@ -24,6 +25,7 @@ type
     procedure TestParse;
     procedure TestWrongTypes;
     procedure TestTooDeep;
+    procedure TestShortError;
     procedure TestLimits;
     procedure TestNotToml;
     procedure TestRead;
@@ -106,6 +108,21 @@ begin
   AssertEquals('HTTP://t.test/%BUGID%', C.Issues.Url);
 end;
 
+procedure TRepoConfigTest.TestShortError;
+var
+  C: TGittanRepoConfig;
+begin
+  AssertEquals('as it is', 'Line 3: no', ShortError('Line 3: no'));
+  AssertEquals('one line', 'a b [31m', ShortError('a'#10'b'#27'[31m'));
+  AssertEquals(MaxErrorText + Length('…'), Length(ShortError(StringOfChar('x', 5000))));
+  { Not in the middle of a character. }
+  AssertEquals(StringOfChar('x', MaxErrorText - 1) + '…',
+    ShortError(StringOfChar('x', MaxErrorText - 1) + 'åå'));
+  C := ParseRepoConfig('a = 1' + StringOfChar('z', 20000));
+  AssertTrue('an error', C.Error <> '');
+  AssertTrue('a short one', Length(C.Error) <= MaxErrorText + Length('…'));
+end;
+
 procedure TRepoConfigTest.TestTooDeep;
 var
   C: TGittanRepoConfig;
@@ -183,6 +200,17 @@ begin
   C := ReadRepoConfig(FDir);
   AssertTrue(C.Exists);
   AssertTrue(BranchProtected(C, 'main'));
+  F := TStringList.Create;
+  try
+    F.Text := '[branches]'#10'protected = ["main"]'#10'#' + StringOfChar('x', MaxTomlBytes);
+    F.SaveToFile(FDir + PathDelim + '.gittan' + PathDelim + RepoConfigFile);
+  finally
+    F.Free;
+  end;
+  C := ReadRepoConfig(FDir);
+  AssertTrue('too large', C.Exists);
+  AssertTrue(C.Error <> '');
+  AssertFalse('and not parsed', BranchProtected(C, 'main'));
 end;
 
 procedure TRepoConfigTest.TestCheckSubject;

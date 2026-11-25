@@ -608,7 +608,7 @@ var
   procedure FlushProse;
   begin
     if Trim(Prose) <> '' then
-      Result.AddObject(MarkdownToInk(LinkFilePaths(Prose, @RepoFileExists), [imoInlineHTML]),
+      Result.AddObject(MarkdownToInk(LinkFilePaths(TameMarkdown(Prose), @RepoFileExists), [imoInlineHTML, imoNoFootnotes]),
         ReviewRow(rlMarkup, Depth, -1, 0));
     Prose := '';
   end;
@@ -627,7 +627,7 @@ begin
       Depth := Parts[k].Depth;
       if Parts[k].Kind = cpDetails then
       begin
-        Result.AddObject(MarkdownToInk(Parts[k].Text, [imoInlineHTML]),
+        Result.AddObject(MarkdownToInk(TameMarkdown(Parts[k].Text), [imoInlineHTML, imoNoFootnotes]),
           ReviewRow(rlDetails, Depth, k, 0));
         Continue;
       end;
@@ -774,7 +774,7 @@ begin
         for i := 0 to Parts.Count - 1 do
           if (Trim(Parts[i]) <> '') and (Copy(Trim(Parts[i]), 1, 3) <> '```') then
           begin
-            S := Trim(HTMLPlainText(MarkdownToInk(Parts[i], [imoInlineHTML])));
+            S := Trim(HTMLPlainText(MarkdownToInk(TameMarkdown(Parts[i]), [imoInlineHTML, imoNoFootnotes])));
             Break;
           end;
       finally

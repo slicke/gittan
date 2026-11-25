@@ -664,6 +664,7 @@ begin
   FRemoteJob.Branch := Branch;
   FRemoteJob.OnDone := @RemoteJobDone;
   FRemoteJob.OnOutput := @RemoteJobOutput;
+  HoldWatcher;
   FRemoteJob.Start;
   FStatus.ShowBusy(Format(rsSubAdding, [Path]));
   ShowRemoteNotice;

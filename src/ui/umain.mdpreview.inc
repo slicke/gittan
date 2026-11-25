@@ -71,6 +71,7 @@ begin
     { The old side's share is of what is left. }
     ApplyLayout;
   end;
+  FMdPreview.Root := FRepo.Root;
   if FView = gvChanges then
     FMdPreview.ShowChange(Path, Old, Md)
   else

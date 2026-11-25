@@ -246,6 +246,21 @@ type
     property Repos: TGittanGoneRepos read FRepos;
   end;
 
+  { TGittanFoldersJob }
+
+  {** Looks whether the folders APaths are there, off the main thread: one
+    on a network volume that does not answer holds whoever asks. }
+  TGittanFoldersJob = class(TGittanBatchJob)
+  private
+    FPaths, FGone: TStringArray;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const APaths: array of string);
+    {** Those that are not there, once the job is done. }
+    property Gone: TStringArray read FGone;
+  end;
+
   { TGittanStatusJob }
 
   {** Reads each repository's status (RepoStatus); Repos holds them, a
@@ -601,7 +616,12 @@ begin
   First := Copy(Names, 1, Pos(#0, Names + #0) - 1);
   if First = '' then
     Exit;
+  { diff-tree goes by none of the user's diff.* settings and log by all:
+    those that change a patch are said here as diff-tree has them. }
   if not RunGitIn(Root, ['log', '-p', '--full-diff', '--no-renames', '--no-ext-diff', '--no-merges',
+    '--no-textconv', '--no-color', '--no-show-signature', '--no-relative', '-U3',
+    '--inter-hunk-context=0', '--src-prefix=a/', '--dst-prefix=b/', '--submodule=short',
+    '--diff-algorithm=myers',
     '--format=commit %H', Base + '..' + ADefault, '--', ':(literal)' + First], Patch, Err) or
     (Patch = '') then
     Exit;
@@ -618,6 +638,7 @@ var
   Repo: TGittanRepo;
   Names: TStringList;
   Current, DefaultRef, Err: string;
+  Trees: TGittanWorktrees;
   i, n: integer;
 begin
   Result := Default(TGittanGoneRepo);
@@ -647,13 +668,24 @@ begin
       Result.Error := Trim(Repo.Error);
       Exit;
     end;
+    { In the middle of a rebase or a bisect HEAD is detached, and the
+      branch worked on is no one's current: an older git would delete
+      it. }
+    if Repo.Operation <> '' then
+    begin
+      Result.Error := Format('git is %s here; nothing is offered until that is done.',
+        [Repo.Operation]);
+      Exit;
+    end;
+    if not ListWorktrees(Repo.Root, Trees, Err) then
+      Trees := nil;
     Current := Repo.Branch;
     DefaultRef := Repo.DefaultBranch;
     SetLength(Result.Branches, Names.Count);
     n := 0;
     for i := 0 to Names.Count - 1 do
     begin
-      if Names[i] = Current then
+      if (Names[i] = Current) or BranchInWorktree(Trees, Names[i]) then
         Continue;
       Result.Branches[n] := Default(TGittanGoneBranch);
       Result.Branches[n].Name := Names[i];
@@ -1304,6 +1336,34 @@ begin
       Exit;
     FRepos[i] := RepoStatus(FRepos[i].Path, FRepos[i].Caption);
     ItemDone;
+  end;
+  Done;
+end;
+
+{ ---------------------------------------------------------------------------
+  TGittanFoldersJob
+  --------------------------------------------------------------------------- }
+
+constructor TGittanFoldersJob.Create(const APaths: array of string);
+var
+  i: integer;
+begin
+  inherited Create(True);
+  SetLength(FPaths, Length(APaths));
+  for i := 0 to High(APaths) do
+    FPaths[i] := APaths[i];
+end;
+
+procedure TGittanFoldersJob.Execute;
+var
+  i: integer;
+begin
+  for i := 0 to High(FPaths) do
+  begin
+    if Terminated then
+      Exit;
+    if not DirectoryExists(FPaths[i]) then
+      Insert(FPaths[i], FGone, Length(FGone));
   end;
   Done;
 end;

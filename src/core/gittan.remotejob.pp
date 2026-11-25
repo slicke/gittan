@@ -41,7 +41,10 @@ type
     halfway would leave a merge behind: Stop only drops the handler, and
     the thread is not terminated for it (a thread terminated before it
     starts never runs Execute). A fetch alone (Abortable) may be given
-    up: Abort also ends its git, which leaves the refs as they were. }
+    up: Abort also ends its git, which leaves the refs as they were.
+    A push (Stoppable) is ended when the user says so (StopPush), and is
+    told like any other; it changes nothing here, but the server may have
+    taken it. One left (Leave) is ended once it has been silent for long. }
   TGittanRemoteJob = class(TGittanJob)
   private
     FRoot, FArg, FRemote, FPath, FBranch, FPullRef: string;
@@ -54,7 +57,12 @@ type
     FLock: TRTLCriticalSection;
     FProgress: string;
     FReturn, FOutputPending: boolean;
-    FAborted: boolean;
+    FAborted, FStopped: boolean;
+    { When git last wrote something, and how long a silence ends a push
+      nobody follows any more; 0 for none. }
+    FLastOutput: QWord;
+    FLeaveMs: integer;
+    FLeaveHook: boolean;
     function GetProgress: string;
     function Aborted: boolean;
     procedure Output(const AText: string);
@@ -74,6 +82,20 @@ type
       (Abortable) at once, so the thread is soon done; a job that is not
       Abortable goes on to its end. }
     procedure Abort;
+    {** Whether StopPush ends the job's git: a push, or a deletion on a
+      remote. }
+    function Stoppable: boolean;
+    {** Ends the git of a Stoppable job; OnDone comes as ever. }
+    procedure StopPush;
+    {** A Stoppable job nobody follows any more, before Stop: its git is
+      ended when it has written nothing for LeaveSilence milliseconds,
+      or for QuitSilence when it is waited for (AWait) and no pre-push
+      hook (AHook: one had not ended) is at work, so a server that never answers does not hold Gittan. }
+    procedure Leave(AWait, AHook: boolean);
+    {** For how many milliseconds git and its hooks have written nothing. }
+    function SilentMs: QWord;
+    {** Whether StopPush was called. }
+    property Stopped: boolean read FStopped;
     property Root: string read FRoot;
     property Kind: TGittanRemoteKind read FKind;
     property Mode: TGittanPullMode read FMode;
@@ -125,6 +147,8 @@ type
 
 const
   ProgressKeep = 16000;
+  LeaveSilence = 600000;
+  QuitSilence = 60000;
 
 {** Appends AChunk, a piece of what a process wrote, to AText as a
   terminal would show it: a carriage return starts the line over, so
@@ -194,6 +218,7 @@ begin
   FRemote := ARemote;
   FKind := AKind;
   FMode := AMode;
+  FLastOutput := GetTickCount64;
 end;
 
 destructor TGittanRemoteJob.Destroy;
@@ -207,9 +232,44 @@ begin
   Result := FKind in [rkFetch, rkFetchPull, rkLfsFetch];
 end;
 
+{ Asked in the job's thread. }
 function TGittanRemoteJob.Aborted: boolean;
 begin
-  Result := FAborted;
+  Result := FAborted or FStopped or (FLeaveMs > 0) and (SilentMs > FLeaveMs) and
+    (not FLeaveHook or (SilentMs > LeaveSilence) or PushTransferStarted(Progress));
+end;
+
+function TGittanRemoteJob.Stoppable: boolean;
+begin
+  Result := FKind in [rkPush, rkForcePush, rkPushBranch, rkPushTag, rkDeleteRemote,
+    rkDeleteRemoteTag];
+end;
+
+procedure TGittanRemoteJob.StopPush;
+begin
+  if Stoppable then
+    FStopped := True;
+end;
+
+procedure TGittanRemoteJob.Leave(AWait, AHook: boolean);
+begin
+  if not Stoppable then
+    Exit;
+  FLeaveHook := AHook;
+  if AWait then
+    FLeaveMs := QuitSilence
+  else
+    FLeaveMs := LeaveSilence;
+end;
+
+function TGittanRemoteJob.SilentMs: QWord;
+begin
+  EnterCriticalSection(FLock);
+  try
+    Result := GetTickCount64 - FLastOutput;
+  finally
+    LeaveCriticalSection(FLock);
+  end;
 end;
 
 procedure TGittanRemoteJob.Abort;
@@ -238,6 +298,7 @@ var
 begin
   EnterCriticalSection(FLock);
   try
+    FLastOutput := GetTickCount64;
     AppendTerminalText(FProgress, FReturn, AText);
     if Length(FProgress) > ProgressKeep then
     begin
@@ -285,7 +346,7 @@ begin
   try
     Repo.OnOutput := @Output;
     Repo.NoVerify := FNoVerify;
-    if Abortable then
+    if Abortable or Stoppable then
       Repo.Cancel := @Aborted;
     if Repo.Open(FRoot) then
       case FKind of

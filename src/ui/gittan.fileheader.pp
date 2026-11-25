@@ -392,9 +392,10 @@ begin
     FActionsEnabled[i] := True;
     FActionRects[i] := Rect(0, 0, 0, 0);
   end;
-  FHot := -1;
+  SetHot(-1);
   FPressed := -1;
   Cursor := crDefault;
+  Hint := '';
   Invalidate;
   ControlsChanged;
 end;

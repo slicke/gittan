@@ -468,6 +468,7 @@ begin
 end;
 {$ELSE}
 begin
+  Ignore('not on Windows');
 end;
 {$ENDIF}
 
@@ -526,6 +527,7 @@ begin
 end;
 {$ELSE}
 begin
+  Ignore('not on Windows');
 end;
 {$ENDIF}
 

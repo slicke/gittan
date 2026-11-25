@@ -363,6 +363,10 @@ type
     FFindJob: TGittanFindJob;
     FFindPopup: TGittanPopupList;
     FFoundFiles: TGittanFoundFiles;
+    { What they were the answer to; whether they, or the plan, wait for
+      the tab to be shown. }
+    FFindQuestion: string;
+    FFindWaiting, FPlanWaiting: boolean;
     FFoundPick: TGittanFoundFile;
     { A conflict resolved by the agent (umain.ai.inc): the job while it
       runs, and the item of the conflict list that starts or stops it
@@ -668,7 +672,8 @@ type
     FRemoteJob: TGittanRemoteJob;
     FRemoteAhead: integer;
     FRemoteHead: string;
-    FFetchItem, FPullItem, FPushItem, FForcePushItem, FPushNoVerifyItem: TMenuItem;
+    FFetchItem, FPullItem, FPushItem, FForcePushItem, FPushNoVerifyItem,
+      FStopPushItem: TMenuItem;
     { Commit > Commit abc1234: the commit menu of the commit shown, and in
       its place Pick a Commit in the Graph... while none is. }
     FBranchCommitMenu, FPickCommitItem: TMenuItem;
@@ -891,7 +896,7 @@ type
     FCommandsFiles: TGittanCommandsFiles;
     FCommandsHash: string;
     FCommandJob: TGittanCommandJob;
-    FCommandName, FCommandProject: string;
+    FCommandName, FCommandProject, FCommandLine: string;
     FCommandSource: TGittanCommandSource;
     FCommandRead: integer;
     { The Files page, in the box too (umain.files.inc): whether it
@@ -1040,6 +1045,11 @@ type
     FNotice: TGittanNotice;
     FNoticeTimer: TTimer;
     FNoticeHook: boolean;
+    { Looks each second whether a push has gone silent: past
+      PushSilentFrom the status bar and the notice count the seconds,
+      past PushStopFrom the notice has a Stop button. }
+    FPushTimer: TTimer;
+    FPushSilent, FPushStop: boolean;
     { The notice tells of a failed commit: its first button commits
       again. }
     FNoticeCommit: boolean;
@@ -1360,6 +1370,7 @@ type
     procedure ShowSidebar(AShown: boolean);
     procedure StartWatcher;
     procedure StopWatcher;
+    procedure HoldWatcher;
     function WatchPace: integer;
     procedure AppActivate(Sender: TObject);
     procedure AppDeactivate(Sender: TObject);
@@ -1853,6 +1864,9 @@ type
     procedure FindPopupPick(Sender: TObject; AIndex: integer);
     procedure ShowFoundAsync(Data: PtrInt);
     procedure AbandonFindJob;
+    procedure ShowFound;
+    procedure ShowAnswers;
+    procedure ShowAnswersAsync(Data: PtrInt);
     {** Asks the agent to resolve conflict AIndex of the shown file; its
       lines are written over the conflict when they come
       (WriteConflictBlock). }
@@ -2401,6 +2415,10 @@ type
     procedure RemoteJobDone(Sender: TObject);
     procedure RemoteJobOutput(Sender: TObject);
     procedure NoticeTimerTimer(Sender: TObject);
+    procedure PushTimerTimer(Sender: TObject);
+    procedure StopPush;
+    procedure ShowPushBusy;
+    procedure MenuStopPushClick(Sender: TObject);
     procedure NoticeButton(Sender: TObject; AIndex: integer);
     procedure ShowRemoteFailure(AJob: TGittanRemoteJob; AHookFailed: boolean);
     procedure ShowRemoteNotice;
@@ -3050,7 +3068,7 @@ resourcestring
   rsPlanAgain = 'Plan Again';
   rsPlanTicked = 'Included the files of commit %d of %d: commit them, then Commit > Split ' +
     'Changes into Commits for the next';
-  rsPlanOne = '%s sees the changes as one commit: its message is in the field';
+  rsPlanOne = '%s sees the changes as one commit';
   rsFixLink = '✦ Fix';
   rsFixStopLink = 'Stop Fixing';
   rsFixing = '%s is fixing the finding at line %d of %s...';
@@ -3106,6 +3124,8 @@ resourcestring
   rsCommitTickHint = 'A file with a tick goes into the commit. Click its box or press ' +
     'Space to leave it out.';
   rsDontShowAgain = 'Don''t Show Again';
+  rsCommitIndexStale = 'Committed, but the index could not be updated, so the files may still ' +
+    'show as changed. git reset <files> brings it up to date.';
   rsCommitted = 'Committed %s: %s';
   rsCommittedTitle = 'Committed %s';
   rsCommittedBehind = '%s · pull the %d new commits on %s, then push';
@@ -3146,6 +3166,13 @@ resourcestring
   rsNoticeDeleting = 'Deleting %s on the remote';
   rsHookFailed = 'The pre-push hook failed';
   rsPushAgain = 'Push Again';
+  rsPushSilent = 'Waiting for the server, %s';
+  rsPushHookSilent = 'Running the pre-push hook, %s without output';
+  rsStopPushMenu = 'Stop Push';
+  rsStopAction = 'Stop';
+  rsStoppingPush = 'Stopping the push...';
+  rsPushStopped = 'The push was stopped';
+  rsPushStoppedDetail = 'The server may have taken it already; a fetch shows whether it did.';
   rsPushNoVerifyMenu = 'Push Without Hooks';
   rsPushNoVerifyAction = 'Push Without Hooks';
   rsNoVerifyLfsTitle = 'Push Without Hooks';
@@ -3403,6 +3430,7 @@ resourcestring
   rsGraphDragTip = 'Drag a commit onto %s to merge it.';
   rsGraphLoadFailed = 'Could not read the history';
   rsOpenFileFailed = 'Could not open %s';
+  rsOpenFileGone = 'The file is no longer there.';
   rsBmCommitPick = 'Pick a Commit in the Graph...';
   rsBmNewItem = '&New Branch...';
   rsToBranchMoveIncludedItem = 'Move &Included Files to New Branch...';
@@ -3794,6 +3822,7 @@ resourcestring
   rsNoticeLfsDownloading = 'Downloading %s from Git LFS';
   rsLfsDownloaded = 'Downloaded %s';
   rsLfsDownloadFailed = 'The Git LFS download failed';
+  rsWaitingDropped = 'The waiting fetch, pull or push was dropped, as the commit failed';
   rsWaitingForFetch = 'Waiting for the background fetch...';
   rsAlreadyWaiting = 'Another action is already waiting for the background fetch.';
   rsLfsMissingTitle = 'Git LFS is not installed';
@@ -4264,6 +4293,10 @@ const
   PillPause = 250;
   { Before the notice shows for a fetch, pull or push without a hook. }
   NoticeDelay = 1000;
+  { How long a push may be silent before the seconds are counted, and
+    before it can be stopped from the notice, in milliseconds. }
+  PushSilentFrom = 10000;
+  PushStopFrom = 60000;
   { How often the timer looks whether a background fetch is due. }
   AutoFetchCheck = 60000;
   { How long one parse may take before a lookup or the indexer gives up
@@ -4852,6 +4885,10 @@ begin
   FNoticeTimer.Enabled := False;
   FNoticeTimer.Interval := NoticeDelay;
   FNoticeTimer.OnTimer := @NoticeTimerTimer;
+  FPushTimer := TTimer.Create(Self);
+  FPushTimer.Enabled := False;
+  FPushTimer.Interval := 1000;
+  FPushTimer.OnTimer := @PushTimerTimer;
   FAutoFetchTimer := TTimer.Create(Self);
   FAutoFetchTimer.Interval := AutoFetchCheck;
   FAutoFetchTimer.OnTimer := @AutoFetchTimerTimer;
@@ -4907,6 +4944,9 @@ begin
   { Remind Me Later may have been answered in another tab. }
   if App.UpdateOk then
     ShowUpdateBadge;
+  { After the click or the key that showed the tab is done with. }
+  if FFindWaiting or FPlanWaiting then
+    Application.QueueAsyncCall(@ShowAnswersAsync, 0);
 end;
 
 function TRepoFrame.IsBlank: boolean;
@@ -6134,6 +6174,7 @@ begin
   FForcePushItem := AddItem(RepoMenu, rsForcePushMenu, ShortCut(VK_P, [ssModifier, ssShift,
     ssAlt]), @MenuForcePushClick);
   FPushNoVerifyItem := AddItem(RepoMenu, rsPushNoVerifyMenu, 0, @MenuPushNoVerifyClick);
+  FStopPushItem := AddItem(RepoMenu, rsStopPushMenu, 0, @MenuStopPushClick);
   FFetchItem := AddItem(RepoMenu, rsFetchMenu, ShortCut(VK_F, [ssModifier, ssAlt]),
     @MenuFetchClick);
   RepoMenu.Add(NewLine);
@@ -6795,11 +6836,23 @@ end;
 { AFileName is not a const: callers pass FEditPath, which LeaveEdit
   clears, and a const would then name freed memory. }
 procedure TRepoFrame.OpenFile(AFileName: string);
+var
+  Failure: string;
 begin
   { A file dropped while a repository opens is shown instead. }
   AbandonOpenJob;
   FlushEdit;
   LeaveEdit;
+  { The editor's LoadFromFile does nothing for a missing file and raises
+    nothing: the text of the view before would pass for the file's, open
+    to edits and to a save over its name. }
+  if not FileExists(AFileName) then
+  begin
+    ShowSummary;
+    UpdateChangeNav;
+    BannerError(Format(rsOpenFileFailed, [ExtractFileName(AFileName)]), rsOpenFileGone);
+    Exit;
+  end;
   if FTranslations and IsPoPath(AFileName) then
   begin
     ShowTranslationFile(AFileName);
@@ -6819,23 +6872,32 @@ begin
   { A large file's load pumps messages for its progress, where the tab
     may be closed (InNestedLoop) or the watcher's refresh come. }
   HoldRefresh;
+  Failure := '';
   try
     try
       Edit.LoadFromFile(AFileName, []);
     except
-      { No permission, locked by another program on Windows, or gone
-        since it was listed: the view stays read-only, and says why. }
+      { No permission, or locked by another program on Windows. }
       on E: Exception do
       begin
-        Edit.ModeReadOnly := True;
-        BannerError(Format(rsOpenFileFailed, [ExtractFileName(AFileName)]), E.Message);
-        Exit;
+        Failure := E.Message;
+        if Failure = '' then
+          Failure := E.ClassName;
       end;
     end;
   finally
     ReleaseRefresh;
   end;
   Edit.ModeReadOnly := True;
+  { The load emptied the editor before it failed: the view before cannot
+    stay, so the summary comes. }
+  if Failure <> '' then
+  begin
+    ShowSummary;
+    UpdateChangeNav;
+    BannerError(Format(rsOpenFileFailed, [ExtractFileName(AFileName)]), Failure);
+    Exit;
+  end;
   SetLineStatesBand(Edit, False);
   Edit.FileName := AFileName;
   FHeader.SetFile(AFileName, -1);
@@ -8131,7 +8193,17 @@ begin
     WatchPace);
   FWatcher.OnChange := @WatcherChange;
   FWatcher.IgnoreWhitespace := FRepo.IgnoreWhitespace;
+  HoldWatcher;
   FWatcher.Start;
+end;
+
+{ No refresh of the index by the watcher while a commit or a job of the
+  remote's runs: both want index.lock. Called before either starts and
+  when it is done (UpdateRemoteItems). }
+procedure TRepoFrame.HoldWatcher;
+begin
+  if FWatcher <> nil then
+    FWatcher.HoldIndex((FCommitJob <> nil) or (FRemoteJob <> nil));
 end;
 
 { The watcher is let go, not waited for: a poll under way (a status of a
@@ -8163,6 +8235,8 @@ end;
 
 procedure TRepoFrame.AppActivate(Sender: TObject);
 begin
+  if FFindWaiting or FPlanWaiting then
+    Application.QueueAsyncCall(@ShowAnswersAsync, 0);
   if FWatcher = nil then
     Exit;
   FWatcher.Interval := WatchInterval;

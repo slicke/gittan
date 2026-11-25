@@ -502,6 +502,7 @@ var
   D: TOpenDialog;
   Picked: TStringList;
   i: integer;
+  OneFolder: boolean;
 
   function HasFile(const AName: string): boolean;
   var
@@ -534,6 +535,17 @@ begin
         if not HasFile(Picked[i]) then
           AFiles.Add(Picked[i]);
       AFolder := ExtractFileDir(Picked[Picked.Count - 1]);
+      { Those picked before are of the same series when they lie in the
+        same folder: 0001 added after 0002 goes first. }
+      OneFolder := True;
+      for i := 0 to AFiles.Count - 1 do
+        OneFolder := OneFolder and (ExtractFileDir(AFiles[i]) = AFolder);
+      if OneFolder then
+      begin
+        Picked.Assign(AFiles);
+        Picked.Sort;
+        AFiles.Assign(Picked);
+      end;
     end;
   finally
     Picked.Free;

@@ -16,7 +16,11 @@ uses
   {$IFDEF LCLGtk3}
   LazGLib2,
   {$ENDIF}
+  {$IFDEF MSWINDOWS}
+  Windows,
+  {$ENDIF}
   Forms,
+  gittan.git,
   { Before any window: the brush cache that survives a change of the
     system's appearance. }
   gittan.brushcache,
@@ -31,6 +35,12 @@ uses
 {$R *.res}
 
 begin
+  {$IFDEF MSWINDOWS}
+  { What the uninstaller looks for (dist/windows/gittan.iss); Windows
+    closes it when the last Gittan ends. }
+  CreateMutex(nil, False, 'GittanRunning');
+  {$ENDIF}
+  ClearGitEnvironment;
   Application.Title:='Git Tree Analyzer & Navigator';
   {$IFDEF LCLCocoa}
   { The application menu's Hide, Quit and About items name the title,

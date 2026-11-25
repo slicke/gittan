@@ -94,6 +94,12 @@ type
     FPullTone, FMessageTone: TGittanStatusTone;
     FMessageIcon: string;
     FBusy: boolean;
+    { The messages of what runs, the latest last; Owner is nil for the
+      one ShowBusy shows. }
+    FBusies: array of record
+      Owner: TObject;
+      Text, Icon: string;
+    end;
     FBusyPhase: integer;
     FBusyRect: TRect;
     FHints: array[TGittanStatusPart] of string;
@@ -112,6 +118,10 @@ type
     procedure SetHot(AValue: TGittanStatusPart);
     procedure TimerTimer(Sender: TObject);
     procedure BusyTimerTimer(Sender: TObject);
+    procedure AddBusy(AOwner: TObject; const AText, AIcon: string);
+    procedure DropBusy(AOwner: TObject);
+    function ShowLastBusy: boolean;
+    procedure PaintBusy(const AText, AIcon: string);
     procedure SetBusy(AValue: boolean);
     function HotHint: string;
     procedure HintTimerTimer(Sender: TObject);
@@ -187,6 +197,12 @@ type
       otherwise the text is on the track's row under the buttons and the
       line, as wide as the text, right under it. }
     procedure ShowBusy(const AText: string; const AIcon: string = '');
+    {** ShowBusy for the job AOwner, one of several that may run at once:
+      its message comes back when a later one ends, until EndBusy. }
+    procedure ShowBusyFor(AOwner: TObject; const AText: string; const AIcon: string = '');
+    {** AOwner has ended: what else runs is shown, or nothing. A message
+      that is not a busy one stays. }
+    procedure EndBusy(AOwner: TObject);
     procedure ClearMessage;
     {** Shows the track line filled APos of ATotal with AText before it,
       in place of the sync counts, in the accent color after the icon of
@@ -872,6 +888,9 @@ end;
 procedure TGittanStatusBar.ShowMessage(const AText: string; ATone: TGittanStatusTone;
   ASeconds: integer);
 begin
+  DropBusy(nil);
+  if (AText = '') and ShowLastBusy then
+    Exit;
   FMessage := AText;
   FMessageTone := ATone;
   FMessageIcon := '';
@@ -887,7 +906,8 @@ begin
   Repaint;
 end;
 
-procedure TGittanStatusBar.ShowBusy(const AText: string; const AIcon: string);
+{ Shown at once, as a message is. }
+procedure TGittanStatusBar.PaintBusy(const AText, AIcon: string);
 begin
   FTimer.Enabled := False;
   if (FMessage = AText) and FBusy and (FMessageIcon = AIcon) then
@@ -899,9 +919,67 @@ begin
   Repaint;
 end;
 
+procedure TGittanStatusBar.AddBusy(AOwner: TObject; const AText, AIcon: string);
+var
+  n: integer;
+begin
+  DropBusy(AOwner);
+  if AText = '' then
+    Exit;
+  n := Length(FBusies);
+  SetLength(FBusies, n + 1);
+  FBusies[n].Owner := AOwner;
+  FBusies[n].Text := AText;
+  FBusies[n].Icon := AIcon;
+end;
+
+procedure TGittanStatusBar.DropBusy(AOwner: TObject);
+var
+  i, n: integer;
+begin
+  n := 0;
+  for i := 0 to High(FBusies) do
+    if FBusies[i].Owner <> AOwner then
+    begin
+      FBusies[n] := FBusies[i];
+      Inc(n);
+    end;
+  SetLength(FBusies, n);
+end;
+
+function TGittanStatusBar.ShowLastBusy: boolean;
+begin
+  Result := Length(FBusies) > 0;
+  if Result then
+    PaintBusy(FBusies[High(FBusies)].Text, FBusies[High(FBusies)].Icon);
+end;
+
+procedure TGittanStatusBar.ShowBusy(const AText: string; const AIcon: string);
+begin
+  AddBusy(nil, AText, AIcon);
+  PaintBusy(AText, AIcon);
+end;
+
+procedure TGittanStatusBar.ShowBusyFor(AOwner: TObject; const AText: string;
+  const AIcon: string);
+begin
+  AddBusy(AOwner, AText, AIcon);
+  PaintBusy(AText, AIcon);
+end;
+
+procedure TGittanStatusBar.EndBusy(AOwner: TObject);
+begin
+  DropBusy(AOwner);
+  if FBusy and not ShowLastBusy then
+    ClearMessage;
+end;
+
 procedure TGittanStatusBar.ClearMessage;
 begin
   FTimer.Enabled := False;
+  DropBusy(nil);
+  if ShowLastBusy then
+    Exit;
   SetBusy(False);
   FMessageIcon := '';
   Change(FMessage, '');

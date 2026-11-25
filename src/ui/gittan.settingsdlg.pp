@@ -243,7 +243,7 @@ resourcestring
     'It is built with Free Pascal and Lazarus; ATSynEdit, ATSynEdit_Ex and ' +
     'ATFlatControls (MPL 2.0 or LGPL); EControl (for open source); EncConv, ' +
     'BGRABitmap and MetaDarkStyle (LGPL); LazInk (0BSD) and the lexers of CudaText; ' +
-    'quickjs-ng (MIT), the extensions'' JavaScript engine.';
+    'toml-fp (MIT); quickjs-ng (MIT), the extensions'' JavaScript engine.';
   rsOK = 'OK';
   rsCancel = 'Cancel';
 
@@ -402,6 +402,7 @@ type
     FExtInfo: TLabel;
     FExtResetBtn, FExtFolderBtn, FExtReloadBtn: TButton;
     FExtReload: TSettingsExtReload;
+    FExtReloading: boolean;
     FExtSettingsBox: TPanel;
     FExtInfos: TGittanExtInfos;
     FExtDefs: TGittanExtSettingDefs;
@@ -1294,7 +1295,8 @@ end;
   again. }
 procedure TSettingsForm.ExtResetClick(Sender: TObject);
 begin
-  if (FExtList.ItemIndex < 0) or (FExtResets = nil) then
+  if (FExtList.ItemIndex < 0) or (FExtList.ItemIndex > High(FExtInfos)) or
+    (FExtResets = nil) then
     Exit;
   FExtResets.Add(FExtInfos[FExtList.ItemIndex].Id);
   FExtResetBtn.Enabled := False;
@@ -1305,11 +1307,30 @@ end;
   without closing the dialog. A box unticked and not yet saved is
   ticked again as the settings have it. }
 procedure TSettingsForm.ExtReloadClick(Sender: TObject);
+var
+  Infos: TGittanExtInfos;
+  Defs: TGittanExtSettingDefs;
 begin
-  if not Assigned(FExtReload) then
+  if not Assigned(FExtReload) or FExtReloading then
     Exit;
-  FExtReload(FExtInfos, FExtDefs, FExtValues);
-  ShowExtList;
+  { Into lists of its own: the reload runs the message loop, and the
+    page's controls still index the ones shown. }
+  FExtReloading := True;
+  FExtList.Enabled := False;
+  FExtSettingsBox.Enabled := False;
+  FExtResetBtn.Enabled := False;
+  FExtReloadBtn.Enabled := False;
+  try
+    FExtReload(Infos, Defs, FExtValues);
+    FExtInfos := Infos;
+    FExtDefs := Defs;
+  finally
+    FExtReloading := False;
+    FExtList.Enabled := True;
+    FExtSettingsBox.Enabled := True;
+    FExtReloadBtn.Enabled := True;
+    ShowExtList;
+  end;
 end;
 
 procedure TSettingsForm.ExtFolderClick(Sender: TObject);
@@ -1328,7 +1349,8 @@ var
   Value, Pair: string;
   i: integer;
 begin
-  if (FExtValues = nil) or not (Sender is TControl) then
+  if (FExtValues = nil) or not (Sender is TControl) or (TControl(Sender).Tag < 0) or
+    (TControl(Sender).Tag > High(FExtDefs)) then
     Exit;
   Def := FExtDefs[TControl(Sender).Tag];
   if Sender is TCheckBox then

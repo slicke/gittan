@@ -383,7 +383,6 @@ begin
     if FConflictJob <> nil then
     begin
       AbandonConflictJob;
-      FStatus.ShowMessage('', stNormal, 0);
     end
     else
       StartConflictJob(FResolveIndex);

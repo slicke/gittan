@@ -815,7 +815,11 @@ procedure TGittanToolbar.SetTabs(const ACaptions, AHints: array of string;
   const AMarks, AExts: array of boolean; AActive: integer; AFixed: boolean);
 var
   i: integer;
+  OldTip: string;
 begin
+  OldTip := '';
+  if (FHot >= 0) and (FHot <= High(FHints)) then
+    OldTip := FHints[FHot];
   FFixed := AFixed;
   SetLength(FCaptions, Length(ACaptions));
   SetLength(FHints, Length(ACaptions));
@@ -835,7 +839,14 @@ begin
   if FHot > High(FCaptions) then
     FHot := -1;
   if FStrip <> nil then
+  begin
+    { Another tab may be under the mouse now, with a tip of its own. }
+    if (FHot >= 0) and (FHints[FHot] <> OldTip) and (FHints[FHot] <> '') then
+      FStrip.setToolTip(NSStr(FHints[FHot]))
+    else if (OldTip <> '') and ((FHot < 0) or (FHints[FHot] = '')) then
+      FStrip.setToolTip(nil);
     FStrip.setNeedsDisplay_(True);
+  end;
 end;
 
 procedure TGittanToolbar.SetNav(ABack, AForward: boolean;

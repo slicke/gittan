@@ -151,13 +151,17 @@ function ReadSigningSetup(const ARoot: string): TGittanSigningSetup;
 function ReadCommitterSetup(const ARoot: string): TGittanCommitter;
 function ParseCommitterSetup(const AOutput: string): TGittanCommitter;
 
+{** The line of AEmail and the SSH key AKey in the allowed signers file
+  set anywhere, else in DefaultAllowedSignersFile, set globally; nothing
+  to do when it is there (AddAllowedSigner). }
+function EnsureAllowedSigner(const ARoot, AEmail, AKey: string; out AError: string): boolean;
 {** Saves ASetup in the repository's own config (ALocal) or the global
   one, as SetIdentity does with the identity: commit.gpgsign and
   tag.gpgSign on with gpg.format and user.signingkey, or both unset at
   that scope when Sign is off (and set to false there when a wider
   scope still turns them on, so the choice holds), and with the global
   one the repository's own values are unset first, since they would go
-  before it. For an
+  before it (its format and key only with Sign on). For an
   SSH key the allowed signers file is seen to as well, so Gittan can
   show one's own commits as verified: the one set anywhere, else
   DefaultAllowedSignersFile set globally, gets a line with AEmail and
@@ -978,10 +982,28 @@ begin
   Result.GpgProgram := OpenPgpProgramIn(ARoot);
 end;
 
+function EnsureAllowedSigner(const ARoot, AEmail, AKey: string; out AError: string): boolean;
+var
+  Output, Allowed: string;
+begin
+  AError := '';
+  Allowed := ConfigValue(ARoot, ['config', '--get', 'gpg.ssh.allowedSignersFile']);
+  if Allowed = '' then
+  begin
+    Allowed := DefaultAllowedSignersFile;
+    if not RunGitIn(ARoot, ['config', '--global', '--replace-all',
+      'gpg.ssh.allowedSignersFile', Allowed], Output, AError) then
+      Exit(False);
+  end
+  else
+    Allowed := AllowedSignersPath(ARoot, Allowed);
+  Result := AddAllowedSigner(Allowed, AEmail, AKey, AError);
+end;
+
 function WriteSigningSetup(const ARoot: string; const ASetup: TGittanSigningSetup;
   const AEmail: string; ALocal: boolean; out AError: string): boolean;
 var
-  Scope, Output, Allowed, Key: string;
+  Scope, Output, Key: string;
 begin
   AError := '';
   if ALocal then
@@ -991,9 +1013,14 @@ begin
   { TStringArray.Create, not [...]: FPC 3.2.2 cuts a for-in's literal
     strings to the first one's length (user.signingke). }
   if not ALocal then
-    for Key in TStringArray.Create('commit.gpgsign', 'tag.gpgSign', 'gpg.format',
-      'user.signingkey') do
+  begin
+    for Key in TStringArray.Create('commit.gpgsign', 'tag.gpgSign') do
       RunGitIn(ARoot, ['config', '--local', '--unset-all', Key], Output, AError);
+    { Off, the format and the key are kept, as at the scope itself. }
+    if ASetup.Sign then
+      for Key in TStringArray.Create('gpg.format', 'user.signingkey') do
+        RunGitIn(ARoot, ['config', '--local', '--unset-all', Key], Output, AError);
+  end;
   if ASetup.Sign then
   begin
     Result := RunGitIn(ARoot, ['config', Scope, '--replace-all', 'commit.gpgsign', 'true'],
@@ -1006,19 +1033,7 @@ begin
     if not Result then
       Exit;
     if ASetup.Format = sfSsh then
-    begin
-      Allowed := ConfigValue(ARoot, ['config', '--get', 'gpg.ssh.allowedSignersFile']);
-      if Allowed = '' then
-      begin
-        Allowed := DefaultAllowedSignersFile;
-        if not RunGitIn(ARoot, ['config', '--global', '--replace-all',
-          'gpg.ssh.allowedSignersFile', Allowed], Output, AError) then
-          Exit(False);
-      end
-      else
-        Allowed := AllowedSignersPath(ARoot, Allowed);
-      Result := AddAllowedSigner(Allowed, AEmail, ASetup.Key, AError);
-    end;
+      Result := EnsureAllowedSigner(ARoot, AEmail, ASetup.Key, AError);
   end
   else
   begin

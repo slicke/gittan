@@ -61,6 +61,9 @@ type
 {** The base of the REST API of the GitHub at AHost: api.github.com
   for github.com, https://host/api/v3 for an Enterprise host. }
 function GitHubApiBase(const AHost: string): string;
+{** The host gh is logged in to for a remote at AHost: github.com for its
+  www and ssh names (ssh://git@ssh.github.com:443/...), else AHost. }
+function GitHubWebHost(const AHost: string): string;
 
 {** The logins of the author and the committer of the commit AHash in
   AOwner/ARepo, each once, in that order; a commit whose e-mail GitHub
@@ -97,16 +100,24 @@ function CommitPeople(const ARoot, AHash: string; out AAuthorEmail, ACommitterEm
 implementation
 
 uses
-  fpjson, jsonparser, gittan.http;
+  fpjson, jsonparser, gittan.http, gittan.textfile;
 
 const
   GitHubAccept = 'Accept: application/vnd.github+json';
   FetchSeconds = 20;
 
+function GitHubWebHost(const AHost: string): string;
+begin
+  if (AHost = '') or SameText(AHost, 'www.github.com') or SameText(AHost, 'ssh.github.com') or
+    SameText(AHost, 'github.com') then
+    Result := 'github.com'
+  else
+    Result := AHost;
+end;
+
 function GitHubApiBase(const AHost: string): string;
 begin
-  if (AHost = 'github.com') or (AHost = 'www.github.com') or (AHost = 'ssh.github.com') or
-    (AHost = '') then
+  if GitHubWebHost(AHost) = 'github.com' then
     Result := 'https://api.github.com'
   else
     Result := 'https://' + AHost + '/api/v3';
@@ -151,7 +162,7 @@ end;
 function SafeJson(const AJson: string): TJSONData;
 begin
   try
-    Result := GetJSON(AJson);
+    Result := GetJSONLimited(AJson);
   except
     Result := nil;
   end;
@@ -407,7 +418,7 @@ begin
   { Without a token GitHub answers 404 for a private repository's
     commit; a tool not logged in to the host gives none. }
   Token := '';
-  if (FCli <> '') and RunCli(FCli, FRoot, ['auth', 'token', '--hostname', FHost],
+  if (FCli <> '') and RunCli(FCli, FRoot, ['auth', 'token', '--hostname', GitHubWebHost(FHost)],
     ['GH_PROMPT_DISABLED=1', 'GH_NO_UPDATE_NOTIFIER=1'], Token, Err) then
     Token := Trim(Token)
   else
@@ -416,7 +427,7 @@ begin
   begin
     { 404 or 422: GitHub has no such commit, as before a push. }
     if (Pos('not found', FError) > 0) or (Pos('422', FError) > 0) then
-      FError := FHost + ' has no commit ' + Copy(FHash, 1, 7) + ' in ' + FOwner + '/' + FRepo +
+      FError := GitHubWebHost(FHost) + ' has no commit ' + Copy(FHash, 1, 7) + ' in ' + FOwner + '/' + FRepo +
         '. Is it pushed?';
     Done;
     Exit;

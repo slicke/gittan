@@ -86,6 +86,9 @@ type
     FBatchShown: boolean;
     FScanJob: TGittanGoneScanJob;
     FStatusJob: TGittanStatusJob;
+    FFoldersJob: TGittanFoldersJob;
+    { The rows were read again while it ran. }
+    FFoldersAgain: boolean;
     FIdentityJob: TGittanIdentityJob;
     FMaintScanJob: TGittanMaintScanJob;
     FMaintRunJob: TGittanMaintRunJob;
@@ -152,6 +155,9 @@ type
     { Asks the forge again now and then, shown or not, so the globe's
       count follows. }
     FPollTimer: TTimer;
+    { Looks for an extension that does not answer. }
+    FExtWaitTimer: TTimer;
+    FExtRunAsked, FExtTabAsked: QWord;
     { What an action on a pull request did, or the forge's words when
       it failed, over the page. }
     FBanner: TGittanBanner;
@@ -189,6 +195,8 @@ type
     procedure IdentityCheck;
     procedure IdentityProgress(Sender: TObject);
     procedure IdentityDone(Sender: TObject);
+    procedure LookForFolders(const ARows: TGittanBatchRows);
+    procedure FoldersDone(Sender: TObject);
     procedure BatchMaintScan(Sender: TObject);
     procedure MaintScanProgress(Sender: TObject);
     procedure MaintScanDone(Sender: TObject);
@@ -249,6 +257,8 @@ type
     procedure ExtTabAnswer(const AJson: string);
     procedure BatchExtRun(Sender: TObject);
     procedure BatchOpenUrl(Sender: TObject; const APath: string);
+    procedure ExtWaitTimerTimer(Sender: TObject);
+    procedure BatchExtStop(Sender: TObject);
     procedure RunExtStep;
     procedure RunExtStepAsync(Data: PtrInt);
     procedure FinishExtRun(const AError: string);
@@ -387,6 +397,9 @@ resourcestring
   rsExtTabGone = 'The extension no longer has this tab.';
   rsExtRunGone = 'The extension no longer has this operation.';
   rsExtReloaded = 'The extensions were loaded again, which stopped the run.';
+  rsExtNoAnswer = 'The extension did not answer.';
+  rsExtCallFailed = 'The extension failed; the Console has the error.';
+  rsExtStopped = 'Stopped.';
   rsExtAccountChanged = 'The account changed, which stopped the run.';
   { Without a hosting service: the globe's hint and Batch's note. }
   rsNoForgeHint = 'Batch: work in several repositories at once';
@@ -404,6 +417,8 @@ const
   { The minutes between two looks at the forge, and the seconds a
     success stays in the banner. }
   ForgePollMinutes = 5;
+  { A little over the five minutes the extensions' shim waits. }
+  ExtAnswerMs = 310 * 1000;
   BannerSeconds = 8;
 
 var
@@ -459,6 +474,12 @@ begin
     FStatusJob.Stop(False);
     FZombies.Add(FStatusJob);
     FStatusJob := nil;
+  end;
+  if FFoldersJob <> nil then
+  begin
+    FFoldersJob.Stop(False);
+    FZombies.Add(FFoldersJob);
+    FFoldersJob := nil;
   end;
   if FIdentityJob <> nil then
   begin
@@ -537,6 +558,7 @@ begin
   FBatch.OnMaintScan := @BatchMaintScan;
   FBatch.OnMaintRun := @BatchMaintRun;
   FBatch.OnExtRun := @BatchExtRun;
+  FBatch.OnExtStop := @BatchExtStop;
   FBatch.OnOpenUrl := @BatchOpenUrl;
   FBatch.OnNotice := @BatchNotice;
   FExtTab := -1;
@@ -551,6 +573,10 @@ begin
   FThemeTimer.Interval := 2000;
   FThemeTimer.Enabled := False;
   FThemeTimer.OnTimer := @ThemeTimerTimer;
+  FExtWaitTimer := TTimer.Create(Self);
+  FExtWaitTimer.Interval := 5000;
+  FExtWaitTimer.Enabled := False;
+  FExtWaitTimer.OnTimer := @ExtWaitTimerTimer;
   FPollTimer := TTimer.Create(Self);
   FPollTimer.Interval := ForgePollMinutes * 60 * 1000;
   FPollTimer.Enabled := False;
@@ -1164,8 +1190,12 @@ end;
   repository list and the recent repositories, measured before it is
   shown. }
 procedure TForgeView.ShowBatch;
+var
+  Rows: TGittanBatchRows;
 begin
-  FBatch.SetRows(BatchRows(App.RepoList, App.Settings.Recent, rsRecentRepos));
+  Rows := BatchRows(App.RepoList, App.Settings.Recent, rsRecentRepos);
+  FBatch.SetRows(Rows);
+  LookForFolders(Rows);
   FBatch.Width := FBox.ClientWidth;
   FBatch.FitHeight(FBox.ClientHeight);
   FPage.Visible := False;
@@ -1174,6 +1204,45 @@ begin
     each time they show. }
   if FBatch.Operation in [BatchOverview, BatchIdentity] then
     BatchCheck(Self);
+end;
+
+{ Which of the rows' folders are gone, asked in a job: one on a volume
+  that does not answer would hold the window. }
+procedure TForgeView.LookForFolders(const ARows: TGittanBatchRows);
+var
+  Paths: TStringArray;
+  i: integer;
+begin
+  if FFoldersJob <> nil then
+  begin
+    FFoldersAgain := True;
+    Exit;
+  end;
+  FFoldersAgain := False;
+  Paths := nil;
+  for i := 0 to High(ARows) do
+    if not ARows[i].IsFolder then
+      Insert(ARows[i].Path, Paths, Length(Paths));
+  if Length(Paths) = 0 then
+    Exit;
+  FFoldersJob := TGittanFoldersJob.Create(Paths);
+  FFoldersJob.OnDone := @FoldersDone;
+  FFoldersJob.Start;
+end;
+
+procedure TForgeView.FoldersDone(Sender: TObject);
+var
+  Job: TGittanFoldersJob;
+begin
+  Job := TGittanFoldersJob(Sender);
+  if Job <> FFoldersJob then
+    Exit;
+  FFoldersJob := nil;
+  FZombies.Add(Job);
+  Application.QueueAsyncCall(@FreeJobsAsync, 0);
+  FBatch.SetGoneFolders(Job.Gone);
+  if FFoldersAgain then
+    LookForFolders(BatchRows(App.RepoList, App.Settings.Recent, rsRecentRepos));
 end;
 
 { Another operation's pill: kept for the next start, and the overview or
@@ -1979,7 +2048,10 @@ end;
 procedure TForgeView.RebuildExtAsync(Data: PtrInt);
 begin
   FExtQueued := False;
-  RebuildExt;
+  { In a permission question of a reload the tab shown would be taken for
+    one that is gone; the reload asks again when it is done. }
+  if not App.Extensions.Reloading then
+    RebuildExt;
 end;
 
 { What every request to an extension gets: the forge and the login. }
@@ -2124,14 +2196,53 @@ begin
   RenderExtTabSoon;
 end;
 
+{ The answer Gittan gives in an extension's place. }
+function ExtNoAnswer(const AError: string): string;
+var
+  O: TJSONObject;
+begin
+  O := TJSONObject.Create(['error', AError]);
+  try
+    Result := O.AsJSON;
+  finally
+    O.Free;
+  end;
+end;
+
+{ The engine's shim answers in an extension's place after its five
+  minutes; this is for one that got past the shim, so no tab stays on
+  Loading and no run goes on for ever. }
+procedure TForgeView.ExtWaitTimerTimer(Sender: TObject);
+var
+  Now: QWord;
+begin
+  Now := GetTickCount64;
+  if (FExtRunSeq <> 0) and (Now - FExtRunAsked > ExtAnswerMs) then
+    ExtDeliver(FExtRunSeq, FExtRunExt, ExtNoAnswer(rsExtNoAnswer));
+  if (FExtTabSeq <> 0) and (FExtTab >= 0) and (FExtTab <= High(FExtTabs)) and
+    (Now - FExtTabAsked > ExtAnswerMs) then
+    ExtDeliver(FExtTabSeq, FExtTabs[FExtTab].ExtId, ExtNoAnswer(rsExtNoAnswer));
+  FExtWaitTimer.Enabled := (FExtRunSeq <> 0) or (FExtTabSeq <> 0);
+end;
+
+{ Stop of a Batch run: what the extension does for the repository it is
+  at it may go on with, but its answer is not taken and no other
+  repository is asked of it. }
+procedure TForgeView.BatchExtStop(Sender: TObject);
+begin
+  FinishExtRun(rsExtStopped);
+end;
+
 { The tab's render, asked with a number of its own; an answer to an
   older request is not taken. }
 procedure TForgeView.RenderExtTab;
 var
   Eng: TGittanExtEngine;
   Ctx: TJSONObject;
-  Key: string;
+  Key, Ext: string;
   Cmd: TGittanExtCommand;
+  Threw: boolean;
+  Seq: integer;
 begin
   if (FExtTab < 0) or (FExtTab > High(FExtTabs)) then
     Exit;
@@ -2154,7 +2265,13 @@ begin
   try
     Ctx.Add('seq', FExtTabSeq);
     Ctx.Add('kind', 'render');
-    Eng.RunCommand(Key, Ctx.AsJSON);
+    Seq := FExtTabSeq;
+    Ext := FExtTabs[FExtTab].ExtId;
+    FExtTabAsked := GetTickCount64;
+    FExtWaitTimer.Enabled := True;
+    Eng.RunCommand(Key, Ctx.AsJSON, Threw);
+    if Threw then
+      ExtDeliver(Seq, Ext, ExtNoAnswer(rsExtCallFailed));
   finally
     Ctx.Free;
   end;
@@ -2186,9 +2303,11 @@ procedure TForgeView.ExtTabAction(Sender: TObject; ARow: integer; const AAction:
 var
   Eng: TGittanExtEngine;
   Ctx: TJSONObject;
-  Key: string;
+  Key, Ext: string;
   Cmd: TGittanExtCommand;
   Row: TJSONData;
+  Threw: boolean;
+  Seq: integer;
 begin
   if (FExtTab < 0) or (FExtTab > High(FExtTabs)) then
     Exit;
@@ -2212,7 +2331,13 @@ begin
       Row := TJSONNull.Create;
     end;
     Ctx.Add('row', Row);
-    Eng.RunCommand(Key, Ctx.AsJSON);
+    Seq := FExtTabSeq;
+    Ext := FExtTabs[FExtTab].ExtId;
+    FExtTabAsked := GetTickCount64;
+    FExtWaitTimer.Enabled := True;
+    Eng.RunCommand(Key, Ctx.AsJSON, Threw);
+    if Threw then
+      ExtDeliver(Seq, Ext, ExtNoAnswer(rsExtCallFailed));
   finally
     Ctx.Free;
   end;
@@ -2348,10 +2473,21 @@ var
   Path, Urls: string;
   Forge: TGittanForgeClass;
   Ctx: TJSONObject;
+  Cmd: TGittanExtCommand;
+  Threw: boolean;
+  Seq: integer;
 begin
   if (FExtRunKey = '') or (FExtRunSeq <> 0) then
     Exit;
   Eng := TGittanExtEngine.Existing;
+  { An answer that came as the extensions were unloaded queued this step:
+    the operation loaded since is another, which nobody ran. }
+  if (Eng <> nil) and Eng.Registry.FindCommand(FExtRunKey, Cmd) and
+    (Eng.GenerationForContext(Cmd.Ctx) <> FExtRunGen) then
+  begin
+    FinishExtRun(rsExtReloaded);
+    Exit;
+  end;
   while FExtRunIndex <= High(FExtRunPaths) do
   begin
     if Eng = nil then
@@ -2385,8 +2521,13 @@ begin
         Ctx.Strings['forge'] := Forge.Name
       else
         Ctx.Nulls['forge'] := True;
-      if not Eng.RunCommand(FExtRunKey, Ctx.AsJSON) then
-        FinishExtRun(rsExtRunGone);
+      Seq := FExtRunSeq;
+      FExtRunAsked := GetTickCount64;
+      FExtWaitTimer.Enabled := True;
+      if not Eng.RunCommand(FExtRunKey, Ctx.AsJSON, Threw) then
+        FinishExtRun(rsExtRunGone)
+      else if Threw then
+        ExtDeliver(Seq, FExtRunExt, ExtNoAnswer(rsExtCallFailed));
     finally
       Ctx.Free;
     end;

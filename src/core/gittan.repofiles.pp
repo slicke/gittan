@@ -50,6 +50,10 @@ function IsLinkPath(const APath: string): boolean;
   it is one. }
 function ReachedWithoutLink(const ARoot, ARelPath: string): boolean;
 
+{** Whether APath lies below the folder ADir, by the names alone: neither
+  is looked up, so a network path (//host/share) is never asked for. }
+function LiesInFolder(const ADir, APath: string): boolean;
+
 {** The gitignore patterns that would hide APath, a path relative to the
   root with "/" separators: the file itself anchored at the root
   ("/dir/name.ext"), every file with its extension ("*.ext", when it has
@@ -99,7 +103,7 @@ function RemoveLfsTrack(const AFileName, APattern: string): boolean;
 implementation
 
 uses
-  {$IFDEF UNIX}BaseUnix,{$ENDIF}
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}BaseUnix,{$ENDIF}
   gittan.textfile;
 
 { Adds every file under ADir (a full path) to AList as ARel + its name,
@@ -108,7 +112,7 @@ uses
 function IsLinkPath(const APath: string): boolean;
 var
   Name: string;
-{$IFDEF UNIX}
+{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
   Info: Stat;
 begin
   { lstat: FileGetSymLinkTarget raises for a link whose target is
@@ -133,6 +137,16 @@ begin
   end;
 end;
 {$ENDIF}
+
+function LiesInFolder(const ADir, APath: string): boolean;
+var
+  Dir: string;
+begin
+  if (ADir = '') or (APath = '') then
+    Exit(False);
+  Dir := IncludeTrailingPathDelimiter(ExpandFileName(ADir));
+  Result := SameFileName(Copy(ExpandFileName(APath), 1, Length(Dir)), Dir);
+end;
 
 function ReachedWithoutLink(const ARoot, ARelPath: string): boolean;
 var

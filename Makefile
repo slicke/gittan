@@ -58,9 +58,11 @@ LAZFLAGS = --widgetset=$(WIDGETSET) $(if $(CPU),--cpu=$(CPU))
 # The version, Major.Minor from Gittan.lpi's version info and the build
 # number CI passes as GITTAN_BUILD (0 in a local build): 0.9.123. Lazarus
 # leaves a number that is 0 out of the .lpi, so a missing one is 0.
-# `make version` prints it, for CI.
+# `make version` prints it, for CI. Not named GITTAN_VERSION, which CI sets
+# for gittan.update: make would export its own value in place of it, also
+# where CI leaves it empty.
 lpi_version_nr = $(or $(shell sed -n -E 's/.*<$(1)VersionNr Value="([0-9]+)".*/\1/p' $(LPI)),0)
-GITTAN_VERSION := $(call lpi_version_nr,Major).$(call lpi_version_nr,Minor).$(or $(GITTAN_BUILD),0)
+APP_VERSION := $(call lpi_version_nr,Major).$(call lpi_version_nr,Minor).$(or $(GITTAN_BUILD),0)
 
 # Gittan.lpi has two build modes: Release (-O2, no debug info, smart linked
 # and stripped, its units in lib/<cpu>-<os>-release) for build, rebuild and
@@ -157,7 +159,7 @@ LEXERS_OWN := lexers
 LEXLIB := lexlib
 
 # Vendored packages, in dependency order: the list is VENDOR_PACKAGES in
-# .github/workflows/build.yml, and a new package goes in both. `make deps`
+# .github/workflows/build.yml, and a new package goes in both and in make.ps1. `make deps`
 # registers each with --add-package-link and compiles it, after a fresh clone
 # or a submodule move; `make ide` installs ATFlatControls and ATSynEdit in the
 # Lazarus IDE (IDE_PACKAGES) and rebuilds it, so it is built with ATSynEdit,
@@ -200,7 +202,7 @@ IDE_STAMP := .ide-vendor
 # into Gittan.app and names it in Info.plist. A fresh bundle's Info.plist has
 # the project title as CFBundleName with its "&" unescaped, which no plist
 # reader accepts; escape it and name the bundle Gittan before adding the icon.
-# Its versions (0.1 and 1 from lazbuild) become GITTAN_VERSION.
+# Its versions (0.1 and 1 from lazbuild) become APP_VERSION.
 # macOS 26 and later take the icon from icons/Assets.car instead (named by
 # CFBundleIconName), which `make icons` compiles from the Icon Composer document
 # icons/Gittan.icon with Xcode's actool; without it they put the .icns on a
@@ -218,8 +220,8 @@ define bundle_icon
 	  cp icons/Assets.car "$(BUNDLE)/Contents/Resources/Assets.car"; \
 	  sed -i '' -E 's/&([^a-zA-Z#]|$$)/\&amp;\1/g' "$$plist"; \
 	  /usr/libexec/PlistBuddy -c 'Set :CFBundleName Gittan' "$$plist"; \
-	  /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString $(GITTAN_VERSION)' "$$plist"; \
-	  /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion $(GITTAN_VERSION)' "$$plist"; \
+	  /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString $(APP_VERSION)' "$$plist"; \
+	  /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion $(APP_VERSION)' "$$plist"; \
 	  /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$$plist" >/dev/null 2>&1 || \
 	    /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string Gittan.icns' "$$plist"; \
 	  /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$$plist" >/dev/null 2>&1 || \
@@ -251,7 +253,7 @@ help:
 	@echo "  wordmark  Write src/ui/gittan.wordmark.inc from icons/wordmark/gittan-wordmark-<theme>.png"
 	@echo "  dialogicon Write src/ui/gittan.dialogicon.inc from icons/dialog/gittan-dialog-<n>.png"
 	@echo "  desktop   Install app.gittan.Gittan.desktop and the icons for ./Gittan in ~/.local/share (Linux)"
-	@echo "  version   Print the version, $(GITTAN_VERSION) (Major.Minor from $(LPI), GITTAN_BUILD)"
+	@echo "  version   Print the version, $(APP_VERSION) (Major.Minor from $(LPI), GITTAN_BUILD)"
 	@echo "  packages  Build the Linux .deb and .rpm into pkg/ (needs fpm and rpmbuild)"
 	@echo "  icons     Pack Gittan.icns and Gittan.ico from ICON_MAC_SRC=$(ICON_MAC_SRC) and ICON_PNG_DIR=$(ICON_PNG_DIR) (macOS only)"
 	@echo "  clean     Remove lib/, $(LEXLIB)/, the test build and the binary"
@@ -291,7 +293,9 @@ ide:
 	done
 	"$(LAZBUILD)" --build-ide=
 	@if git rev-parse --git-dir >/dev/null 2>&1; then \
-	  for d in $(IDE_VENDOR); do echo "$$(git -C $$d rev-parse HEAD) $$d"; done > $(IDE_STAMP); fi
+	  for d in $(IDE_VENDOR); do \
+	    if [ -e "$$d/.git" ]; then echo "$$(git -C $$d rev-parse HEAD) $$d"; fi; \
+	  done > $(IDE_STAMP); fi
 
 vendor-check:
 	@if git rev-parse --git-dir >/dev/null 2>&1; then \
@@ -307,6 +311,7 @@ vendor-check:
 	  done; \
 	  if [ -f $(IDE_STAMP) ]; then \
 	    moved=""; for d in $(IDE_VENDOR); do \
+	      [ -e "$$d/.git" ] || continue; \
 	      grep -qx "$$(git -C $$d rev-parse HEAD 2>/dev/null) $$d" $(IDE_STAMP) || moved="$$moved $$d"; \
 	    done; \
 	    [ -z "$$moved" ] || echo "warning: the Lazarus IDE was built with older$$moved; run: make ide" >&2; \
@@ -431,11 +436,11 @@ desktop:
 # gittan.lexers finds from the executable), the desktop file, the AppStream
 # metainfo and the icons. The .rpm owns /usr/share/gittan, so removing it
 # takes the folder too (dpkg removes an emptied folder itself). The packages
-# carry GITTAN_VERSION.
+# carry APP_VERSION.
 PKG_ROOT := pkg/root
 PKG_ARCH ?= native
 FPM ?= fpm
-FPM_FLAGS = -s dir -n gittan -v $(GITTAN_VERSION) --license GPL-3.0-only \
+FPM_FLAGS = -s dir -n gittan -v $(APP_VERSION) --license GPL-3.0-only \
   --url https://gittan.app --maintainer "Björn Lindh" \
   --description "Git Tree Analyzer & Navigator: a native git client built around the diff" \
   -C $(PKG_ROOT) -p pkg/ -f
@@ -461,7 +466,7 @@ packages: build
 	  --depends 'git >= 2.30' --depends 'libgtk-3.so.0()(64bit)' .
 
 version:
-	@echo $(GITTAN_VERSION)
+	@echo $(APP_VERSION)
 
 run: build
 	"$(RUN_EXE)" $(RUN_ARGS)

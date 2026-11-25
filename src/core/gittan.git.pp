@@ -24,7 +24,8 @@ const
   RemoteAliveInterval = 15;
   RemoteAliveCount = 4;
   {** A transfer over HTTP below RemoteLowSpeedLimit bytes a second for
-    RemoteLowSpeedTime seconds is given up: one that has stalled. }
+    RemoteLowSpeedTime seconds is given up: one that has stalled. Not a
+    push, where a server may be as silent while it runs its hooks. }
   RemoteLowSpeedLimit = 1;
   RemoteLowSpeedTime = 60;
 
@@ -297,7 +298,7 @@ type
     { Git LFS's store folder (LfsObjectFile) and FETCH_HEAD's path
       (LastFetch), '' until they are asked for. }
     FLfsStore, FFetchHead: string;
-    FError: string;
+    FError, FCommitNote: string;
     FBase: string;
     FWholeTree: boolean;
     FTempIndex: string;
@@ -607,8 +608,9 @@ type
       RemoteLowSpeedLimit bytes a second for RemoteLowSpeedTime seconds
       is given up (GIT_HTTP_LOW_SPEED_LIMIT and _TIME), unless the
       environment or the config (http.lowSpeedLimit or lowSpeedTime,
-      for any URL) sets either. }
-    function RemoteEnvironment: TStringArray;
+      for any URL) sets either; not for a push (APush), whose server may
+      be silent for long and which the user stops instead. }
+    function RemoteEnvironment(APush: boolean = False): TStringArray;
     {** Whether AName may name a branch (`git check-ref-format --branch`). }
     function IsBranchName(const AName: string): boolean;
     {** Whether AName may name a tag (`git check-ref-format refs/tags/<name>`). }
@@ -865,8 +867,8 @@ type
       takes away, git is in the middle of nothing else, and the index
       holds something to commit. The file alone does not say so: it
       stays when the staged changes are stashed or discarded one by
-      one, and is removed here then, so that changes staged later are
-      not taken for the squash. Runs git when the file is there. }
+      one, and is not gone by from then on, so that changes staged
+      later are not taken for the squash. Runs git when the file is there. }
     function SquashPending: boolean;
     {** The e-mail the repository commits under (`git config
       user.email`), empty when none is set. }
@@ -1186,10 +1188,11 @@ type
     function CommitDetails(const AHash: string; out ACommit: TGittanCommitLine;
       out ABody: string): boolean;
     {** Brings the index's record of the files' times and sizes up to
-      date (`git update-index -q --refresh`), so a status after it need
+      date (`git status` with optional locks), so a status after it need
       not read files touched but not changed again; every other git
-      Gittan runs takes no optional lock and never does it. False with
-      nothing run while index.lock is there, another git at work. }
+      Gittan runs takes no optional lock and never does it. index.lock
+      is held for the write alone. False with nothing run while it is
+      there, another git at work. }
     function RefreshIndex: boolean;
     {** A text that changes whenever the branch, the set of changed files
       or the content of a changed file changes: the branch, the commit ids
@@ -1212,6 +1215,10 @@ type
       still give one), so it says why only right after a call that
       returned false. }
     property Error: string read FError;
+    {** After a Commit that returned true: why the index could not be
+      brought up to the new commit (index.lock held by another git), so
+      the files committed show as changed; '' when it was. }
+    property CommitNote: string read FCommitNote;
     {** The commit the work tree is compared against: a branch, tag or
       commit id, or empty for HEAD. A range "A..B" compares the commits A
       and B instead, "A...B" the commit B against its merge base with A
@@ -1235,9 +1242,9 @@ type
       thread. }
     property OnOutput: TGittanOutputEvent read FOnOutput write FOnOutput;
     {** Asked as a fetch runs (Fetch, FetchPullRequest, the download of
-      LfsDownload); True ends its git, which then fails with no reason.
-      Called in the caller's thread. A pull, a push or a checkout is
-      never ended halfway, so only a job that fetches sets it. }
+      LfsDownload) or a push; True ends its git, which then fails with no
+      reason. Called in the caller's thread. A pull or a checkout is
+      never ended halfway, so only a job that fetches or pushes sets it. }
     property Cancel: TGittanCancelEvent read FCancel write FCancel;
     {** Pushes, the deletions on a remote among them, without the
       pre-push hook (`git push --no-verify`). }
@@ -1267,6 +1274,15 @@ function EnvironmentVariable(const AName: string): string;
   describes, and a git given a USERPROFILE of Bj÷rn could not write
   ~/.gitconfig. }
 function EnvironmentStrings: TStringArray;
+
+{** Takes the variables that tie a git to one repository (GIT_DIR,
+  GIT_WORK_TREE and their like, what a git alias or hook exports to what
+  it starts, and the -c settings of that git) out of Gittan's own
+  environment, so neither its git, its terminals nor the commands it
+  runs inherit them: every tab would work in that one repository.
+  GIT_CONFIG_COUNT stays, as git does not set it: it is the user's.
+  Called once, as Gittan starts. }
+procedure ClearGitEnvironment;
 
 {** Full path of the command AName (without .exe; Windows adds it) on
   ToolSearchPath, or empty when it is not installed. node is found this
@@ -1545,10 +1561,10 @@ function RunGitEnv(const ADir: string; const AArgs, AEnv: array of string;
   besides Gittan's own: ssh in batch mode with AConnectTimeout seconds
   to connect and keepalives, unless the environment or the config read
   in ADir (the repository's, else the user's) says how to run ssh, and
-  a lowest speed over HTTP, unless they set one (see
-  TGittanRepo.RemoteEnvironment). }
-function RemoteEnvironmentIn(const ADir: string;
-  AConnectTimeout: integer = 0): TStringArray;
+  a lowest speed over HTTP, unless they set one or it is for a push
+  (APush) (see TGittanRepo.RemoteEnvironment). }
+function RemoteEnvironmentIn(const ADir: string; AConnectTimeout: integer = 0;
+  APush: boolean = False): TStringArray;
 
 {** Clones the repository at AUrl into the folder ATarget (`git clone
   --progress`, with --recurse-submodules when ASubmodules is set), which
@@ -1587,7 +1603,9 @@ function ResolveReturns(const AText: string): string;
 {** Puts in AList the local branches of the repository in ADir that track
   a branch no longer on its remote: git ls-remote asks each remote once,
   since the remote-tracking ref stays until a fetch with --prune. A
-  remote that cannot be reached counts none of its branches as gone.
+  remote that cannot be reached counts none of its branches as gone, and
+  a branch that follows something else there (a pull request's
+  refs/pull/7/head) is not asked about.
   For threads: it goes to the network. }
 procedure GoneUpstreamsIn(const ADir: string; AList: TStrings);
 
@@ -1640,7 +1658,7 @@ function ProcessArg(const S: string): string;
 implementation
 
 uses
-  {$ifdef unix}BaseUnix,{$endif}
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}BaseUnix,{$ENDIF}
   Pipes, md5, StrUtils, DateUtils, gittan.textfile;
 
 constructor TGittanDeadline.Create(ASeconds: integer);
@@ -1766,6 +1784,7 @@ var
     Age: longint;
     Size: int64;
     Own: boolean;
+    Asked: QWord;
   end;
   GConflictLock: TRTLCriticalSection;
 
@@ -2182,6 +2201,48 @@ end;
   Windows (whose variable is "Path", and whose PATH is kept as it is).
   Windows takes a name in any case, so there ASkip is matched so too:
   Copilot_Allow_All is the COPILOT_ALLOW_ALL it would read. }
+{$ifdef windows}
+function SetEnvironmentVariableW(AName, AValue: PWideChar): LongBool; stdcall;
+  external 'kernel32' name 'SetEnvironmentVariableW';
+{$else}
+function libc_unsetenv(AName: PChar): cint; cdecl; external 'c' name 'unsetenv';
+{$endif}
+
+procedure ClearGitEnvironment;
+const
+  Names: array[0..9] of string = ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR',
+    'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+    'GIT_NAMESPACE', 'GIT_PREFIX', 'GIT_IMPLICIT_WORK_TREE', 'GIT_CONFIG_PARAMETERS');
+var
+  Name: string;
+  {$ifndef windows}
+  i, j: integer;
+  {$endif}
+begin
+  for Name in Names do
+  begin
+    {$ifdef windows}
+    SetEnvironmentVariableW(PWideChar(UnicodeString(Name)), nil);
+    {$else}
+    { libc's environment and the RTL's envp: one block at the start, but
+      libc moves its own once it adds to it. }
+    libc_unsetenv(PChar(Name));
+    i := 0;
+    while (envp <> nil) and (envp[i] <> nil) do
+      if StrLComp(envp[i], PChar(Name + '='), Length(Name) + 1) = 0 then
+      begin
+        j := i;
+        repeat
+          envp[j] := envp[j + 1];
+          Inc(j);
+        until envp[j - 1] = nil;
+      end
+      else
+        Inc(i);
+    {$endif}
+  end;
+end;
+
 procedure CopyEnvironment(P: TProcess; const ASkip: array of string);
 var
   Env, Prefix: string;
@@ -2724,8 +2785,12 @@ begin
   Env[i] := 'LC_ALL=C';
   Env[i + 1] := 'GIT_TERMINAL_PROMPT=0';
   { git status refreshes the index when it may, under index.lock; the
-    watcher's poll would then make a commit started meanwhile fail. }
-  Env[i + 2] := 'GIT_OPTIONAL_LOCKS=0';
+    watcher's poll would then make a commit started meanwhile fail. A
+    caller that wants just that (RefreshIndex) passes its own. }
+  if HasEnvName(AEnv, 'GIT_OPTIONAL_LOCKS') then
+    Env[i + 2] := 'LC_ALL=C'
+  else
+    Env[i + 2] := 'GIT_OPTIONAL_LOCKS=0';
   if AIndexFile <> '' then
     Env[i + 3] := 'GIT_INDEX_FILE=' + AIndexFile
   else
@@ -2938,25 +3003,62 @@ begin
   end;
 end;
 
-{ Each line of for-each-ref is "branch<TAB>remote<TAB>refs/heads/x",
-  the last two empty without an upstream; each of ls-remote's is
+{ Whether a line of AFetch (remote.<name>.fetch) other than one for
+  branches writes ATracking: refs/pull/*/head:refs/remotes/origin/pr/*
+  writes refs/remotes/origin/pr/7. }
+function FetchedFromElsewhere(AFetch: TStrings; const ATracking: string): boolean;
+var
+  i, p: integer;
+  Spec, Dest, Tail: string;
+begin
+  for i := 0 to AFetch.Count - 1 do
+  begin
+    Spec := Trim(AFetch[i]);
+    if (Spec <> '') and (Spec[1] = '+') then
+      Delete(Spec, 1, 1);
+    p := Pos(':', Spec);
+    if (p = 0) or (Copy(Spec, 1, Length('refs/heads/')) = 'refs/heads/') then
+      Continue;
+    Dest := Copy(Spec, p + 1, MaxInt);
+    p := Pos('*', Dest);
+    if p = 0 then
+    begin
+      if Dest = ATracking then
+        Exit(True);
+      Continue;
+    end;
+    Tail := Copy(Dest, p + 1, MaxInt);
+    if (Length(ATracking) >= Length(Dest)) and
+      (Copy(ATracking, 1, p - 1) = Copy(Dest, 1, p - 1)) and
+      (Copy(ATracking, Length(ATracking) - Length(Tail) + 1, MaxInt) = Tail) then
+      Exit(True);
+  end;
+  Result := False;
+end;
+
+{ Each line of for-each-ref is "branch<TAB>remote<TAB>refs/heads/x<TAB>
+  refs/remotes/origin/x", the last three empty without an upstream; a
+  branch that follows another kind of ref (refs/pull/7/head), or whose
+  remote-tracking ref is fetched from one, is left to git's own [gone],
+  as ls-remote is asked for the branches alone; each of ls-remote's is
   "<id><TAB>refs/heads/x". Split at tabs alone: DelimitedText reads a
   quote, which a branch name may hold. }
 procedure GoneUpstreamsIn(const ADir: string; AList: TStrings);
 var
   Output, Err, Line, Remote: string;
   Fields: TStringArray;
-  Tracks, Heads, Asked: TStringList;
+  Tracks, Heads, Asked, Fetch: TStringList;
   i: integer;
 begin
   AList.Clear;
   if not RunGitIn(ADir, ['for-each-ref',
-    '--format=%(refname:lstrip=2)%09%(upstream:remotename)%09%(upstream:remoteref)',
-    'refs/heads'], Output, Err) then
+    '--format=%(refname:lstrip=2)%09%(upstream:remotename)%09%(upstream:remoteref)' +
+    '%09%(upstream)', 'refs/heads'], Output, Err) then
     Exit;
   Tracks := TStringList.Create;
   Heads := TStringList.Create;
   Asked := TStringList.Create;
+  Fetch := TStringList.Create;
   try
     Tracks.Text := Output;
     { Branch and remote names are case-sensitive: Feature gone while
@@ -2967,7 +3069,8 @@ begin
     for i := 0 to Tracks.Count - 1 do
     begin
       Fields := Tracks[i].Split([#9]);
-      if (Length(Fields) < 3) or (Fields[1] = '') or (Fields[2] = '') then
+      if (Length(Fields) < 4) or (Fields[1] = '') or
+        (Copy(Fields[2], 1, Length('refs/heads/')) <> 'refs/heads/') then
         Continue;
       Remote := Fields[1];
       if Asked.IndexOf(Remote) < 0 then
@@ -2986,12 +3089,20 @@ begin
       end;
       if (Heads.IndexOf(Remote + #9#9) < 0) and
         (Heads.IndexOf(Remote + #9 + Fields[2]) < 0) then
-        AList.Add(Fields[0]);
+      begin
+        Fetch.Clear;
+        if RunGitIn(ADir, ['config', '--get-all', 'remote.' + Remote + '.fetch'],
+          Output, Err) then
+          Fetch.Text := Output;
+        if not FetchedFromElsewhere(Fetch, Fields[3]) then
+          AList.Add(Fields[0]);
+      end;
     end;
   finally
     Tracks.Free;
     Heads.Free;
     Asked.Free;
+    Fetch.Free;
   end;
 end;
 
@@ -3227,6 +3338,10 @@ end;
 
 { The repository's index file: in the git dir of the work tree (a linked
   work tree has one of its own). }
+{ git status, not update-index --refresh, which holds index.lock for the
+  whole refresh (428 of 429 ms with 20 000 touched files): status takes
+  it for the write alone (12 to 17 ms) and leaves the index as it was
+  when another git holds it. }
 function TGittanRepo.RefreshIndex: boolean;
 var
   Output: string;
@@ -3234,9 +3349,8 @@ begin
   Result := False;
   if (FRoot = '') or FileExists(IndexPath + '.lock') then
     Exit;
-  { Files that differ are listed, and git exits with 1: no failure. }
-  RunGit(FRoot, ['update-index', '-q', '--refresh'], Output);
-  Result := not FileExists(IndexPath + '.lock');
+  Result := RunGitEnv(FRoot, ['status', '--porcelain', '-uno', '--no-renames',
+    '--ignore-submodules=all'], ['GIT_OPTIONAL_LOCKS=1'], Output, FError) and not FileExists(IndexPath + '.lock');
 end;
 
 function TGittanRepo.IndexPath: string;
@@ -3637,6 +3751,28 @@ end;
   symbolic link (or on Windows a reparse point), and nothing is in .git,
   so a path a cloned file names cannot read what lies outside the
   checkout or git's own files. }
+function IsGitDirName(const APart: string): boolean;
+var
+  Name: string;
+  i: integer;
+begin
+  Name := APart;
+  { A stream of it (.git::$INDEX_ALLOCATION) is the folder itself. }
+  i := Pos(':', Name);
+  if i > 0 then
+    SetLength(Name, i - 1);
+  while (Name <> '') and (Name[Length(Name)] in ['.', ' ']) do
+    SetLength(Name, Length(Name) - 1);
+  if SameText(Name, '.git') then
+    Exit(True);
+  if not SameText(Copy(Name, 1, 4), 'git~') or (Length(Name) = 4) then
+    Exit(False);
+  for i := 5 to Length(Name) do
+    if not (Name[i] in ['0'..'9']) then
+      Exit(False);
+  Result := True;
+end;
+
 function FileInCheckout(const ARoot, AFileName: string): boolean;
 
   function IsLink(const APath: string): boolean;
@@ -3678,7 +3814,7 @@ begin
     if Parts[i] = '' then
       Continue;
     { Nothing of git's own: .git/config may hold a remote's token. }
-    if SameText(Parts[i], '.git') then
+    if IsGitDirName(Parts[i]) then
       Exit;
     Path := Path + PathDelim + Parts[i];
     if IsLink(Path) then
@@ -4104,7 +4240,7 @@ end;
   it as the link it is rather than through it. Windows keeps links as
   files in git by default and is left as it was. }
 function ReadLinkAt(const AFull: string; out ATarget: string): boolean;
-{$ifdef unix}
+{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
 var
   Info: Stat;
 begin
@@ -4135,7 +4271,7 @@ var
   Output, Entry, Path, Id, ListFile, Target: string;
   Fields, Chosen, Paths, InHead, Restore, Remove: TStringList;
   i: integer;
-  {$ifdef unix}
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
   Info: Stat;
   {$endif}
 
@@ -4207,7 +4343,7 @@ begin
         if not RunGit(FRoot, ['hash-object', '-w', '--no-filters', '--', Path], Id) then
           Exit(False);
         Id := Trim(Id);
-        {$ifdef unix}
+        {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
         { The mode too: a new script, or a change that was a chmod +x
           alone, would come back without it. }
         if fpStat(FullPath(Path), Info) = 0 then
@@ -4267,7 +4403,7 @@ begin
     end;
     if Target <> '' then
     begin
-      {$ifdef unix}
+      {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
       if FileExists(FullPath(Path)) or IsLinkAt(FullPath(Path)) then
         DeleteFile(FullPath(Path));
       ForceDirectories(ExtractFileDir(FullPath(Path)));
@@ -4303,7 +4439,7 @@ begin
         raise EInOutError.CreateFmt('Could not remove the link %s.', [Path]);
       ForceDirectories(ExtractFileDir(FullPath(Path)));
       WriteBytes(FullPath(Path), Data);
-      {$ifdef unix}
+      {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
       if (Mode >= 0) and (fpChmod(FullPath(Path), Mode) <> 0) then
         raise EInOutError.CreateFmt('Could not set the permissions of %s.', [Path]);
       {$endif}
@@ -4668,6 +4804,23 @@ var
   Whole: boolean;
   i: integer;
 
+  { Runs git on the real index, again for a second or two while another
+    git holds index.lock. }
+  function RunUnlocked(const ACommand: array of string): boolean;
+  var
+    Tries: integer;
+  begin
+    Tries := 0;
+    repeat
+      Result := RunGit(FRoot, ACommand, Output);
+      if Result or (Pos('index.lock', FError) = 0) then
+        Exit;
+      Inc(Tries);
+      if Tries < 10 then
+        Sleep(150);
+    until Tries = 10;
+  end;
+
   { -F with the message, then --amend, --signoff and --no-verify as
     asked. }
   procedure AddCommitArgs;
@@ -4754,8 +4907,9 @@ var
     if not Result then
       Exit;
     Err := FError;
-    RunGit(FRoot, ['--literal-pathspecs', 'reset', '-q', '--pathspec-from-file=' +
-      SpecFile, '--pathspec-file-nul'], Output);
+    if not RunUnlocked(['--literal-pathspecs', 'reset', '-q', '--pathspec-from-file=' +
+      SpecFile, '--pathspec-file-nul']) then
+      FCommitNote := FError;
     FError := Err;
     if RunGit(FRoot, ['rev-parse', 'HEAD'], Output) then
       AId := Trim(Output);
@@ -4763,6 +4917,7 @@ var
 
 begin
   AId := '';
+  FCommitNote := '';
   if FRoot = '' then
     Exit(False);
   Op := Operation;
@@ -4860,8 +5015,9 @@ begin
       if not Whole and (Added.Count > 0) then
       begin
         Err := FError;
-        RunGit(FRoot, ['--literal-pathspecs', 'rm', '--cached', '-q',
-          '--pathspec-from-file=' + AddFile, '--pathspec-file-nul'], Output);
+        if not RunUnlocked(['--literal-pathspecs', 'rm', '--cached', '-q',
+          '--pathspec-from-file=' + AddFile, '--pathspec-file-nul']) then
+          Err := Err + LineEnding + 'The new files are still added to the index: ' + FError;
         FError := Err;
       end;
       Exit;
@@ -4892,7 +5048,8 @@ end;
   Fetch, pull and push go to the network: they run with
   RemoteEnvironment, and their output on stderr (progress, "To ...") is
   no failure. }
-function RemoteEnvironmentIn(const ADir: string; AConnectTimeout: integer): TStringArray;
+function RemoteEnvironmentIn(const ADir: string; AConnectTimeout: integer;
+  APush: boolean): TStringArray;
 var
   Output, Err, Line, Key: string;
   OwnSsh, OwnSpeed: boolean;
@@ -4904,7 +5061,7 @@ begin
     AConnectTimeout := RemoteConnectTimeout;
   OwnSsh := (EnvironmentVariable('GIT_SSH_COMMAND') <> '') or
     (EnvironmentVariable('GIT_SSH') <> '');
-  OwnSpeed := (EnvironmentVariable('GIT_HTTP_LOW_SPEED_LIMIT') <> '') or
+  OwnSpeed := APush or (EnvironmentVariable('GIT_HTTP_LOW_SPEED_LIMIT') <> '') or
     (EnvironmentVariable('GIT_HTTP_LOW_SPEED_TIME') <> '');
   { One git for both: the keys come lowercased but for a URL's part. }
   if (ADir <> '') and not (OwnSsh and OwnSpeed) and RunGitIn(ADir,
@@ -4938,9 +5095,9 @@ begin
       'GIT_HTTP_LOW_SPEED_TIME=' + IntToStr(RemoteLowSpeedTime)]);
 end;
 
-function TGittanRepo.RemoteEnvironment: TStringArray;
+function TGittanRepo.RemoteEnvironment(APush: boolean): TStringArray;
 begin
-  Result := RemoteEnvironmentIn(FRoot);
+  Result := RemoteEnvironmentIn(FRoot, 0, APush);
 end;
 
 { git clone runs in the parent, so a relative URL means what it says
@@ -5057,17 +5214,19 @@ var
   Output, Err: string;
   Args: TStringArray;
   i: integer;
+  IsPush: boolean;
 begin
   Args := nil;
   SetLength(Args, Length(AArgs));
   for i := 0 to High(AArgs) do
     Args[i] := AArgs[i];
-  if FNoVerify and (Length(Args) > 0) and (Args[0] = 'push') then
+  IsPush := (Length(Args) > 0) and (Args[0] = 'push');
+  if FNoVerify and IsPush then
     Insert('--no-verify', Args, 1);
   Asked := nil;
   if ACancellable then
     Asked := FCancel;
-  Result := (FRoot <> '') and RunGitEnv(FRoot, Args, RemoteEnvironment, Output, Err, '',
+  Result := (FRoot <> '') and RunGitEnv(FRoot, Args, RemoteEnvironment(IsPush), Output, Err, '',
     FOnOutput, Asked);
   if not Result then
     FError := Err;
@@ -5138,9 +5297,77 @@ begin
   end;
 end;
 
-{ Whether the repository at ARoot sets merge.conflictStyle itself, from
-  what is remembered while its config file is unchanged, else asked of
-  git and remembered. }
+{ The SQUASH_MSG files found with nothing staged, by the git directory,
+  for every TGittanRepo of the process: the watcher has its own. One
+  written anew has another time or size, or was asked for here
+  (ForgetSquashStale). }
+type
+  TSquashStale = record
+    Dir: string;
+    Age: longint;
+    Size: int64;
+  end;
+
+var
+  GSquashLock: TRTLCriticalSection;
+  GSquashStale: array of TSquashStale;
+
+function SquashStale(const ADir: string): boolean;
+var
+  Age: longint;
+  Size: int64;
+  i: integer;
+begin
+  FileStamp(IncludeTrailingPathDelimiter(ADir) + 'SQUASH_MSG', Age, Size);
+  Result := False;
+  EnterCriticalSection(GSquashLock);
+  try
+    for i := 0 to High(GSquashStale) do
+      if (GSquashStale[i].Dir = ADir) and (GSquashStale[i].Age = Age) and
+        (GSquashStale[i].Size = Size) then
+        Exit(True);
+  finally
+    LeaveCriticalSection(GSquashLock);
+  end;
+end;
+
+procedure ForgetSquashStale(const ADir: string);
+var
+  i: integer;
+begin
+  EnterCriticalSection(GSquashLock);
+  try
+    for i := High(GSquashStale) downto 0 do
+      if GSquashStale[i].Dir = ADir then
+        Delete(GSquashStale, i, 1);
+  finally
+    LeaveCriticalSection(GSquashLock);
+  end;
+end;
+
+procedure SetSquashStale(const ADir: string);
+var
+  New: TSquashStale;
+begin
+  New.Dir := ADir;
+  FileStamp(IncludeTrailingPathDelimiter(ADir) + 'SQUASH_MSG', New.Age, New.Size);
+  EnterCriticalSection(GSquashLock);
+  try
+    ForgetSquashStale(ADir);
+    Insert(New, GSquashStale, 0);
+  finally
+    LeaveCriticalSection(GSquashLock);
+  end;
+end;
+
+const
+  { How long an answer is kept, as it may come from the user's config or
+    a file either includes, which have no stamp here. }
+  ConflictStyleKeepMs = 30000;
+
+{ Whether merge.conflictStyle is set for the repository at ARoot, in any
+  config, from what is remembered while its own config file is unchanged
+  and for a while, else asked of git and remembered. }
 function OwnConflictStyle(const ARoot: string): boolean;
 var
   Output, Err, Path: string;
@@ -5156,7 +5383,8 @@ begin
     try
       for i := 0 to High(GConflictOwn) do
         if (GConflictOwn[i].Root = ARoot) and (GConflictOwn[i].ConfigPath = Path) and
-          (GConflictOwn[i].Age = Age) and (GConflictOwn[i].Size = Size) then
+          (GConflictOwn[i].Age = Age) and (GConflictOwn[i].Size = Size) and
+          (GetTickCount64 - GConflictOwn[i].Asked < ConflictStyleKeepMs) then
           Exit(GConflictOwn[i].Own);
     finally
       LeaveCriticalSection(GConflictLock);
@@ -5182,6 +5410,7 @@ begin
     GConflictOwn[At].Age := Age;
     GConflictOwn[At].Size := Size;
     GConflictOwn[At].Own := Result;
+    GConflictOwn[At].Asked := GetTickCount64;
   finally
     LeaveCriticalSection(GConflictLock);
   end;
@@ -5484,13 +5713,36 @@ end;
 { git config exits with 5 when there is no push URL to unset. }
 function TGittanRepo.SetRemoteUrls(const AName, AUrl, APushUrl: string): boolean;
 var
-  Output, Err: string;
+  Output, Err, Key: string;
+  Urls: TStringList;
+  i: integer;
 begin
   Result := (FRoot <> '') and RunGit(FRoot, ['remote', 'set-url', '--', AName, AUrl], Output);
   if not Result then
     Exit;
-  if RunGitIn(FRoot, ['config', '--get-all', 'remote.' + AName + '.pushurl'], Output, Err) then
-    Result := RunGit(FRoot, ['config', '--unset-all', 'remote.' + AName + '.pushurl'], Output);
+  Key := 'remote.' + AName + '.pushurl';
+  Urls := TStringList.Create;
+  try
+    if RunGitIn(FRoot, ['config', '-z', '--get-all', Key], Output, Err) then
+      SplitNul(Output, Urls);
+    { A remote may push to several URLs; the first is the one edited. }
+    if (Urls.Count > 0) and (Urls[0] = APushUrl) then
+      Exit;
+    if Urls.Count > 0 then
+      Result := RunGit(FRoot, ['config', '--unset-all', Key], Output);
+    if Result and (Urls.Count > 1) then
+    begin
+      { Cleared, it pushes to the URL; the others stay. }
+      Urls[0] := APushUrl;
+      if APushUrl = '' then
+        Urls[0] := AUrl;
+      for i := 0 to Urls.Count - 1 do
+        Result := RunGit(FRoot, ['config', '--add', Key, Urls[i]], Output) and Result;
+      Exit;
+    end;
+  finally
+    Urls.Free;
+  end;
   if Result and (APushUrl <> '') and (APushUrl <> AUrl) then
     Result := RunGit(FRoot, ['remote', 'set-url', '--push', '--', AName, APushUrl], Output);
 end;
@@ -6324,6 +6576,7 @@ begin
       Result := RunCommitting(Self, FRoot, ['merge', '--no-ff', '--no-edit', ARef], AConflicts, Err);
     mwSquash:
     begin
+      ForgetSquashStale(GitDir);
       { A squash writes no MERGE_HEAD, so git is in the middle of
         nothing when it stops; the unmerged entries say it did. }
       Result := RunCommitting(Self, FRoot, ['merge', '--squash', ARef], AConflicts, Err);
@@ -7390,7 +7643,11 @@ begin
     Exit;
   FileName := IncludeTrailingPathDelimiter(Dir) + 'MERGE_MSG';
   if not FileExists(FileName) then
+  begin
     FileName := IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG';
+    if SquashStale(Dir) then
+      Exit;
+  end;
   if not FileExists(FileName) then
     Exit;
   if not RunGit(FRoot, ['config', '--get', 'core.commentString'], Comment) and
@@ -7417,15 +7674,16 @@ var
 begin
   Dir := GitDir;
   if (Dir = '') or not FileExists(IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG') or
-    (Operation <> '') then
+    (Operation <> '') or SquashStale(Dir) then
     Exit(False);
   { diff --quiet fails with a staged change, an unmerged file too. }
   Result := not RunGitIn(FRoot, ['diff', '--cached', '--quiet'], Output, Err);
   { Nothing staged: the squash's changes were stashed or discarded and
-    git left its file. It is removed, or work staged later would pass
-    for the squash, with its message and an Abort that resets it. }
+    git left its file. It is no longer gone by, or work staged later
+    would pass for the squash, with its message and an Abort that resets
+    it. The file stays for git, as this is asked at every poll. }
   if not Result then
-    DeleteFile(IncludeTrailingPathDelimiter(Dir) + 'SQUASH_MSG');
+    SetSquashStale(Dir);
 end;
 
 function TGittanRepo.HeadMessage(out AMessage: string): boolean;
@@ -9532,6 +9790,7 @@ initialization
   InitCriticalSection(GSpawnLock);
   {$endif}
   InitCriticalSection(GConflictLock);
+  InitCriticalSection(GSquashLock);
   GToolPath := MakeToolPath;
   GOldGitExes := TStringList.Create;
   GGitRuns := TList.Create;
@@ -9541,6 +9800,7 @@ finalization
   FreeGitRuns;
   GOldGitExes.Free;
   DoneCriticalSection(GConflictLock);
+  DoneCriticalSection(GSquashLock);
   {$ifdef unix}
   DoneCriticalSection(GSpawnLock);
   {$endif}

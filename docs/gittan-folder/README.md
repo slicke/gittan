@@ -11,7 +11,7 @@ A repository can tell Gittan about itself in a folder named `.gittan` at its roo
 
 The Config section at the bottom of the sidebar lists every one of these files, the personal file included, and opens them in the editor. On the Commands page, Edit… or Create… opens a commands file and writes a commented example into it the first time.
 
-All the files are [TOML](https://toml.io). A file that is not valid TOML gives nothing, and Gittan shows the line and column where reading stopped: for a commands file under the file's heading on the Commands page, for `repo.toml` in the banner at the top of the window, when the repository opens or the file changes. A value of the wrong type, such as a number where a string belongs, is ignored as if it were not there.
+All the files are [TOML](https://toml.io). A file over 64 KB is not read, nor are committed commands files past 512 KB together. A file nested too deeply is refused. A file that is not valid TOML gives nothing, and Gittan shows the line and column where reading stopped: for a commands file under the file's heading on the Commands page, for `repo.toml` in the banner at the top of the window, when the repository opens or the file changes. A value of the wrong type, such as a number where a string belongs, is ignored as if it were not there.
 
 ## Why some files need trust
 
@@ -41,16 +41,18 @@ run = "make docs"
 
 Each table under `[commands]` is one command:
 
-- `run` is the shell line. It runs from the repository root through your login shell, so your PATH is the one your terminal has. It can be a table with a line per system: `macos`, `windows`, `linux`, `freebsd`, `haiku`, then `unix` for any system but Windows, then `default`. A command with no line for the system you are on is shown dimmed.
+- `run` is the shell line. It runs from the repository root through your login shell, so your PATH is the one your terminal has (on Windows through `cmd`, with the PATH Gittan was started with). It can be a table with a line per system: `macos`, `windows`, `linux`, `freebsd`, `haiku`, then `unix` for any system but Windows, then `default`. A command with no line for the system you are on is shown dimmed.
 - `key` is one letter or digit. The command then runs with Ctrl+Cmd and that key on macOS, or Ctrl+Alt and that key elsewhere, from anywhere in Gittan. If two commands ask for the same key, the first one gets it.
 - `terminal = true` opens the command in a terminal window instead of under the page. Use it for anything that keeps running or asks questions, such as a dev server, a watch or a REPL.
-- `description` is a line shown in the tile's tooltip.
+- `description` is a line shown in the tile's tooltip, up to 200 bytes of it.
 - `confirm = true` asks before the command runs. A string asks your own question instead.
 - `hidden = true` leaves the command off the page.
 
+A command that is only a line can be written short, under `[commands]` itself: `lint = "npm run lint"`.
+
 A name with a colon must be quoted, as in `[commands."build:docs"]`. Commands that share what comes before the colon are grouped under that name on the page.
 
-**Giving existing commands a key.** Gittan lists the scripts of a `package.json`, the targets of a Makefile and the commands of the project's own tools by itself: `cargo test`, `go test`, `lazbuild`, `pytest` and so on. A table with no `run` line whose name matches one of them adds to that command instead of creating a new one. It can give it a key, a description, a question or `hidden`:
+**Giving existing commands a key.** Gittan lists the scripts of a `package.json`, the targets of a Makefile and the commands of the project's own tools by itself: `cargo test`, `go test`, `lazbuild`, `pytest` and so on. A script whose name a shell could read as something else (one that begins with a dash, say) is not listed. A table with no `run` line whose name matches one of them adds to that command instead of creating a new one. It can give it a key, a description, a question or `hidden`:
 
 ```toml
 [commands.test]      # make test, npm test or cargo test, whichever there is
@@ -110,11 +112,11 @@ Every part is optional. Where git config sets the same thing, git config wins, s
 - `regex` finds a reference. Its first group is the id; without a group, the whole match is.
 - `ids` is optional. Use it when `regex` finds a whole reference such as "Fixes #12, #13"; `ids` then picks the ids out of it.
 
-These work like the `bugtraq.url` and `bugtraq.logregex` keys that several git clients read from git config. If git config sets them, or you set them under Repository > Issue Tracker..., git config is used instead. Write the expression in single quotes, as above, so a backslash stays a backslash.
+These work like the `bugtraq.url` and `bugtraq.logregex` keys that several git clients read from git config. If git config sets them, or you set them under Repository > Issue Tracker..., git config is used instead. When git config has only the address (`bugtraq.url`), the expression of the file is used with it. Write the expression in single quotes, as above, so a backslash stays a backslash.
 
 **`[commit]`** says how commit messages are written:
 
-- `subject-limit` and `subject-max` set the first line's lengths. Past the limit, its length shows beside the Commit button; past the maximum, the count turns amber. Without them, the limit is 50 and the maximum 72, where `git log --oneline` and GitHub cut the line.
+- `subject-limit` and `subject-max` set the first line's lengths. Past the limit, its length shows beside the Commit button; past the maximum, the count turns amber. Without them, the limit is 50 and the maximum 72, where `git log --oneline` and GitHub cut the line. Each is a number from 1 to 200; another is ignored.
 - `template` is a file, as a path from the root, that fills an empty message field, in the same way as git's `commit.template`, which wins if it is set. It has to be a file in the repository: a path that leads outside it (`../`, an absolute path or a symbolic link) is not read. Lines starting with `#` are left out.
 - `sign-off = true` makes commits signed off (`Signed-off-by:`) unless you turn Sign Off off in the Commit section's options. Gittan then remembers that choice for this repository.
 - `types` asks for subjects written as [Conventional Commits](https://www.conventionalcommits.org): `type(scope): what it does`, or `type!:` for a breaking change. The Commit section says so when the subject has no type or one the list does not have. `scopes` lists the scopes too; without it, any scope is fine. Merges, reverts and `fixup!`, `squash!` and `amend!` commits are not checked.

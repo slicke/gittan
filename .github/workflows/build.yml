@@ -85,6 +85,12 @@ jobs:
         run: |
           set -euo pipefail
           LATEST=$(git tag | grep -E '^build-[0-9]+$' | sed 's/^build-//' | sort -n | tail -1 || true)
+          # A re-run of every job of an old run: its commit is in the latest
+          # build already, which it would replace as the newest.
+          if [ -n "$LATEST" ] && git merge-base --is-ancestor "$GITHUB_SHA" "build-$LATEST"; then
+            echo "::error::$GITHUB_SHA is already in build-$LATEST; push a new commit to publish."
+            exit 1
+          fi
           if [ -z "$LATEST" ]; then NEXT=100; else NEXT=$((LATEST + 1)); fi
           echo "build_number=${NEXT}" >> "$GITHUB_OUTPUT"
           echo "Next build number: ${NEXT}"
@@ -601,6 +607,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+          # The workspace is copied into the VM, without the token.
+          persist-credentials: false
 
       - name: Restore the Lazarus build
         id: lazarus-cache
@@ -1373,6 +1381,13 @@ jobs:
           elif [ "$DRAFT" != "true" ]; then
             echo "$TAG is published already; nothing to do."
             exit 0
+          else
+            # A draft may be an earlier run's, for an older commit: it had
+            # no tag yet, so this run took the same number.
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "${VERSION%.*}" \
+              --notes-file notes.md
           fi
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
             packages/Gittan-macos-silicon.dmg \

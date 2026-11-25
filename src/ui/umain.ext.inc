@@ -89,7 +89,10 @@ end;
 procedure TRepoFrame.RebuildExtMenuAsync(Data: PtrInt);
 begin
   FExtMenuQueued := False;
-  RebuildExtMenu;
+  { A permission question of a reload runs this: the menu the click came
+    from stands until the reload is done, which asks again. }
+  if not App.Extensions.Reloading then
+    RebuildExtMenu;
 end;
 
 { What a command gets: the repository, the file it was opened on (the

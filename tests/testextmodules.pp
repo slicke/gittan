@@ -216,7 +216,7 @@ end;
 procedure TExtModulesTest.TestSymlinkEscapeIsRejected;
 {$IFDEF UNIX}
 var
-  resolved, err, outside, link: string;
+  resolved, err, outside, link, entry: string;
 begin
   // lib/out -> a folder outside the root: the path text stays inside, the
   // file does not.
@@ -230,6 +230,13 @@ begin
       './lib/out/evil.js', FRoot, resolved);
     AssertTrue('link escape rejected: ' + err, Pos('symbolic link', err) > 0);
     AssertEquals('nothing resolved', '', resolved);
+    // The entry itself may be a link: its text is the one the loader read.
+    entry := FRoot + DirectorySeparator + 'linked.js';
+    AssertEquals('symlink created', 0, fpSymlink(pchar(outside + DirectorySeparator +
+      'evil.js'), pchar(entry)));
+    AssertEquals('a linked entry', '', ResolveModuleSpecifier('<bootstrap>', entry, FRoot,
+      resolved, entry));
+    DeleteFile(entry);
   finally
     DeleteFile(link);
     DeleteFile(outside + DirectorySeparator + 'evil.js');
@@ -302,7 +309,8 @@ var
 begin
   src := string(GittanModuleSource);
   AssertTrue('default export', Pos('export default T', src) > 0);
-  AssertTrue('data export', Pos('export const data', src) > 0);
+  AssertTrue('repo export', Pos('export const repo = T.repo;', src) > 0);
+  AssertTrue('forgeTabs export', Pos('export const forgeTabs = T.forgeTabs;', src) > 0);
   AssertTrue('on export', Pos('export const on', src) > 0);
 end;
 

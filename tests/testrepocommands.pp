@@ -11,7 +11,7 @@ interface
 
 uses
   Classes, SysUtils, StrUtils, {$ifndef windows}BaseUnix,{$endif} fpcunit, testregistry,
-  gittan.repocommands, gittan.project, gittan.sha256, testhelpers;
+  gittan.repocommands, gittan.project, gittan.sha256, gittan.textfile, testhelpers;
 
 type
   TRepoCommandsTest = class(TTestCase)
@@ -28,11 +28,13 @@ type
     procedure TearDown; override;
   published
     procedure TestParseToml;
+    procedure TestDescriptionOneLine;
     procedure TestParseTomlNotToml;
     procedure TestParseTomlFields;
     procedure TestParseTomlPerSystem;
     procedure TestTomlProjects;
     procedure TestCommandsFiles;
+    procedure TestCommandsFilesTooLarge;
     procedure TestCommandsFileNames;
     procedure TestCommandsFileUnreadable;
     procedure TestPersonalFile;
@@ -319,6 +321,42 @@ begin
     Length(ProjectsOfRoot(FDir)));
 end;
 
+procedure TRepoCommandsTest.TestCommandsFilesTooLarge;
+var
+  F: TGittanCommandsFiles;
+  i: integer;
+begin
+  Put('.gittan/commands.toml', '[commands.a]'#10'run = "a"'#10'#' +
+    StringOfChar('x', MaxTomlBytes));
+  F := ReadCommandsFiles(FDir);
+  AssertEquals('listed', 1, Length(F));
+  AssertTrue('and why it gives nothing', F[0].Error <> '');
+  AssertEquals(0, Length(F[0].Commands));
+  AssertEquals('', F[0].Text);
+  { Many of a size that each is read: the last are past the total. }
+  for i := 0 to 11 do
+    Put(Format('.gittan/commands/%.2d.toml', [i]), '[commands.c]'#10'run = "c"'#10'#' +
+      StringOfChar('x', MaxTomlBytes - 100));
+  F := ReadCommandsFiles(FDir);
+  AssertEquals(13, Length(F));
+  AssertEquals('the first is read', '', F[1].Error);
+  AssertEquals(1, Length(F[1].Commands));
+  AssertTrue('the last is not', F[12].Error <> '');
+  AssertEquals(0, Length(F[12].Commands));
+end;
+
+procedure TRepoCommandsTest.TestDescriptionOneLine;
+var
+  C: TGittanRepoCommands;
+  Error: string;
+begin
+  C := ParseCommandsToml('[commands.a]'#10'run = "x"'#10'description = "Lints\n\n\tall | of it"'#10 +
+    '[commands.b]'#10'run = "y"'#10'description = "' + StringOfChar('d', MaxDescription + 50) + '"', Error);
+  AssertEquals('', Error);
+  AssertEquals('Lints   all | of it', C[0].Description);
+  AssertEquals(StringOfChar('d', MaxDescription) + '…', C[1].Description);
+end;
+
 procedure TRepoCommandsTest.TestPersonalFile;
 var
   F: TGittanCommandsFiles;
@@ -531,6 +569,10 @@ begin
   DeleteFile(IncludeTrailingPathDelimiter(FDir) + 'yarn.lock');
   Put('bun.lock', '');
   AssertEquals('bun run', PackageRunner(FDir));
+  Put('package.json', '{"packageManager": "pnpm@9.1.0"}');
+  AssertEquals('the field wins, as for Install', 'pnpm run', PackageRunner(FDir));
+  Put('package.json', '{"packageManager": "rm -rf"}');
+  AssertEquals('one of the four alone', 'bun run', PackageRunner(FDir));
 end;
 
 procedure TRepoCommandsTest.TestDiscoverOrder;
@@ -854,6 +896,8 @@ begin
   finally
     Job.Free;
   end;
+  {$else}
+  Ignore('not on Windows');
   {$endif}
 end;
 
@@ -893,6 +937,8 @@ begin
   finally
     Job.Free;
   end;
+  {$else}
+  Ignore('not on Windows');
   {$endif}
 end;
 

@@ -260,6 +260,15 @@ begin
     Result := RootFile(ARoot, ATarget);
 end;
 
+{ A replacement on another computer: \\host\share or //host/share, and
+  \??\UNC, which Windows takes for one. go.mod comes with the clone, and
+  looking there has Windows sign in to the host. }
+function IsNetworkPath(const ATarget: string): boolean;
+begin
+  Result := ((Length(ATarget) >= 2) and (ATarget[1] in ['/', '\']) and
+    (ATarget[2] in ['/', '\'])) or (Pos('\??', ATarget) = 1) or (Pos('/??', ATarget) = 1);
+end;
+
 { TGittanGoKind }
 
 class function TGittanGoKind.Name: string;
@@ -313,7 +322,7 @@ begin
     AddProjectCheck(Result, ProjectCheck(rsNoGoSum, ''));
   Info := ParseGoModInfo(TextOf(AContext.Root, 'go.mod'));
   for i := 0 to High(Info.Replaces) do
-    if IsLocalPath(Info.Replaces[i].New) and
+    if IsLocalPath(Info.Replaces[i].New) and not IsNetworkPath(Info.Replaces[i].New) and
       not DirectoryExists(LocalPathDir(AContext.Root, Info.Replaces[i].New)) then
       AddProjectCheck(Result, ProjectCheck(Format(rsLocalReplace, [Info.Replaces[i].Old +
         ' => ' + Info.Replaces[i].New]), ''));

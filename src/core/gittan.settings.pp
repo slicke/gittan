@@ -72,6 +72,9 @@ type
   private
     FRecent: TStringList;
     FPaletteRecent: TStringList;
+    { state.json was there but could not be read by Load: its lists are
+      taken in by the first save that can read it (TakeUnreadLists). }
+    FStateUnread: boolean;
     FTabs: TStringList;
     FBatchRepos: TStringList;
     FCoAuthors: TStringList;
@@ -95,6 +98,7 @@ type
     procedure PutSettings;
     procedure PutState;
     procedure ReadFields;
+    procedure TakeUnreadLists;
     procedure TakeBase;
   public
     {** The tab shown when the window closed, an index into Tabs. }
@@ -766,6 +770,7 @@ begin
   if Damaged then
     FDamagedFiles := SettingsFileName;
   FStateDoc := ReadDoc(StateFile, Damaged, Unreadable);
+  FStateUnread := Unreadable;
   MoveLegacyDraft(FStateDoc);
   if Damaged and (FDamagedFiles <> '') then
     FDamagedFiles := FDamagedFiles + ', ' + StateFileName
@@ -1124,6 +1129,46 @@ begin
   end;
 end;
 
+{ The lists of a state.json Load could not read, after this session's
+  own: a list changed here is written whole, and would replace the
+  file's. Nothing to do once it has been read. }
+procedure TGittanSettings.TakeUnreadLists;
+var
+  Doc: TJSONObject;
+  Damaged, Unreadable: boolean;
+
+  procedure TakeIn(AObj: TJSONObject; const AName: string; AList: TStrings; AMax: integer);
+  var
+    Theirs: TStringList;
+    i: integer;
+  begin
+    Theirs := TStringList.Create;
+    try
+      ListOf(AObj, AName, Theirs, AMax);
+      for i := 0 to Theirs.Count - 1 do
+        if (AList.Count < AMax) and (AList.IndexOf(Theirs[i]) < 0) then
+          AList.Add(Theirs[i]);
+    finally
+      Theirs.Free;
+    end;
+  end;
+
+begin
+  if not FStateUnread then
+    Exit;
+  Doc := ReadDoc(StateFile, Damaged, Unreadable);
+  try
+    if Unreadable then
+      Exit;
+    TakeIn(Doc, 'recent', FRecent, MaxRecent);
+    TakeIn(Doc, 'paletteRecent', FPaletteRecent, MaxPaletteRecent);
+    TakeIn(ObjOf(Doc, 'commit'), 'coAuthors', FCoAuthors, MaxCoAuthors);
+    FStateUnread := False;
+  finally
+    Doc.Free;
+  end;
+end;
+
 procedure TGittanSettings.Save;
 var
   Doc, OldSettings, OldState: TJSONObject;
@@ -1133,6 +1178,7 @@ begin
   OldState := nil;
   try
     try
+      TakeUnreadLists;
       PutSettings;
       PutState;
       { A file that is there but cannot be read now is left as it is: the
@@ -1208,10 +1254,19 @@ begin
   { The file as it is now, which another instance may have written since
     Load, with the recent lists put in, and nothing else. }
   try
+    TakeUnreadLists;
     Doc := ReadDoc(StateFile, Damaged, Unreadable);
     try
       if Unreadable then
         Exit;
+      { Missing, broken or empty now: the base, as MergedWithFile has it.
+        A file with the lists alone would have the next Save drop every
+        key not changed here. }
+      if Doc.Count = 0 then
+      begin
+        Doc.Free;
+        Doc := TJSONObject(FStateBase.Clone);
+      end;
       Doc.Integers['version'] := SettingsVersion;
       Doc.Arrays['recent'] := ListJson(FRecent);
       Doc.Arrays['paletteRecent'] := ListJson(FPaletteRecent);

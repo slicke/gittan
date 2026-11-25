@@ -495,6 +495,10 @@ function JS_Call(ctx: JSContext; const func, this_obj: JSValue; argc: integer;
   argv: PJSValues): JSValue;
 {** Retrieve and clear the pending exception. }
 function JS_GetException(ctx: JSContext): JSValue;
+{** Take the exception pending on ctx, if any, off it and free it: what a
+    conversion or a getter threw where nobody asks, which the next native
+    called in any context of the runtime would have thrown as its own. }
+procedure JS_DropException(ctx: JSContext);
 {** Raise @code(msg) as a JavaScript @code(Error) on @code(ctx) and return the
     exception marker, ready to be handed back to the interpreter.
 
@@ -873,18 +877,12 @@ begin
 end;
 
 procedure JS_JobDone(ctx: JSContext; AResult: integer);
-var
-  e: JSValue;
 begin
   if (AResult >= 0) or (ctx = nil) then
     Exit;
   if Assigned(JSJobFailed) then
     JSJobFailed(ctx);
-  if JS_HasException(ctx) then
-  begin
-    e := JS_GetException(ctx);
-    JS_FreeValue(ctx, e);
-  end;
+  JS_DropException(ctx);
 end;
 
 function JS_DrainPendingJobs(rt: JSRuntime; ctx: JSContext): boolean;
@@ -1010,6 +1008,12 @@ end;
 function JS_GetException(ctx: JSContext): JSValue;
 begin
   tq_get_exception(@Result, ctx);
+end;
+
+procedure JS_DropException(ctx: JSContext);
+begin
+  if JS_HasException(ctx) then
+    JS_FreeValue(ctx, JS_GetException(ctx));
 end;
 
 function JS_ThrowError(ctx: JSContext; const msg: RawUtf8): JSValue;
@@ -1499,6 +1503,9 @@ begin
   Result := not v.IsUndefined and not v.IsException;
   if not Result then
   begin
+    // What a getter of the global threw.
+    if v.IsException then
+      JS_DropException(ctx);
     JS_FreeValue(ctx, v);
     v := JS_UNDEFINED;
   end;
@@ -1616,12 +1623,16 @@ begin
     if not Result then
       Exit;
     aMessage := JS_ToUtf8(ctx, exc);
+    // A Symbol, an object without a prototype, a toString that throws:
+    // reported all the same.
+    if JS_HasException(ctx) then
+      aMessage := '[value that cannot be shown]';
     // Errors carry a .stack property; plain thrown values do not.
     if (aStack <> nil) and exc.IsObject then
     begin
       st := JS_GetPropertyStr(ctx, exc, 'stack');
       try
-        if not st.IsUndefined then
+        if not st.IsUndefined and not st.IsException then
           aStack^ := JS_ToUtf8(ctx, st);
       finally
         JS_FreeValue(ctx, st);
@@ -1629,6 +1640,8 @@ begin
     end;
   finally
     JS_FreeValue(ctx, exc);
+    // What the conversions above threw is not left pending in its place.
+    JS_DropException(ctx);
   end;
 end;
 

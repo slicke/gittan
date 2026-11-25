@@ -68,7 +68,7 @@ type
     FProjects: TGittanProjects;
     FFiles: TGittanCommandsFiles;
     FTrusted: boolean;
-    FRunName, FRunProject: string;
+    FRunName, FRunProject, FRunCommand: string;
     FRunSource: TGittanCommandSource;
     FHasRun, FRunning, FRunStarted, FRunKilled, FStopping, FPulse: boolean;
     FExitCode: integer;
@@ -91,6 +91,9 @@ type
     FOnStop, FOnTrust, FOnEditFile, FOnEditPersonal, FOnCopyOutput: TNotifyEvent;
     function LinkAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
+    {** The link under the mouse as the content was laid out anew: its
+      index, the cursor and the hint. }
+    procedure UpdateHot;
     procedure AddLink(const ARect: TRect; const AUrl: string; const AHint: string = '');
     procedure PaintHeading(var Y: integer; const ATitle, ADetail, AState: string;
       AStateColor: TColor);
@@ -141,7 +144,7 @@ type
       false when the shell could not start it, AKilled when Stop ended
       it. }
     procedure SetRun(const AName: string; ASource: TGittanCommandSource;
-      const AProject: string; ARunning: boolean; AExitCode: integer; AElapsedMs: int64;
+      const AProject, ACommand: string; ARunning: boolean; AExitCode: integer; AElapsedMs: int64;
       AStarted, AKilled: boolean);
     {** The palette: the background, the text, the dim text, the fill
       under the mouse, the dividers, the links, the ok state and the
@@ -346,7 +349,7 @@ begin
 end;
 
 procedure TGittanCommandPage.SetRun(const AName: string; ASource: TGittanCommandSource;
-  const AProject: string; ARunning: boolean; AExitCode: integer; AElapsedMs: int64;
+  const AProject, ACommand: string; ARunning: boolean; AExitCode: integer; AElapsedMs: int64;
   AStarted, AKilled: boolean);
 begin
   if ARunning and not FRunning then
@@ -354,6 +357,7 @@ begin
   FRunName := AName;
   FRunSource := ASource;
   FRunProject := AProject;
+  FRunCommand := ACommand;
   FHasRun := True;
   FRunning := ARunning;
   FStopping := False;
@@ -410,6 +414,7 @@ begin
   H := Max(FContentHeight, Constraints.MinHeight);
   if Height <> H then
     Height := H;
+  UpdateHot;
   Invalidate;
 end;
 
@@ -427,6 +432,18 @@ begin
     if PtInRect(FLinkRects[i], Point(X, Y)) then
       Exit(i);
   Result := -1;
+end;
+
+procedure TGittanCommandPage.UpdateHot;
+var
+  P: TPoint;
+begin
+  { Nothing was hovered, also when FHot was cleared without SetHot. }
+  if (FHot < 0) and (Cursor = crDefault) and (Hint = '') then
+    Exit;
+  P := ScreenToClient(Mouse.CursorPos);
+  FHot := -2;
+  SetHot(LinkAt(P.X, P.Y));
 end;
 
 procedure TGittanCommandPage.SetHot(AValue: integer);
@@ -477,11 +494,13 @@ end;
 
 { Whether ACommand is the one that runs or ran last: by name, source
   and kind, so a reload that moves the indexes keeps it, and a kind's
-  test is told from a script's. }
+  test is told from a script's. A kind's also by its line: the Project
+  page runs some that have the name of another one. }
 function TGittanCommandPage.IsRun(const ACommand: TGittanRepoCommand): boolean;
 begin
   Result := (ACommand.Name = FRunName) and (ACommand.Source = FRunSource) and
-    (ACommand.Project = FRunProject);
+    (ACommand.Project = FRunProject) and ((FRunSource <> csProject) or
+    (ACommand.Command = FRunCommand));
 end;
 
 { A dim bold title with a dim detail after it and, after that, a state
@@ -553,7 +572,7 @@ begin
   Style.SingleLine := False;
   Style.Alignment := taLeftJustify;
   Style.Layout := tlTop;
-  DrawText(FC.Handle, PChar(AText), Length(AText), R, DT_CALCRECT or DT_WORDBREAK);
+  DrawText(FC.Handle, PChar(AText), Length(AText), R, DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
   R.Right := Width - Px(Pad);
   FC.TextRect(R, R.Left, R.Top, AText, Style);
   Y := R.Bottom;
@@ -578,7 +597,7 @@ begin
   Style.Alignment := taLeftJustify;
   Style.Layout := tlTop;
   R := Rect(Inner.Left, Inner.Top + TextH + 4, Inner.Right, Inner.Top + TextH + 4);
-  DrawText(FC.Handle, PChar(rsTrustText), Length(rsTrustText), R, DT_CALCRECT or DT_WORDBREAK);
+  DrawText(FC.Handle, PChar(rsTrustText), Length(rsTrustText), R, DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
   B := Rect(Inner.Left, R.Bottom + Px(Gap), Inner.Left + FC.TextWidth(rsTrustButton) +
     2 * Px(ButtonPadX), R.Bottom + Px(Gap) + TextH + 2 * Px(ButtonPadY));
   Y := B.Bottom + Px(CardPad);

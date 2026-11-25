@@ -73,12 +73,17 @@ type
       message boxes of ATSynEdit and EControl) is centered on the window
       instead, as Gittan's own dialogs are. }
     procedure ModalBegin(Sender: TObject);
+    procedure ShowWholeHint(var HintStr: string; var CanShow: boolean;
+      var HintInfo: THintInfo);
     procedure FormDropFiles(Sender: TObject; const FileNames: array of string);
   private
     FFrames: TList;
     { The frames CloseFrameAsync is closing: its save question runs the
       message loop, where a second close of the same one may come. }
     FClosing: TList;
+    { The frames to close once the wait they are in is over. }
+    FCloseWaiting: TList;
+    FCloseTimer: TTimer;
     FActive: TRepoFrame;
     FTitleBarHeight: integer;
     { The forge view, over the frame shown while FForgeShown; the pull
@@ -135,6 +140,7 @@ type
     procedure ForgeUserChange(Sender: TObject);
     procedure SaveTabs;
     procedure CloseFrameAsync(Data: PtrInt);
+    procedure CloseTimerTimer(Sender: TObject);
     procedure TabSelect(Sender: TObject; AIndex: integer);
     procedure TabClose(Sender: TObject; AIndex: integer);
     procedure TabNew(Sender: TObject);
@@ -238,8 +244,14 @@ begin
   SetExtHost(TGittanExtUIHost.Create(Self));
   FFrames := TList.Create;
   FClosing := TList.Create;
+  FCloseWaiting := TList.Create;
+  FCloseTimer := TTimer.Create(Self);
+  FCloseTimer.Enabled := False;
+  FCloseTimer.Interval := 100;
+  FCloseTimer.OnTimer := @CloseTimerTimer;
   PlaceWindow;
   Application.AddOnModalBeginHandler(@ModalBegin);
+  Application.AddOnShowHintHandler(@ShowWholeHint);
   KeyPreview := True;
   OnKeyDown := @FormKeyDown;
   {$IFDEF LCLGtk3}
@@ -285,6 +297,35 @@ begin
   Application.QueueAsyncCall(@LoadExtensionsAsync, 0);
 end;
 
+{ The LCL shows a hint up to its first |, what follows being for a status
+  bar. Gittan's hints have no second part, but hold shell lines, branch
+  names and code, where a pipe cut off the rest of what would run. A
+  control that gave a text of its own keeps it. }
+procedure TGittanWindow.ShowWholeHint(var HintStr: string; var CanShow: boolean;
+  var HintInfo: THintInfo);
+var
+  Control: TControl;
+  Short: string;
+begin
+  Control := HintInfo.HintControl;
+  Short := '';
+  while (Control <> nil) and (Short = '') do
+  begin
+    Short := GetShortHint(Control.Hint);
+    Control := Control.Parent;
+  end;
+  if HintStr <> Short then
+    Exit;
+  Control := HintInfo.HintControl;
+  while (Control <> nil) and (Control.Hint = '') do
+    Control := Control.Parent;
+  if Control = nil then
+    Exit;
+  HintInfo.HideTimeout := HintInfo.HideTimeout +
+    Application.HintHidePausePerChar * (Length(Control.Hint) - Length(HintStr));
+  HintStr := Control.Hint;
+end;
+
 { ShowModal tells the application before it shows the form, and the
   form is placed as it shows, so a hidden form still to be centered on
   the screen is the one about to show: centered on the window
@@ -310,6 +351,7 @@ var
   Frame: TRepoFrame;
 begin
   Application.RemoveOnModalBeginHandler(@ModalBegin);
+  Application.RemoveOnShowHintHandler(@ShowWholeHint);
   Application.RemoveAsyncCalls(Self);
   { The host is gone before the frames it reaches. }
   SetExtHost(nil);
@@ -328,6 +370,8 @@ begin
   FreeAndNil(FForgeView);
   FreeAndNil(FFrames);
   FreeAndNil(FClosing);
+  FCloseTimer.Enabled := False;
+  FreeAndNil(FCloseWaiting);
   {$IFDEF LCLCocoa}
   FreeAndNil(FToolbar);
   {$ENDIF}
@@ -1230,6 +1274,23 @@ begin
   Application.QueueAsyncCall(@CloseFrameAsync, PtrInt(AFrame));
 end;
 
+{ The frames whose closing waits; one gone meanwhile is not in FFrames,
+  which CloseFrameAsync asks first. }
+procedure TGittanWindow.CloseTimerTimer(Sender: TObject);
+var
+  Waiting: array of PtrInt;
+  i: integer;
+begin
+  FCloseTimer.Enabled := False;
+  Waiting := nil;
+  SetLength(Waiting, FCloseWaiting.Count);
+  for i := 0 to High(Waiting) do
+    Waiting[i] := PtrInt(FCloseWaiting[i]);
+  FCloseWaiting.Clear;
+  for i := 0 to High(Waiting) do
+    CloseFrameAsync(Waiting[i]);
+end;
+
 { A frame with unsaved changes is shown before it asks, and stays when
   they are kept. It saves what closing the window saves, and the tab to
   its right is shown, else the one to its left, else a new empty one. }
@@ -1246,11 +1307,13 @@ begin
     Exit;
   { Asked from inside a wait of the frame's that runs the message loop
     (a file loading, a parse): freed now, it would go on in freed
-    memory once the wait returns. Asked again from the queue until the
-    wait is over. }
+    memory once the wait returns. Asked again by the timer until the
+    wait is over; a call queued at once would run in a tight loop. }
   if Frame.InNestedLoop then
   begin
-    Application.QueueAsyncCall(@CloseFrameAsync, Data);
+    if FCloseWaiting.IndexOf(Frame) < 0 then
+      FCloseWaiting.Add(Frame);
+    FCloseTimer.Enabled := True;
     Exit;
   end;
   if Frame.NeedsSave then

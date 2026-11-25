@@ -256,7 +256,8 @@ var
     else if Pattern[Length(Pattern)] = '/' then
       Result := (Pos(Pattern, APath) = 1) or (Pos('/' + Pattern, APath) > 0)
     else if Pos('*.', Pattern) = 1 then
-      Result := SameText(ExtractFileExt(APath), Copy(Pattern, 2, MaxInt))
+      { By case, as git reads it. }
+      Result := ExtractFileExt(APath) = Copy(Pattern, 2, MaxInt)
     else
       Result := APath = ACheck.Path;
   end;

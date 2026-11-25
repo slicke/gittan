@@ -25,6 +25,8 @@ const
   RepoConfigFile = 'repo.toml';
   {** The file as a path relative to the root, with "/". }
   RepoConfigPath = '.gittan/' + RepoConfigFile;
+  {** The longest message kept of a file that cannot be read, in bytes. }
+  MaxErrorText = 200;
   {** The subject's length past which its count shows. }
   DefaultSubjectSoft = 50;
   {** The subject's length past which the count warns: where git log
@@ -74,6 +76,10 @@ function ReadRepoConfig(const ARoot: string): TGittanRepoConfig;
 {** The config with nothing set: the defaults. }
 function EmptyRepoConfig: TGittanRepoConfig;
 
+{** A parser's message, which quotes the file, as it can be shown: on one
+  line, without control characters and at most MaxErrorText bytes. }
+function ShortError(const AText: string): string;
+
 {** Whether ASubject, a message's first line, is written as the
   config's types ask: type(scope)!: description, with the type among
   Types and the scope, when there is one and the config lists any,
@@ -99,6 +105,26 @@ implementation
 
 uses
   TOML.Types, TOML.Parser, gittan.textfile;
+
+function ShortError(const AText: string): string;
+var
+  i: integer;
+begin
+  { A little more than is kept, for the cut to see it is one. }
+  Result := Copy(AText, 1, MaxErrorText + 1);
+  for i := 1 to Length(Result) do
+    if Result[i] in [#0..#31, #127] then
+      Result[i] := ' ';
+  Result := Trim(Result);
+  if Length(Result) > MaxErrorText then
+  begin
+    { Not in the middle of a UTF-8 character. }
+    i := MaxErrorText;
+    while (i > 0) and (Result[i + 1] in [#$80..#$BF]) do
+      Dec(i);
+    Result := Copy(Result, 1, i) + '…';
+  end;
+end;
 
 function EmptyRepoConfig: TGittanRepoConfig;
 begin
@@ -204,7 +230,7 @@ begin
   except
     on E: Exception do
     begin
-      Result.Error := E.Message;
+      Result.Error := ShortError(E.Message);
       Exit;
     end;
   end;
@@ -275,13 +301,13 @@ begin
   if not FileExists(FileName) then
     Exit;
   try
-    Result := ParseRepoConfig(ReadFileBytes(FileName));
+    Result := ParseRepoConfig(ReadTomlBytes(FileName));
   except
     on E: Exception do
     begin
       Result := EmptyRepoConfig;
       Result.Exists := True;
-      Result.Error := E.Message;
+      Result.Error := ShortError(E.Message);
     end;
   end;
 end;

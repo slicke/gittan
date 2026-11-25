@@ -192,7 +192,7 @@ resourcestring
 implementation
 
 uses
-  Math, LibAvif, BGRAOpenRaster, BGRAPaintNet, BGRAPhoxo, InkWebP, gittan.git, gittan.theme;
+  Math, LibAvif, BGRAOpenRaster, BGRAPhoxo, InkWebP, gittan.git, gittan.theme;
 
 resourcestring
   rsCannotRead = 'Cannot read this image';
@@ -215,9 +215,9 @@ const
   KnobRadius = 6;
   GrabWidth = 6;
   ModeNames: array[TGittanImageMode] of string = ('side', 'swipe', 'onion', 'difference');
-  ImageExtensions: array[0..23] of string = ('.png', '.jpg', '.jpeg', '.gif', '.bmp',
+  ImageExtensions: array[0..21] of string = ('.png', '.jpg', '.jpeg', '.gif', '.bmp',
     '.ico', '.cur', '.tga', '.tif', '.tiff', '.pcx', '.webp', '.psd', '.pdd', '.xpm',
-    '.pnm', '.pbm', '.pgm', '.ppm', '.xwd', '.ora', '.pdn', '.lzp', '.oxo');
+    '.pnm', '.pbm', '.pgm', '.ppm', '.ora', '.lzp', '.oxo');
 var
   AvifChecked, AvifLoaded: boolean;
 
@@ -299,6 +299,10 @@ begin
       { The size from the header, before anything is decoded. A format
         whose reader cannot tell it gives 0 × 0 or raises, and is decoded
         as before. }
+      { A Paint.NET image has none its reader could tell, so nothing
+        would bound what it decodes to. }
+      if DetectFileFormat(Stream) = ifPaintDotNet then
+        Exit;
       if InkIsWebP(Copy(AData, 1, 12)) then
         Size := WebPHeaderSize(AData)
       else
@@ -1180,7 +1184,6 @@ end;
 initialization
   { these register their readers only when asked }
   RegisterOpenRasterFormat;
-  RegisterPaintNetFormat;
   RegisterPhoxoFormat;
 
 end.

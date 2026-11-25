@@ -594,7 +594,8 @@ begin
   if NoWork <> FCommitIdle then
   begin
     FCommitIdle := NoWork;
-    if Idle and FCommitHeader.Expanded then
+    { Nor is it folded with the caret in it, to hide what is typed. }
+    if Idle and FCommitHeader.Expanded and not FCommitMemo.Focused then
     begin
       FCommitAutoFolded := True;
       FCommitHeader.Expanded := False;
@@ -989,14 +990,14 @@ end;
 function TRepoFrame.EditIdentity: boolean;
 var
   Who, Mail, WasMail, Error: string;
-  Local, WasLocal, SigningChanged: boolean;
-  Signing: TGittanSigningSetup;
+  Local, SigningChanged: boolean;
+  Signing, WasSigning: TGittanSigningSetup;
 begin
   Who := FRepo.UserName;
   Mail := FRepo.UserEmail;
   Local := FRepo.HasLocalIdentity;
   Signing := ReadSigningSetup(FRepo.Root);
-  WasLocal := Local;
+  WasSigning := Signing;
   WasMail := Mail;
   Result := ChooseIdentity(Who, Mail, Local, Signing, FRepo.Root, SigningChanged);
   if not Result then
@@ -1007,24 +1008,25 @@ begin
     StatusNote(FRepo.Error, True);
     Exit;
   end;
-  { Signing left as it was is not written: git may sign with a key it
-    picks by the e-mail, or sign commits and not tags, which the
-    dialog's setup would replace. A change of scope moves it along. }
-  if SigningChanged or (Local <> WasLocal) then
+  { Signing left as it was is not written, at a change of scope either:
+    git may sign with a key it picks by the e-mail, or sign commits and
+    not tags, which the dialog's setup would replace, and off here alone
+    would become off everywhere. }
+  if SigningChanged then
   begin
     Result := WriteSigningSetup(FRepo.Root, Signing, Mail, Local, Error);
     if not Result then
       StatusNote(Error, True);
   end
-  { A new e-mail alone: the SSH key goes under it in the allowed
-    signers file, or commits made under it would not verify. }
-  else if Signing.Sign and (Signing.Format = sfSsh) and (Mail <> WasMail) and
-    (Signing.AllowedSigners <> '') and (Signing.Key <> '') then
+  { The SSH key set, not one the dialog picked for an empty field, goes
+    under the e-mail in the allowed signers file, or commits made under
+    it would not verify; the dialog's Test says that Save does so. }
+  else if WasSigning.Sign and (WasSigning.Format = sfSsh) and (WasSigning.Key <> '') and
+    not EnsureAllowedSigner(FRepo.Root, Mail, WasSigning.Key, Error) then
   begin
-    Result := AddAllowedSigner(AllowedSignersPath(FRepo.Root, Signing.AllowedSigners), Mail,
-      Signing.Key, Error);
-    if not Result then
-      StatusNote(Error, True);
+    { The identity was saved; only a new e-mail needs the line. }
+    Result := Mail = WasMail;
+    StatusNote(Error, True);
   end;
   FSignCache.Clear;
   CommitHeaderEnter(nil);
@@ -1108,6 +1110,9 @@ begin
     Paths.Free;
   end;
   FCommitJob.OnDone := @CommitJobDone;
+  { What an agent writes is for the files as they were before it. }
+  AbandonMessageJob;
+  HoldWatcher;
   FCommitJob.Start;
   FStatus.ShowBusy(rsCommitting);
   UpdateCommitState;
@@ -1164,6 +1169,9 @@ begin
   else
     FFixupParent := '';
   FCommitJob.OnDone := @CommitJobDone;
+  { What an agent writes is for the files as they were before it. }
+  AbandonMessageJob;
+  HoldWatcher;
   FCommitJob.Start;
   FStatus.ShowBusy(rsCommitting);
   UpdateCommitState;
@@ -1210,9 +1218,10 @@ begin
   Amended := FCommitAmend.Checked and not Moved;
   if Job.Ok then
   begin
-    Subject := FCommitMemo.Lines.Text;
-    if FCommitMemo.Lines.Count > 0 then
-      Subject := FCommitMemo.Lines[0];
+    { The job's: the field may have been changed since. }
+    Subject := Trim(Job.Message);
+    if Pos(#10, Subject) > 0 then
+      Subject := TrimRight(Copy(Subject, 1, Pos(#10, Subject) - 1));
     if not Fixup and (not Moved or FMoveUsedMemo) then
     begin
       { commit.template may have changed since the repository opened. }
@@ -1310,9 +1319,19 @@ begin
   end
   else
     StatusNote(Format(rsCommitted, [Copy(Job.Id, 1, 7), Subject]));
+  if Job.Ok and (Job.Note <> '') then
+    BannerError(rsCommitIndexStale, Job.Note);
   { A fetch, pull or push that waited for the background fetch and then
-    for this commit; last, so its busy note is not written over. }
-  if FPendingRemote and (FAutoFetchJob = nil) then
+    for this commit; last, so its busy note is not written over. One
+    that waits goes with a commit that failed, also when the background
+    fetch still runs: a push would go without the commit, and its end
+    close the notice that says why. }
+  if FPendingRemote and not Job.Ok then
+  begin
+    FPendingRemote := False;
+    StatusNote(rsWaitingDropped, True);
+  end
+  else if FPendingRemote and (FAutoFetchJob = nil) then
     RunPendingRemote;
 end;
 

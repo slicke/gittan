@@ -121,6 +121,10 @@ TExtContextInfo = record
     reach, so it stays here, not only for the call, until it is taken or
     the context goes. }
   EntrySource: RawUtf8;
+  { JSON.parse as the context was made with it, which the host's own
+    calls go through whatever the script puts in its place; freed before
+    the context. }
+  ParseFn: JSValue;
 end;
 
 TExtContextList = specialize TFPGList<PExtContextInfo>;
@@ -577,6 +581,8 @@ public
         which is not loaded but would otherwise keep its listeners,
         commands and timers. }
   procedure DropExtensionContext(Ext: PExtContextInfo);
+    {** How many timers of ctx are set. }
+  function TimersOf(ctx: JSContext): integer;
     {** Module-shaped extensions are evaluated through @code(import());
         called by @code(ExtExecuteFile) when the file has static
         @code(import)/@code(export) statements. }
@@ -671,7 +677,10 @@ public
     {** Runs the command AKey (TGittanExtRegistry.CommandKey) with
         AContextJson parsed in its context as its argument; a throw is
         reported. False when there is no such command. }
-  function RunCommand(const AKey, AContextJson: string): boolean;
+  function RunCommand(const AKey, AContextJson: string): boolean; overload;
+    {** As RunCommand; AThrew says whether the call itself threw, so that
+      one that answers later never will. }
+  function RunCommand(const AKey, AContextJson: string; out AThrew: boolean): boolean; overload;
 
     {** Register the engine-internal baseline (alert/confirm/prompt/select/log,
         setTimeout/setInterval/clear*, console.*) into the current registration
@@ -1114,8 +1123,7 @@ opaque: pointer): pointer; cdecl;
 var
   FileName: string;
   Script: RawUtf8;
-  FileStream: TFileStream;
-  StringStream: TStringStream;
+  Source: RawByteString;
   Compiled: JSValue;
 
   { Leave a readable error pending on the context: returning nil without one
@@ -1157,15 +1165,14 @@ begin
   // Load file contents into Script as UTF-8. This runs inside a C frame, so a
   // Pascal exception must not be allowed to unwind out of it.
   try
-    FileStream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyWrite);
-    StringStream := TStringStream.Create;
-    try
-      StringStream.CopyFrom(FileStream, FileStream.Size);
-      Script := StringStream.DataString;
-    finally
-      StringStream.Free;
-      FileStream.Free;
+    Source := ReadFileBytes(FileName);
+    if Assigned(OnModuleApproval) and not OnModuleApproval(Source) then
+    begin
+      Fail('module ' + FileName + ' changed since the extensions were loaded; ' +
+        'reload the extensions');
+      Exit;
     end;
+    Script := RawUtf8(Source);
   except
     on E: Exception do
     begin
@@ -1878,35 +1885,52 @@ const
     '    },' + LineEnding +
     '    unregister: function (id) { return t.unregisterCommand(String(id)); }' + LineEnding +
     '  };' + LineEnding +
+    { Everything the answer is made with is taken here, before the
+      extension's script can put its own in its place, or a tab would stay
+      on Loading and a run never end. await looks nothing up. }
     '  var deliver = t._deliver, ANSWER_SECONDS = 300;' + LineEnding +
     '  delete t._deliver;' + LineEnding +
+    '  var apply = Reflect.apply, stringify = JSON.stringify, text = String;' + LineEnding +
+    '  var set = globalThis.setTimeout, clear = globalThis.clearTimeout, mine = { __proto__: null };' + LineEnding +
+    '  if (typeof clear === "function")' + LineEnding +
+    '    globalThis.clearTimeout = globalThis.clearInterval = function (id) { var n = id | 0; if (!mine[n]) clear(n); };' + LineEnding +
     { The raw natives would keep a function that never answers, and the
       run or the tab would wait for ever: only the shim's way is left. }
     '  var registerForgeTab = t.registerForgeTab, registerBatch = t.registerBatch;' + LineEnding +
     '  delete t.registerForgeTab;' + LineEnding +
     '  delete t.registerBatch;' + LineEnding +
-    '  var said = function (e) { try { return String((e && e.message) || e); } catch (x) { return "The extension failed"; } };' + LineEnding +
-    '  var answer = function (seq, p) {' + LineEnding +
+    '  var said = function (e) { try { return text((e && e.message) || e); } catch (x) { return "The extension failed"; } };' + LineEnding +
+    '  var answer = async function (seq, p) {' + LineEnding +
     '    var done = false, timer = null;' + LineEnding +
     '    var send = function (o) {' + LineEnding +
     '      if (done) return;' + LineEnding +
-    '      done = true;' + LineEnding +
-    '      if (timer !== null && typeof clearTimeout === "function") clearTimeout(timer);' + LineEnding +
+    { Made before the timer goes: a toJSON the watchdog ends takes this
+      call with it, and the timer is what answers then. }
     '      var s;' + LineEnding +
-    '      try { s = JSON.stringify(o); } catch (e) { s = JSON.stringify({ error: "The answer is not JSON: " + said(e) }); }' + LineEnding +
-    '      deliver(Number(seq), s);' + LineEnding +
+    '      try { s = stringify(o); } catch (e) {' + LineEnding +
+    '        try { s = stringify({ error: "The answer is not JSON: " + said(e) }); }' + LineEnding +
+    '        catch (x) { s = ''{"error":"The answer is not JSON"}''; }' + LineEnding +
+    '      }' + LineEnding +
+    '      if (done) return;' + LineEnding +
+    '      done = true;' + LineEnding +
+    '      if (timer !== null) { clear(timer); delete mine[timer]; }' + LineEnding +
+    '      deliver(+seq, s);' + LineEnding +
     '    };' + LineEnding +
-    '    if (typeof setTimeout === "function")' + LineEnding +
-    '      timer = setTimeout(function () { send({ error: "The extension did not answer within " + ANSWER_SECONDS + " seconds" }); }, ANSWER_SECONDS * 1000);' + LineEnding +
-    '    Promise.resolve().then(p).then(' + LineEnding +
-    '      function (v) { send({ value: v === undefined ? null : v }); },' + LineEnding +
-    '      function (e) { send({ error: said(e) }); });' + LineEnding +
+    '    try {' + LineEnding +
+    '      if (typeof set === "function") {' + LineEnding +
+    '        timer = set(function () { send({ error: "The extension did not answer within " + ANSWER_SECONDS + " seconds" }); }, ANSWER_SECONDS * 1000);' + LineEnding +
+    '        mine[timer] = true;' + LineEnding +
+    '      }' + LineEnding +
+    '      await undefined;' + LineEnding +
+    '      var v = await p();' + LineEnding +
+    '      send({ value: v === undefined ? null : v });' + LineEnding +
+    '    } catch (e) { send({ error: said(e) }); }' + LineEnding +
     '  };' + LineEnding +
     '  t.forgeTabs = {' + LineEnding +
     '    register: function (o) {' + LineEnding +
     '      if (!o || typeof o.render !== "function" || !o.id)' + LineEnding +
     '        throw new TypeError("Gittan.forgeTabs.register: {id, title, render} expected");' + LineEnding +
-    '      return registerForgeTab.call(t, String(o.id), String(o.title || o.id), String(o.description || ""), function (ctx) {' + LineEnding +
+    '      return apply(registerForgeTab, t, [text(o.id), text(o.title || o.id), text(o.description || ""), function (ctx) {' + LineEnding +
     '        var seq = ctx.seq; delete ctx.seq;' + LineEnding +
     '        if (ctx.kind === "action") {' + LineEnding +
     '          var a = ctx.action, row = ctx.row; delete ctx.kind; delete ctx.action; delete ctx.row;' + LineEnding +
@@ -1915,7 +1939,7 @@ const
     '          delete ctx.kind;' + LineEnding +
     '          answer(seq, function () { return o.render(ctx); });' + LineEnding +
     '        }' + LineEnding +
-    '      });' + LineEnding +
+    '      }]);' + LineEnding +
     '    },' + LineEnding +
     '    unregister: function (id) { return t.unregisterForgeTab(String(id)); }' + LineEnding +
     '  };' + LineEnding +
@@ -1923,10 +1947,10 @@ const
     '    register: function (o) {' + LineEnding +
     '      if (!o || typeof o.run !== "function" || !o.id)' + LineEnding +
     '        throw new TypeError("Gittan.batch.register: {id, title, run} expected");' + LineEnding +
-    '      return registerBatch.call(t, String(o.id), String(o.title || o.id), String(o.description || ""), function (ctx) {' + LineEnding +
+    '      return apply(registerBatch, t, [text(o.id), text(o.title || o.id), text(o.description || ""), function (ctx) {' + LineEnding +
     '        var seq = ctx.seq; delete ctx.seq;' + LineEnding +
     '        answer(seq, function () { return o.run(ctx); });' + LineEnding +
-    '      });' + LineEnding +
+    '      }]);' + LineEnding +
     '    },' + LineEnding +
     '    unregister: function (id) { return t.unregisterBatch(String(id)); }' + LineEnding +
     '  };' + LineEnding +
@@ -1958,14 +1982,15 @@ begin
   addClassFunctionIf(epUI, 'registerBatch',      @JSBatchRegister,      4);
   addClassFunctionIf(epUI, 'unregisterBatch',    @JSBatchUnregister,    1);
   addClassFunctionIf(epUI, '_deliver',           @JSDeliver,            2);
-  if CanRegister(epUI) then
-    ExecuteInCurrent(COMMANDS_SHIM, '<commands shim>');
-
-  // Timer family → timers group (baseline, always granted today).
+  // Timer family → timers group (baseline, always granted today),
+  // before the shim, which takes them.
   addFunctionIf(epTimers, 'setTimeout',    @JSSetTimeout,  2);
   addFunctionIf(epTimers, 'setInterval',   @JSSetInterval, 2);
   addFunctionIf(epTimers, 'clearTimeout',  @JSClearTimer,  1);
   addFunctionIf(epTimers, 'clearInterval', @JSClearTimer,  1);
+
+  if CanRegister(epUI) then
+    ExecuteInCurrent(COMMANDS_SHIM, '<commands shim>');
 
   // console.log/push/logs object — UI group. RegisterConsoleLog writes into ctx directly.
   if CanRegister(epUI) then
@@ -2137,6 +2162,7 @@ begin
         if FExtContexts[i]^.Ctx <> nil then
         try
           FRegistry.RemoveContext(FExtContexts[i]^.Ctx);
+          JS_FreeValue(FExtContexts[i]^.Ctx, FExtContexts[i]^.ParseFn);
           JS_FreeContext(FExtContexts[i]^.Ctx);
         except
         end;
@@ -2470,15 +2496,18 @@ begin
     if (info = nil) or (info^.Ctx = nil) then
       Continue;
     ctx := info^.Ctx;
-    if not ContextHasFunction(ctx, 'unloadCallback') then
-      Continue;
 
     globalObj := JS_GetGlobalObject(ctx);
+    { Read once: a getter may throw, and another read may give another
+      answer. What it throws is taken off, or the next call of another
+      extension would throw it. }
     funcObj := JS_GetPropertyStr(ctx, globalObj, 'unloadCallback');
     retVal := JS_UNDEFINED;
     try
       try
-        if JS_IsFunction(ctx, funcObj) then
+        if JS_IsException(funcObj) then
+          DumpJSError(ctx)
+        else if JS_IsFunction(ctx, funcObj) then
         begin
           retVal := JS_Call(ctx, funcObj, globalObj, 0, nil);
           // JS_IsException, not JS_IsError: a throwing unload hook returns the
@@ -2499,6 +2528,17 @@ begin
   finally
     SetExceptionMask(oldMask);
   end;
+end;
+
+function TGittanExtEngine.TimersOf(ctx: JSContext): integer;
+var
+  i: integer;
+begin
+  Result := 0;
+  if Assigned(FJSTimers) then
+    for i := 0 to FJSTimers.Count - 1 do
+      if FJSTimers.Data[i]^.Context = ctx then
+        Inc(Result);
 end;
 
 procedure TGittanExtEngine.DropTimersOf(ctx: JSContext);
@@ -2539,6 +2579,7 @@ begin
   { Out of the list first: a promise task of it then finds no generation
     and leaves its promise alone. }
   FExtContexts.Remove(Ext);
+  JS_FreeValue(ctx, Ext^.ParseFn);
   JS_FreeContext(ctx);
   Dispose(Ext);
 end;
@@ -2620,6 +2661,7 @@ begin
             { What the script defines on its next load is what it has: a
               key it no longer defines goes. }
             FRegistry.RemoveSettingsOf(FExtContexts[i]^.ExtId);
+            JS_FreeValue(FExtContexts[i]^.Ctx, FExtContexts[i]^.ParseFn);
             JS_FreeContext(FExtContexts[i]^.Ctx);
           except
           end;
@@ -2646,7 +2688,7 @@ DisplayName, Author: string; Granted: TExtPermSet): PExtContextInfo;
 var
   ctx: JSContext;
   Info: PExtContextInfo;
-  globalObj: JSValue;
+  globalObj, jsonObj: JSValue;
 begin
   Result := nil;
   if FRuntime = nil then Exit;
@@ -2683,6 +2725,12 @@ begin
   Info^.Granted := Granted;
   Inc(FContextGeneration);
   Info^.Generation := FContextGeneration;
+  Info^.ParseFn := JS_UNDEFINED;
+  globalObj := JS_GetGlobalObject(ctx);
+  jsonObj := JS_GetPropertyStr(ctx, globalObj, 'JSON');
+  Info^.ParseFn := JS_GetPropertyStr(ctx, jsonObj, 'parse');
+  JS_FreeValue(ctx, jsonObj);
+  JS_FreeValue(ctx, globalObj);
 
   // Provision engine-internal baselines (alert/confirm/prompt/select/log/timers/console)
   // into this ctx, gated by Granted. Caller will follow up with BeginRegistration to
@@ -2697,6 +2745,7 @@ begin
       EndRegistration;
     end;
   except
+    JS_FreeValue(ctx, Info^.ParseFn);
     JS_FreeContext(ctx);
     Dispose(Info);
     raise;
@@ -2884,8 +2933,15 @@ begin
   else
   begin
     ResultStr := JS_ToCString(ctx, EvalResult.Raw);
-    Result := ResultStr;
-    JS_FreeCString(ctx, ResultStr);
+    if ResultStr <> nil then
+    begin
+      Result := ResultStr;
+      JS_FreeCString(ctx, ResultStr);
+    end
+    else
+      // A value that cannot be a string (a Symbol, an object without a
+      // prototype) is no failure of the script.
+      JS_DropException(ctx);
   end;
   ctx^.Free(EvalResult);
 
@@ -2964,8 +3020,15 @@ begin
   begin
     // Convert non-exception value to string
     ResultStr := JS_ToCString(FContext, EvalResult.Raw);
-    Result := ResultStr;
-    JS_FreeCString(FContext, ResultStr);
+    if ResultStr <> nil then
+    begin
+      Result := ResultStr;
+      JS_FreeCString(FContext, ResultStr);
+    end
+    else
+      // A value that cannot be a string (a Symbol, an object without a
+      // prototype) is no failure of the script.
+      JS_DropException(FContext);
   end;
 
   // Release evaluation result
@@ -3728,13 +3791,23 @@ end;
 function TGittanExtEngine.ParseJsonIn(ctx: JSContext; const Json: string): JSValue;
 var
   glob, jsonObj, parseFn, text: JSValue;
+  i: integer;
 begin
   Result := JS_UNDEFINED;
   if ctx = nil then
     Exit;
   glob := JS_GetGlobalObject(ctx);
-  jsonObj := JS_GetPropertyStr(ctx, glob, 'JSON');
-  parseFn := JS_GetPropertyStr(ctx, jsonObj, 'parse');
+  jsonObj := JS_UNDEFINED;
+  parseFn := JS_UNDEFINED;
+  if Assigned(FExtContexts) then
+    for i := 0 to FExtContexts.Count - 1 do
+      if (FExtContexts[i] <> nil) and (FExtContexts[i]^.Ctx = ctx) then
+        parseFn := JS_DupValue(ctx, FExtContexts[i]^.ParseFn);
+  if not JS_IsFunction(ctx, parseFn) then
+  begin
+    jsonObj := JS_GetPropertyStr(ctx, glob, 'JSON');
+    parseFn := JS_GetPropertyStr(ctx, jsonObj, 'parse');
+  end;
   text := JS_NewString(ctx, RawUtf8(Json));
   try
     Result := JS_Call(ctx, parseFn, jsonObj, 1, @text);
@@ -3826,8 +3899,9 @@ begin
 end;
 
 { What a command of an extension granted AGranted gets of its context:
-  without data no file's path and no selected code, and no repository's
-  root unless exec or forge gives it anyway (git and programs, and the
+  without forge no login of the user's on the forge, as Gittan.forges
+  gives it; without data no file's path and no selected code, and no
+  repository's root or name unless exec or forge gives it anyway (git and programs, and the
   forge's tool, run there, which a Batch operation with either alone
   needs to name its repository: forge-overview.js asks gh of each). }
 function CommandContextFor(AGranted: TExtPermSet; const AJson: string): string;
@@ -3835,7 +3909,7 @@ var
   Data: TJSONData;
   Key: string;
 begin
-  if epData in AGranted then
+  if [epData, epForge] * AGranted = [epData, epForge] then
     Exit(AJson);
   Result := '{}';
   try
@@ -3846,8 +3920,13 @@ begin
   try
     if not (Data is TJSONObject) then
       Exit;
-    for Key in TStringArray.Create('path', 'selection', 'repo') do
-      if (Key <> 'repo') or ([epExec, epForge] * AGranted = []) then
+    if not (epForge in AGranted) then
+      TJSONObject(Data).Delete('login');
+    if not (epData in AGranted) then
+      for Key in TStringArray.Create('path', 'selection') do
+        TJSONObject(Data).Delete(Key);
+    if [epData, epExec, epForge] * AGranted = [] then
+      for Key in TStringArray.Create('repo', 'name') do
         TJSONObject(Data).Delete(Key);
     Result := Data.AsJSON;
   finally
@@ -4004,10 +4083,19 @@ end;
 
 function TGittanExtEngine.RunCommand(const AKey, AContextJson: string): boolean;
 var
+  Threw: boolean;
+begin
+  Result := RunCommand(AKey, AContextJson, Threw);
+end;
+
+function TGittanExtEngine.RunCommand(const AKey, AContextJson: string;
+  out AThrew: boolean): boolean;
+var
   Cmd: TGittanExtCommand;
   Func, arg, ret: JSValue;
 begin
   Result := False;
+  AThrew := False;
   if IsExtShuttingDown or (FRuntime = nil) or (FRegistry = nil) then
     Exit;
   if not FRegistry.FindCommand(AKey, Cmd) then
@@ -4017,7 +4105,8 @@ begin
   try
     arg := ParseJsonIn(Cmd.Ctx, CommandContextFor(GrantedForContext(Cmd.Ctx), AContextJson));
     ret := JS_Call(Cmd.Ctx, Func, JS_UNDEFINED, 1, @arg);
-    if JS_IsException(ret) then
+    AThrew := JS_IsException(ret);
+    if AThrew then
       DumpJSError(Cmd.Ctx);
     JS_FreeValue(Cmd.Ctx, ret);
     JS_FreeValue(Cmd.Ctx, arg);

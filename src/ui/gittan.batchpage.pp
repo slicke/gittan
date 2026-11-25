@@ -128,8 +128,8 @@ type
   TGittanBatchPage = class(TGittanCardPage)
   private
     FRows: TGittanBatchRows;
-    { Per row: a repository whose folder is gone. }
-    FMissing: array of boolean;
+    { The repositories whose folder is gone, as SetGoneFolders gave them. }
+    FMissing: TStringList;
     FChosen: TStringList;
     { What the scan found, the first FGoneDone of FGoneTotal repositories;
       FSeen of them had their merged branches picked. }
@@ -168,7 +168,7 @@ type
       another is shown. }
     FExtOps: TGittanBatchExtOps;
     FExtRuns: array of TGittanBatchExtRun;
-    FOnExtRun: TNotifyEvent;
+    FOnExtRun, FOnExtStop: TNotifyEvent;
     FOnOpenUrl: TGittanBatchOpenEvent;
     { A note over the list (Notice), with a link that raises OnNotice. }
     FNotice, FNoticeLink: string;
@@ -193,6 +193,8 @@ type
     function PaintTag(ARight, ATop: integer; const AText: string; AColor: TColor): integer;
     procedure PaintHeading(var Y: integer; const ATitle, ADetail: string; ALeft, ARight: integer;
       AChips: boolean);
+    function RowsFit(Y, ACount, ARowH, ALimit: integer): integer;
+    procedure PaintHidden(var Y: integer; AHidden, ALeft, ARight: integer);
     procedure PaintRows(var Y: integer; ALeft, ARight: integer);
     procedure PaintPicked(var Y: integer; ALeft, ARight: integer);
     procedure PaintChevron(ALeft, ATop, ASize: integer; AOpen: boolean; AColor: TColor);
@@ -221,6 +223,8 @@ type
     destructor Destroy; override;
     {** The repositories to offer, as BatchRows gives them. }
     procedure SetRows(const ARows: TGittanBatchRows);
+    {** The repositories of the rows whose folder is not there. }
+    procedure SetGoneFolders(const APaths: TStringArray);
     {** Picks the repositories at APaths (roots), and no other. }
     procedure SetChosen(APaths: TStrings);
     {** The picked repositories the rows have, in the rows' order, with
@@ -295,6 +299,8 @@ type
     {** A click on an extension's Run: the owner runs the operation shown
       (ShownExtOp) over ChosenRepos. }
     property OnExtRun: TNotifyEvent read FOnExtRun write FOnExtRun;
+    {** A click on Stop, which stands in Run's place while it runs. }
+    property OnExtStop: TNotifyEvent read FOnExtStop write FOnExtStop;
     {** A link an extension gave with a result. }
     property OnOpenUrl: TGittanBatchOpenEvent read FOnOpenUrl write FOnOpenUrl;
     {** The operation shown, BatchOverview (the default), BatchGone or
@@ -344,6 +350,7 @@ resourcestring
   rsNoRepos = 'No repositories to pick yet. Open some, or add them to the repository list on ' +
     'the welcome page.';
   rsNotFound = 'not found';
+  rsHidden = '%d more are not shown: the page cannot be taller.';
   rsNonePicked = 'None picked.';
   { After the names that fit: how many more. }
   rsMorePicked = ' and %d more';
@@ -444,9 +451,16 @@ resourcestring
   rsExtSaidNone = 'Nothing to say of the %d repositories';
   rsExtNothingIn = 'Nothing to say of %s.';
   rsExtLeftOut = 'Left out, as the extension does not run for them: %s.';
+  rsExtStop = 'Stop';
   rsExtOpenLink = 'Open link';
 
 const
+  { The LCL sends a size in 16 bits, so a control over 32767 px fails (on
+    GTK the rest cannot be scrolled to): where the list ends, and where
+    the last card may begin or take its last row. What follows the cards
+    (a list of names, a button) is under that. }
+  MaxListHeight = 14000;
+  MaxCardsHeight = 28000;
   RowLink = 'r:';
   GoneLink = 'g:';
   BranchLink = 'b:';
@@ -464,6 +478,7 @@ const
   MaintRunLink = 'mrun';
   MaintLink = 'mt:';
   ExtRunLink = 'xrun';
+  ExtStopLink = 'xstop';
   ExtOpenLink = 'xo:';
   ExtUrlLink = 'xu:';
   NoticeLink = 'notice';
@@ -518,11 +533,16 @@ begin
   FMaintPicked.CaseSensitive := True;
   FMaintPicked.Sorted := True;
   FMaintPicked.Duplicates := dupIgnore;
+  FMissing := TStringList.Create;
+  FMissing.CaseSensitive := True;
+  FMissing.Sorted := True;
+  FMissing.Duplicates := dupIgnore;
 end;
 
 destructor TGittanBatchPage.Destroy;
 begin
   FMaintPicked.Free;
+  FMissing.Free;
   FPicked.Free;
   FChosen.Free;
   inherited Destroy;
@@ -533,16 +553,20 @@ end;
   --------------------------------------------------------------------------- }
 
 procedure TGittanBatchPage.SetRows(const ARows: TGittanBatchRows);
+begin
+  FRows := Copy(ARows);
+  FHot := -1;
+  Layout;
+  Invalidate;
+end;
+
+procedure TGittanBatchPage.SetGoneFolders(const APaths: TStringArray);
 var
   i: integer;
 begin
-  FRows := Copy(ARows);
-  FMissing := nil;
-  SetLength(FMissing, Length(FRows));
-  for i := 0 to High(FRows) do
-    FMissing[i] := not FRows[i].IsFolder and not DirectoryExists(FRows[i].Path);
-  FHot := -1;
-  Layout;
+  FMissing.Clear;
+  for i := 0 to High(APaths) do
+    FMissing.Add(APaths[i]);
   Invalidate;
 end;
 
@@ -1077,11 +1101,29 @@ end;
 { The repositories, a row each, indented by depth: the box, a folder's
   name in bold with how many it holds, a repository's name with its
   path dim after it ("not found" when its folder is gone). }
+{ How many of ACount rows of ARowH fit from Y under ALimit, room kept for
+  the line that says how many more there are. }
+function TGittanBatchPage.RowsFit(Y, ACount, ARowH, ALimit: integer): integer;
+begin
+  Result := ACount;
+  if Y + ACount * ARowH > ALimit then
+    Result := Max(1, (ALimit - Y) div ARowH);
+end;
+
+procedure TGittanBatchPage.PaintHidden(var Y: integer; AHidden, ALeft, ARight: integer);
+begin
+  if AHidden <= 0 then
+    Exit;
+  PaintText(Y, Format(rsHidden, [AHidden]), FDim, ALeft, ARight);
+  Inc(Y, Px(Gap));
+end;
+
 procedure TGittanBatchPage.PaintRows(var Y: integer; ALeft, ARight: integer);
 var
-  i, TextH, RowH, S, X: integer;
+  i, TextH, RowH, S, X, Shown: integer;
   R: TRect;
   Detail: string;
+  Missing: boolean;
 begin
   FC.Font := Font;
   TextH := FC.TextHeight('Xg');
@@ -1093,7 +1135,8 @@ begin
     PaintText(Y, rsNoRepos, FDim, ALeft, ARight);
     Exit;
   end;
-  for i := 0 to High(FRows) do
+  Shown := RowsFit(Y, Length(FRows), RowH, MaxListHeight);
+  for i := 0 to Shown - 1 do
   begin
     R := Rect(ALeft, Y, ARight, Y + RowH);
     AddLink(R, RowLink + IntToStr(i));
@@ -1125,14 +1168,15 @@ begin
     end
     else
     begin
-      if FMissing[i] then
+      Missing := FMissing.IndexOf(FRows[i].Path) >= 0;
+      if Missing then
         FC.Font.Color := FDim
       else
         FC.Font.Color := FText;
       FC.TextOut(X, Y + Px(RowPadY), FitTextLeft(FC, FRows[i].Caption, ARight - X));
       Inc(X, FC.TextWidth(FRows[i].Caption) + Px(Gap));
       FC.Font.Color := FDim;
-      if FMissing[i] then
+      if Missing then
         Detail := rsNotFound
       else
         Detail := ShortPath(FRows[i].Path);
@@ -1141,6 +1185,7 @@ begin
     end;
     Inc(Y, RowH);
   end;
+  PaintHidden(Y, Length(FRows) - Shown, ALeft, ARight);
 end;
 
 { A repository's card: its box (of its branches), its name in bold and
@@ -1150,7 +1195,7 @@ end;
 procedure TGittanBatchPage.PaintGoneCard(var Y: integer; AIndex, ALeft, ARight: integer);
 var
   G: TGittanGoneRepo;
-  TextH, RowH, S, H, X, RowTop, b, TagLeft: integer;
+  TextH, RowH, S, H, X, RowTop, b, TagLeft, Shown: integer;
   R: TRect;
   Notes: array of string;
   NoteColors: array of TColor;
@@ -1178,8 +1223,9 @@ begin
   TextH := FC.TextHeight('Xg');
   RowH := TextH + 2 * Px(RowPadY);
   S := Max(Px(12), TextH - Px(2));
-  H := 2 * Px(CardPadY) + TextH + Length(Notes) * (TextH + Px(4)) +
-    Length(G.Branches) * RowH;
+  Shown := RowsFit(Y + 2 * Px(CardPadY) + TextH + Length(Notes) * (TextH + Px(4)),
+    Length(G.Branches), RowH, MaxCardsHeight);
+  H := 2 * Px(CardPadY) + TextH + Length(Notes) * (TextH + Px(4)) + Shown * RowH;
   if Length(G.Branches) > 0 then
     Inc(H, Px(4));
   R := Rect(ALeft, Y, ARight, Y + H);
@@ -1221,7 +1267,7 @@ begin
   if Length(G.Branches) > 0 then
     Inc(RowTop, Px(4));
 
-  for b := 0 to High(G.Branches) do
+  for b := 0 to Shown - 1 do
   begin
     R := Rect(ALeft + Px(CardPadX) div 2, RowTop, ARight - Px(CardPadX) div 2, RowTop + RowH);
     CanPick := not FDeleting and not G.Branches[b].Deleted;
@@ -1287,6 +1333,7 @@ begin
     Inc(RowTop, RowH);
   end;
   Inc(Y, H + Px(CardGap));
+  PaintHidden(Y, Length(G.Branches) - Shown, ALeft, ARight);
 end;
 
 { The gone branches: what Scan does, Scan with the progress after it or
@@ -1294,7 +1341,7 @@ end;
   nothing gone, and Delete. }
 procedure TGittanBatchPage.PaintGone(var Y: integer; ALeft, ARight: integer);
 var
-  TextH, n, Repos, i, Picked, Cards: integer;
+  TextH, n, Repos, i, Picked, Cards, Hidden: integer;
   Detail, ButtonText, Nothing: string;
   R: TRect;
 begin
@@ -1335,6 +1382,7 @@ begin
 
   Nothing := '';
   Cards := 0;
+  Hidden := 0;
   for i := 0 to FGoneDone - 1 do
     if (Length(FGone[i].Branches) = 0) and (FGone[i].Error = '') and (FGone[i].FetchError = '')
     then
@@ -1345,9 +1393,13 @@ begin
     end
     else
     begin
-      PaintGoneCard(Y, i, ALeft, ARight);
       Inc(Cards);
+      if Y < MaxCardsHeight then
+        PaintGoneCard(Y, i, ALeft, ARight)
+      else
+        Inc(Hidden);
     end;
+  PaintHidden(Y, Hidden, ALeft, ARight);
   { Every one scanned had nothing to say: one line says so. }
   if (Cards = 0) and (FGoneDone > 0) and not FScanning then
   begin
@@ -1565,7 +1617,7 @@ end;
   repositories on one line. }
 procedure TGittanBatchPage.PaintStatus(var Y: integer; ALeft, ARight: integer);
 var
-  i, Cards: integer;
+  i, Cards, Hidden: integer;
   Detail, Clean: string;
 begin
   Cards := 0;
@@ -1584,6 +1636,7 @@ begin
   PaintCheckPill(Y, ALeft, FChecking, FStatusDone, FStatusTotal, Detail);
 
   Clean := '';
+  Hidden := 0;
   for i := 0 to FStatusDone - 1 do
     if StatusClean(FStatus[i]) then
     begin
@@ -1591,8 +1644,11 @@ begin
         Clean := Clean + ', ';
       Clean := Clean + FStatus[i].Caption;
     end
+    else if Y < MaxCardsHeight then
+      PaintStatusCard(Y, i, ALeft, ARight)
     else
-      PaintStatusCard(Y, i, ALeft, ARight);
+      Inc(Hidden);
+  PaintHidden(Y, Hidden, ALeft, ARight);
   if (Cards = 0) and (FStatusDone > 0) and not FChecking then
   begin
     PaintText(Y, rsAllDone, FDim, ALeft, ARight);
@@ -1690,7 +1746,7 @@ procedure TGittanBatchPage.PaintIdentityCard(var Y: integer; const AMembers: arr
   ALeft, ARight: integer);
 var
   Id: TGittanRepoIdentity;
-  TextH, RowH, H, X, RowTop, m, TagLeft: integer;
+  TextH, RowH, H, X, RowTop, m, TagLeft, Shown: integer;
   R: TRect;
   Head, Line, Where: string;
   HeadColor, LineColor: TColor;
@@ -1736,8 +1792,9 @@ begin
   end;
 
   H := 2 * Px(CardPadY) + 2 * TextH + Px(4);
+  Shown := RowsFit(Y + H, Length(AMembers), RowH, MaxCardsHeight);
   if Id.Error = '' then
-    Inc(H, Px(4) + Length(AMembers) * RowH);
+    Inc(H, Px(4) + Shown * RowH);
   R := Rect(ALeft, Y, ARight, Y + H);
   FC.Pen.Style := psClear;
   FC.Brush.Style := bsSolid;
@@ -1761,7 +1818,7 @@ begin
   if Id.Error = '' then
   begin
     Inc(RowTop, Px(4));
-    for m := 0 to High(AMembers) do
+    for m := 0 to Shown - 1 do
     begin
       Id := FIds[AMembers[m]];
       R := Rect(ALeft + Px(CardPadX) div 2, RowTop, ARight - Px(CardPadX) div 2, RowTop + RowH);
@@ -1797,6 +1854,7 @@ begin
     end;
   end;
   Inc(Y, H + Px(CardGap));
+  PaintHidden(Y, Length(AMembers) - Shown, ALeft, ARight);
 end;
 
 { The identity check: what it does, Check with the progress after it or
@@ -1806,12 +1864,13 @@ procedure TGittanBatchPage.PaintIdentity(var Y: integer; ALeft, ARight: integer)
 var
   Groups: array of array of integer;
   Errors: array of integer;
-  i, g, j, Marked: integer;
+  i, g, j, Marked, Hidden: integer;
   Detail: string;
   Swap: array of integer;
 begin
   Groups := nil;
   Errors := nil;
+  Hidden := 0;
   Marked := 0;
   for i := 0 to FIdsDone - 1 do
   begin
@@ -1863,9 +1922,16 @@ begin
   Inc(Y, Px(Gap));
   PaintCheckPill(Y, ALeft, FReadingIds, FIdsDone, FIdsTotal, Detail);
   for g := 0 to High(Groups) do
-    PaintIdentityCard(Y, Groups[g], ALeft, ARight);
+    if Y < MaxCardsHeight then
+      PaintIdentityCard(Y, Groups[g], ALeft, ARight)
+    else
+      Inc(Hidden, Length(Groups[g]));
   for i := 0 to High(Errors) do
-    PaintIdentityCard(Y, [Errors[i]], ALeft, ARight);
+    if Y < MaxCardsHeight then
+      PaintIdentityCard(Y, [Errors[i]], ALeft, ARight)
+    else
+      Inc(Hidden);
+  PaintHidden(Y, Hidden, ALeft, ARight);
 end;
 
 { ---------------------------------------------------------------------------
@@ -2154,7 +2220,7 @@ end;
   found, the cards, the repositories with nothing to do, and Run. }
 procedure TGittanBatchPage.PaintMaint(var Y: integer; ALeft, ARight: integer);
 var
-  TextH, n, Repos, i, Picked, Cards: integer;
+  TextH, n, Repos, i, Picked, Cards, Hidden: integer;
   Detail, ButtonText, Nothing: string;
   R: TRect;
 begin
@@ -2191,6 +2257,7 @@ begin
 
   Nothing := '';
   Cards := 0;
+  Hidden := 0;
   for i := 0 to FMaintDone - 1 do
     if (Length(FMaint[i].Items) = 0) and (FMaint[i].Error = '') and
       (FMaint[i].RemoteError = '') then
@@ -2201,9 +2268,13 @@ begin
     end
     else
     begin
-      PaintMaintCard(Y, i, ALeft, ARight);
       Inc(Cards);
+      if Y < MaxCardsHeight then
+        PaintMaintCard(Y, i, ALeft, ARight)
+      else
+        Inc(Hidden);
     end;
+  PaintHidden(Y, Hidden, ALeft, ARight);
   if (Cards = 0) and (FMaintDone > 0) and not FMaintScanning then
   begin
     PaintText(Y, rsAllTidy, FDim, ALeft, ARight);
@@ -2460,7 +2531,7 @@ end;
 procedure TGittanBatchPage.PaintExtOp(var Y: integer; ALeft, ARight: integer);
 var
   Op: TGittanBatchExtOp;
-  Run, i, n, Said, Asked, TextH: integer;
+  Run, i, n, Said, Asked, TextH, Hidden: integer;
   ButtonText, Detail, Quiet, LeftOut: string;
   Running, Other: boolean;
   R: TRect;
@@ -2522,7 +2593,10 @@ begin
   for i := 0 to High(FExtRuns) do
     if (i <> Run) and FExtRuns[i].Running then
       Other := True;
-  R := PaintButton(ALeft, Y, ButtonText, ExtRunLink, (n > 0) and not Running and not Other);
+  if Running then
+    R := PaintButton(ALeft, Y, rsExtStop, ExtStopLink, True)
+  else
+    R := PaintButton(ALeft, Y, ButtonText, ExtRunLink, (n > 0) and not Other);
   FC.Font.Color := FDim;
   if Running then
     FC.TextOut(R.Right + Px(Gap), Y, Format(rsExtRunning,
@@ -2540,6 +2614,7 @@ begin
     PaintText(Y, FExtRuns[Run].Error, FErrorColor, ALeft, ARight);
     Inc(Y, Px(Gap));
   end;
+  Hidden := 0;
   Quiet := '';
   LeftOut := '';
   for i := 0 to FExtRuns[Run].Done - 1 do
@@ -2550,13 +2625,19 @@ begin
       LeftOut := LeftOut + FExtRuns[Run].Captions[i];
     end
     else if FExtRuns[Run].Results[i].Said then
-      PaintExtCard(Y, Run, i, ALeft, ARight)
+    begin
+      if Y < MaxCardsHeight then
+        PaintExtCard(Y, Run, i, ALeft, ARight)
+      else
+        Inc(Hidden);
+    end
     else
     begin
       if Quiet <> '' then
         Quiet := Quiet + ', ';
       Quiet := Quiet + FExtRuns[Run].Captions[i];
     end;
+  PaintHidden(Y, Hidden, ALeft, ARight);
   if (Quiet <> '') and (Said > 0) then
   begin
     PaintText(Y, Format(rsExtNothingIn, [Quiet]), FDim, ALeft, ARight);
@@ -2905,6 +2986,11 @@ begin
   begin
     if Assigned(FOnDelete) then
       FOnDelete(Self);
+  end
+  else if Url = ExtStopLink then
+  begin
+    if Assigned(FOnExtStop) then
+      FOnExtStop(Self);
   end
   else if Url = ExtRunLink then
   begin

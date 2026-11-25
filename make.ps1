@@ -88,7 +88,7 @@ function Test-Vendor {
     }
     if (Test-Path $IdeStamp) {
         $stamp = @(Get-Content $IdeStamp)
-        $moved = @($IdeVendor | Where-Object { $stamp -notcontains "$(& git -C $_ rev-parse HEAD) $_" })
+        $moved = @($IdeVendor | Where-Object { (Test-Path "$_/.git") -and $stamp -notcontains "$(& git -C $_ rev-parse HEAD) $_" })
         if ($moved.Count -gt 0) {
             Write-Warning "the Lazarus IDE was built with older $($moved -join ' '); run: .\make.ps1 ide"
         }
@@ -264,7 +264,8 @@ switch ($target) {
         & $laz @rest --build-ide=
         $rc = $LASTEXITCODE
         if ($rc -eq 0 -and (Test-InGit)) {
-            $IdeVendor | ForEach-Object { "$(& git -C $_ rev-parse HEAD) $_" } | Set-Content $IdeStamp
+            $IdeVendor | Where-Object { Test-Path "$_/.git" } |
+                ForEach-Object { "$(& git -C $_ rev-parse HEAD) $_" } | Set-Content $IdeStamp
         }
         exit $rc
     }

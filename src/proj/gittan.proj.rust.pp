@@ -374,8 +374,8 @@ begin
   Bins := ProjectBlock(pbTable, rsBinaries);
   Bins.RightLast := True;
   for i := 0 to High(Info.Binaries) do
-    AddRow(Bins, ProjectRow([ProjectCell(Info.Binaries[i], psStrong), ProjectButton(rsRunBin,
-      'run:' + Info.Binaries[i], 'cargo run --bin ' + ShellName(Info.Binaries[i]))]));
+    AddRow(Bins, ProjectRow([ProjectCell(Info.Binaries[i], psStrong), ProjectNameButton(Info.Binaries[i],
+      rsRunBin, 'run:' + Info.Binaries[i], 'cargo run --bin ' + ShellName(Info.Binaries[i]))]));
   for i := 0 to High(Std.Blocks) do
     if Std.Blocks[i].Kind <> pbChecks then
       AddBlock(Result, Std.Blocks[i]);

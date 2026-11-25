@@ -452,7 +452,7 @@ const
     over a constructor of strings wrong. }
   VenvFolders: array[0..1] of string = ('.venv/', 'venv/');
 var
-  Path, Folder: string;
+  Path, Folder, Pattern: string;
 begin
   Result := nil;
   for Folder in VenvFolders do
@@ -460,7 +460,14 @@ begin
       AddProjectCheck(Result, ProjectCheck(Format(rsVenvTracked, [Folder]), Path, '/' + Folder));
   Path := AContext.TrackedWithExt('.pyc');
   if Path <> '' then
-    AddProjectCheck(Result, ProjectCheck(Format(rsPycTracked, [Path]), Path, '__pycache__/'));
+  begin
+    { Beside its source (Python 2, compileall -b) no folder covers it. }
+    if (Pos('__pycache__/', Path) = 1) or (Pos('/__pycache__/', Path) > 0) then
+      Pattern := '__pycache__/'
+    else
+      Pattern := '*' + ExtractFileExt(Path);
+    AddProjectCheck(Result, ProjectCheck(Format(rsPycTracked, [Path]), Path, Pattern));
+  end;
 end;
 
 class function TGittanPythonKind.Section(AContext: TGittanProjectContext;
@@ -471,6 +478,23 @@ var
   Std: TGittanProjectSection;
   Tool, Run: string;
   i: integer;
+
+  { Only through a tool that runs the project's own scripts (with pip
+    alone the name would be whatever program has it), and only a plain
+    name, not a path. }
+  function RunButton(const AName: string): TGittanProjectCell;
+  var
+    k: integer;
+  begin
+    Result := ProjectCell('');
+    if (Run = '') or not PlainName(AName) then
+      Exit;
+    for k := 1 to Length(AName) do
+      if not (AName[k] in ['A'..'Z', 'a'..'z', '0'..'9', '.', '_', '-']) then
+        Exit;
+    Result := ProjectButton(rsRun, 'run:' + AName, Run + ShellName(AName));
+  end;
+
 begin
   Std := StandardSection(AContext, AManifest);
   Result := Std;
@@ -492,8 +516,7 @@ begin
   Scripts.RightLast := True;
   for i := 0 to High(Info.Scripts) do
     AddRow(Scripts, ProjectRow([ProjectCell(Info.Scripts[i].Name, psStrong),
-      ProjectCell(Info.Scripts[i].Target, psDim), ProjectButton(rsRun,
-      'run:' + Info.Scripts[i].Name, Run + ShellName(Info.Scripts[i].Name))]));
+      ProjectCell(Info.Scripts[i].Target, psDim), RunButton(Info.Scripts[i].Name)]));
   AddBlock(Result, Scripts);
   for i := 0 to High(Std.Blocks) do
     if Std.Blocks[i].Kind = pbChecks then

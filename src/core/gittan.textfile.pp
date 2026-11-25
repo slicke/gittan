@@ -40,9 +40,20 @@ function UnescapeC(const S: string): string;
   catches, so a deeper text is refused before it is parsed. }
 const
   MaxNesting = 200;
+  {** The largest TOML file of .gittan that is parsed, in bytes. toml-fp
+    takes time that grows with the square of a number's length (its
+    underscores are deleted one by one) and memory a hundred times the
+    text's size, and the files are read on the main thread with every
+    snapshot. }
+  MaxTomlBytes = 64 * 1024;
 
 resourcestring
   rsNestedTooDeep = 'Nested deeper than %d levels.';
+  rsTomlTooLarge = 'The file is too large to be read here (over %d KB).';
+
+{** The bytes of the TOML file AFileName, as ReadFileBytes gives them; an
+  exception when there are more than MaxTomlBytes, before any is read. }
+function ReadTomlBytes(const AFileName: string): RawByteString;
 
 {** Whether AJson nests arrays and objects deeper than MaxNesting, its
   strings left out. }
@@ -309,6 +320,23 @@ begin
   SetLength(Result, Out);
 end;
 
+function ReadTomlBytes(const AFileName: string): RawByteString;
+var
+  F: TFileStream;
+begin
+  Result := '';
+  F := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+  try
+    if F.Size > MaxTomlBytes then
+      raise Exception.CreateFmt(rsTomlTooLarge, [MaxTomlBytes div 1024]);
+    SetLength(Result, F.Size);
+    if Result <> '' then
+      F.ReadBuffer(Result[1], Length(Result));
+  finally
+    F.Free;
+  end;
+end;
+
 function GetJSONLimited(const AJson: string): TJSONData;
 begin
   if JsonTooDeep(AJson) then
@@ -511,9 +539,11 @@ const
 var
   { The writes so far, which name each one's temporary file. }
   WriteCount: longint = 0;
-{$IFDEF UNIX}
+{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
   { The private folder PrivateTempDir settled on, '' before the first. }
   PrivateTemp: string = '';
+  { The jobs' threads ask for temporary files too. }
+  PrivateTempLock: TRTLCriticalSection;
 {$ENDIF}
 
 { AFileName, or the file the symbolic link there leads to, through a
@@ -561,7 +591,7 @@ begin
   Result := (AIndex >= 0) and (AIndex < ALines.Count) and (ALines.Objects[AIndex] = NoNewlineMark);
 end;
 
-{$IFDEF UNIX}
+{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
 { Whether ADir is a folder (not a link to one) of this user that no one
   else may enter. }
 function OwnPrivateDir(const ADir: string): boolean;
@@ -611,8 +641,13 @@ end;
 
 function TempFileName(const APrefix: string): string;
 begin
-  {$IFDEF UNIX}
-  Result := PrivateTempDir;
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
+  EnterCriticalSection(PrivateTempLock);
+  try
+    Result := PrivateTempDir;
+  finally
+    LeaveCriticalSection(PrivateTempLock);
+  end;
   {$ELSE}
   Result := IncludeTrailingPathDelimiter(GetTempDir);
   {$ENDIF}
@@ -664,5 +699,13 @@ begin
   if not Result then
     DeleteFile(Temp);
 end;
+
+{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
+initialization
+  InitCriticalSection(PrivateTempLock);
+
+finalization
+  DoneCriticalSection(PrivateTempLock);
+{$ENDIF}
 
 end.

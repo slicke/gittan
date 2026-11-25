@@ -33,6 +33,7 @@ type
     procedure TestFreeRunning;
     procedure TestRemoteJob;
     procedure TestAbortFetch;
+    procedure TestStopPush;
     procedure TestRemoteJobProgress;
     procedure TestTerminalText;
   end;
@@ -390,9 +391,63 @@ begin
   Job := TGittanRemoteJob.Create(FDir, rkPush);
   try
     AssertFalse(Job.Abortable);
+    AssertTrue(Job.Stoppable);
   finally
     Job.Free;
   end;
+  {$IFNDEF UNIX}
+  Ignore('not on Windows');
+  {$ENDIF}
+end;
+
+{ A push stopped ends its git at once, is told as any other and gives no
+  reason; a pull is not Stoppable. }
+procedure TCommitJobTest.TestStopPush;
+var
+  Job: TGittanRemoteJob;
+  Started: string;
+  T: QWord;
+begin
+  {$ifdef unix}
+  WriteFile('a.txt', 'a');
+  Git(['add', '-A']);
+  Git(['commit', '-q', '-m', 'first']);
+  Started := IncludeTrailingPathDelimiter(FDir) + 'started';
+  Git(['config', 'core.sshCommand', 'touch ''' + Started + '''; sleep 5; false']);
+  Git(['remote', 'add', 'origin', 'ssh://example.invalid/repo.git']);
+  Job := TGittanRemoteJob.Create(FDir, rkPush);
+  try
+    Job.OnDone := @JobDone;
+    Job.Start;
+    WaitForFile(Started);
+    AssertTrue('ssh started', FileExists(Started));
+    AssertFalse(Job.Stopped);
+    Sleep(20);
+    AssertTrue('silent', Job.SilentMs > 0);
+    T := GetTickCount64;
+    Job.StopPush;
+    Job.WaitFor;
+    AssertTrue('ended at once', GetTickCount64 - T < 2500);
+    CheckSynchronize(0);
+    AssertEquals('told', 1, FDone);
+    AssertTrue(Job.Stopped);
+    AssertFalse(Job.Ok);
+    AssertEquals('no reason', '', Job.Error);
+  finally
+    Job.Free;
+  end;
+  {$endif}
+  Job := TGittanRemoteJob.Create(FDir, rkPull);
+  try
+    AssertFalse(Job.Stoppable);
+    Job.StopPush;
+    AssertFalse(Job.Stopped);
+  finally
+    Job.Free;
+  end;
+  {$IFNDEF UNIX}
+  Ignore('not on Windows');
+  {$ENDIF}
 end;
 
 initialization

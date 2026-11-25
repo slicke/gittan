@@ -44,6 +44,10 @@ const
   CommandsFile = 'commands.toml';
   {** The file as a path relative to the root, with "/". }
   CommandsPath = CommandsFolder + '/' + CommandsFile;
+  {** The committed commands files that are parsed, in bytes together. }
+  MaxCommandsBytes = 512 * 1024;
+  {** The longest description kept, in bytes. }
+  MaxDescription = 200;
   {** The folder inside it whose .toml files are commands files too, a
     section of the page each. }
   CommandsSubFolder = 'commands';
@@ -293,9 +297,28 @@ uses
   Process, fpjson, jsonparser, TOML.Types, TOML.Parser, gittan.git, gittan.textfile,
   gittan.sha256, gittan.repoconfig;
 
+resourcestring
+  rsCommandsTooLarge = 'The commands files are too large together to be read (over %d KB).';
+
 { ---------------------------------------------------------------------------
   The commands file
   --------------------------------------------------------------------------- }
+
+{ AText on one line, at most MaxDescription bytes of it: a description
+  stands above the shell line in a tile's hint, and may not push it off
+  the screen. }
+function OneLine(const AText: string): string;
+var
+  i: integer;
+begin
+  Result := AText;
+  for i := 1 to Length(Result) do
+    if (Result[i] < ' ') or (Result[i] = #127) then
+      Result[i] := ' ';
+  Result := Trim(Result);
+  if Length(Result) > MaxDescription then
+    Result := TrimRight(Utf8Clean(Copy(Result, 1, MaxDescription))) + '…';
+end;
 
 function KeyOf(const AValue: string): char;
 var
@@ -356,7 +379,7 @@ begin
   except
     on E: Exception do
     begin
-      AError := E.Message;
+      AError := ShortError(E.Message);
       Result := nil;
     end;
   end;
@@ -470,7 +493,7 @@ begin
         if TTOMLTable(Value).TryGetValue('terminal', Field) and (Field is TTOMLBoolean) then
           Cmd.Terminal := Field.AsBoolean;
         if TTOMLTable(Value).TryGetValue('description', Field) and (Field is TTOMLString) then
-          Cmd.Description := Trim(Field.AsString);
+          Cmd.Description := OneLine(Field.AsString);
         if TTOMLTable(Value).TryGetValue('confirm', Field) then
           if Field is TTOMLBoolean then
             Cmd.Confirm := Field.AsBoolean
@@ -534,6 +557,7 @@ var
   Names: TStringList;
   Info: TSearchRec;
   i: integer;
+  Total: int64;
 
   procedure AddFile(const APath, AFileName: string; AMain, APersonal: boolean);
   var
@@ -543,16 +567,23 @@ var
     F := Default(TGittanCommandsFile);
     F.Path := APath;
     F.Personal := APersonal;
-    { A file that cannot be read gives no commands and says why. }
+    { A file that cannot be read, or comes after MaxCommandsBytes of
+      others, gives no commands and says why. }
     try
-      F.Text := ReadFileBytes(AFileName);
+      F.Text := ReadTomlBytes(AFileName);
+      if not APersonal then
+      begin
+        Inc(Total, Length(F.Text));
+        if Total > MaxCommandsBytes then
+          raise Exception.CreateFmt(rsCommandsTooLarge, [MaxCommandsBytes div 1024]);
+      end;
       F.Commands := ParseCommandsToml(F.Text, F.Error);
     except
       on E: Exception do
       begin
         F.Text := '';
         F.Commands := nil;
-        F.Error := E.Message;
+        F.Error := ShortError(E.Message);
       end;
     end;
     if AMain then
@@ -568,6 +599,7 @@ var
 
 begin
   Result := nil;
+  Total := 0;
   if ARoot = '' then
     Exit;
   Root := IncludeTrailingPathDelimiter(ARoot);
@@ -658,22 +690,6 @@ end;
   package.json and the Makefile
   --------------------------------------------------------------------------- }
 
-{ A script name the command line can carry: ShellName quotes it, but a
-  control character (a line feed starts a second command in sh) is
-  refused, and on Windows a " or a %, which cmd reads inside quotes. }
-function PlainScript(const AName: string): boolean;
-var
-  i: integer;
-begin
-  if AName = '' then
-    Exit(False);
-  for i := 1 to Length(AName) do
-    if (AName[i] < ' ') or (AName[i] = #127)
-      {$IFDEF WINDOWS} or (AName[i] in ['"', '%']){$ENDIF} then
-      Exit(False);
-  Result := True;
-end;
-
 function ParsePackageScripts(const AJson: string): TGittanRepoCommands;
 var
   Data: TJSONData;
@@ -696,7 +712,7 @@ begin
       Exit;
     for i := 0 to TJSONObject(Scripts).Count - 1 do
       if (TJSONObject(Scripts).Items[i].JSONType = jtString) and
-        PlainScript(TJSONObject(Scripts).Names[i]) then
+        PlainName(TJSONObject(Scripts).Names[i]) then
       begin
         SetLength(Result, Length(Result) + 1);
         Result[High(Result)] := Default(TGittanRepoCommand);
@@ -809,11 +825,50 @@ begin
   end;
 end;
 
+function ReadIfExists(const AFileName: string): string;
+begin
+  if FileExists(AFileName) then
+    Result := ReadFileBytes(AFileName)
+  else
+    Result := '';
+end;
+
+{ The tool the packageManager field of package.json names ("pnpm@9"),
+  which the Install button goes by too, '' for none of the four. }
+function NamedPackageManager(const AFileName: string): string;
+var
+  Data: TJSONData;
+  Text: string;
+begin
+  Result := '';
+  Text := ReadIfExists(AFileName);
+  if (Trim(Text) = '') or JsonTooDeep(Text) then
+    Exit;
+  try
+    Data := GetJSON(Text);
+  except
+    Exit;
+  end;
+  try
+    if (Data is TJSONObject) and (TJSONObject(Data).Find('packageManager') is TJSONString) then
+      Result := TJSONObject(Data).Find('packageManager').AsString;
+  finally
+    Data.Free;
+  end;
+  if Pos('@', Result) > 1 then
+    Result := Copy(Result, 1, Pos('@', Result) - 1);
+  if (Result <> 'npm') and (Result <> 'pnpm') and (Result <> 'yarn') and (Result <> 'bun') then
+    Result := '';
+end;
+
 function PackageRunner(const ARoot: string): string;
 var
   Root: string;
 begin
   Root := IncludeTrailingPathDelimiter(ARoot);
+  Result := NamedPackageManager(Root + 'package.json');
+  if Result <> '' then
+    Exit(Result + ' run');
   if FileExists(Root + 'pnpm-lock.yaml') then
     Result := 'pnpm run'
   else if FileExists(Root + 'yarn.lock') then
@@ -822,14 +877,6 @@ begin
     Result := 'bun run'
   else
     Result := 'npm run';
-end;
-
-function ReadIfExists(const AFileName: string): string;
-begin
-  if FileExists(AFileName) then
-    Result := ReadFileBytes(AFileName)
-  else
-    Result := '';
 end;
 
 function CommandByKey(const ACommands: TGittanRepoCommands; AKey: char): integer;
@@ -944,7 +991,7 @@ var
         if First then
         begin
           ACommand.Key := FileOnes[k].Key;
-          ACommand.Terminal := FileOnes[k].Terminal;
+          ACommand.Terminal := ACommand.Terminal or FileOnes[k].Terminal;
           if FileOnes[k].Description <> '' then
             ACommand.Description := FileOnes[k].Description;
           ACommand.Confirm := FileOnes[k].Confirm;
@@ -1275,8 +1322,12 @@ begin
     if Shell = '' then
       Shell := 'cmd.exe';
     P.Executable := Shell;
+    { /s takes the outer quotes off and leaves the line between them as
+      it is. Not ProcessArg, whose \" for a quote cmd hands on: a program
+      at "C:\x y" was not found, and a quoted name came out cut. }
+    P.Parameters.Add('/s');
     P.Parameters.Add('/c');
-    P.Parameters.Add(ProcessArg(FCommand));
+    P.Parameters.Add('"' + FCommand + '"');
     {$else}
     Shell := EnvironmentVariable('SHELL');
     if (Shell = '') or not FileExists(Shell) then

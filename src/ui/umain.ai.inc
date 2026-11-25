@@ -126,7 +126,6 @@ begin
   if FMessageJob <> nil then
   begin
     AbandonMessageJob;
-    FStatus.ShowMessage('', stNormal, 0);
     UpdateCommitState;
   end
   else
@@ -156,7 +155,7 @@ begin
   FMessageFrom := FCommitMemo.Text;
   FMessageJob.OnDone := @MessageJobDone;
   FMessageJob.Start;
-  FStatus.ShowBusy(Format(rsWritingStatus, [AgentName]), HintSparkle);
+  FStatus.ShowBusyFor(FMessageJob, Format(rsWritingStatus, [AgentName]), HintSparkle);
   UpdateCommitState;
 end;
 
@@ -174,7 +173,7 @@ begin
   FMessageJob := nil;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
-  FStatus.ShowMessage('', stNormal, 0);
+  FStatus.EndBusy(Job);
   if not Job.Ok then
     BannerError(Format(rsMessageFailed, [Job.AgentName]), Job.Error)
   else if FCommitMemo.Text <> FMessageFrom then
@@ -192,6 +191,7 @@ begin
   if FMessageJob = nil then
     Exit;
   FMessageJob.Stop(False);
+  FStatus.EndBusy(FMessageJob);
   FBlameZombies.Add(FMessageJob);
   FMessageJob := nil;
 end;
@@ -248,7 +248,6 @@ begin
   if FAIReviewJob <> nil then
   begin
     AbandonAIReview;
-    FStatus.ShowMessage('', stNormal, 0);
     UpdateAIReviewItems;
   end
   else
@@ -285,7 +284,7 @@ begin
   end;
   FAIReviewJob.OnDone := @AIReviewDone;
   FAIReviewJob.Start;
-  FStatus.ShowBusy(Format(rsAIReviewing, [AgentName]), HintSparkle);
+  FStatus.ShowBusyFor(FAIReviewJob, Format(rsAIReviewing, [AgentName]), HintSparkle);
   UpdateAIReviewItems;
 end;
 
@@ -302,7 +301,7 @@ begin
   FAIReviewJob := nil;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
-  FStatus.ShowMessage('', stNormal, 0);
+  FStatus.EndBusy(Job);
   Agent := Job.AgentName;
   if not Job.Ok then
   begin
@@ -329,6 +328,7 @@ begin
   if FAIReviewJob = nil then
     Exit;
   FAIReviewJob.Stop(False);
+  FStatus.EndBusy(FAIReviewJob);
   FBlameZombies.Add(FAIReviewJob);
   FAIReviewJob := nil;
 end;
@@ -357,7 +357,6 @@ begin
   if FFindJob <> nil then
   begin
     AbandonFindJob;
-    FStatus.ShowMessage('', stNormal, 0);
     UpdateFindAction;
     Exit;
   end;
@@ -379,7 +378,7 @@ begin
   FFindJob := TGittanFindJob.Create(FRepo.Root, FAI, AQuestion);
   FFindJob.OnDone := @FindJobDone;
   FFindJob.Start;
-  FStatus.ShowBusy(Format(rsFindLooking, [AgentName, AQuestion]),
+  FStatus.ShowBusyFor(FFindJob, Format(rsFindLooking, [AgentName, AQuestion]),
     HintSparkle);
   UpdateFindAction;
 end;
@@ -390,16 +389,10 @@ end;
   part of the list's width here, and the path at its start, keeping the
   file's name. }
 procedure TRepoFrame.FindJobDone(Sender: TObject);
-const
-  { What the list gives the caption and the detail, at its widest. }
-  FindRoom = 360;
-  WhyRoom = 170;
 var
   Job: TGittanFindJob;
-  Agent, Item, Why: string;
+  Agent: string;
   i: integer;
-  P: TPoint;
-  C: TCanvas;
 begin
   Job := TGittanFindJob(Sender);
   if Job <> FFindJob then
@@ -407,7 +400,7 @@ begin
   FFindJob := nil;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
-  FStatus.ShowMessage('', stNormal, 0);
+  FStatus.EndBusy(Job);
   UpdateFindAction;
   Agent := Job.AgentName;
   if not Job.Ok then
@@ -424,8 +417,51 @@ begin
     StatusNote(Format(rsFindNone, [Agent, Job.Question]));
     Exit;
   end;
+  FFindQuestion := Job.Question;
+  FFindWaiting := True;
+  MarkNews;
+  ShowAnswers;
+end;
+
+{ The answers an agent gave while the tab or the application was in the
+  background: a list closes at the first click outside it, so it waits
+  until it can be seen. Only one list at a time is of use. }
+procedure TRepoFrame.ShowAnswers;
+begin
+  if not Application.Active or not FWindow.IsActive(Self) or not (FFindWaiting or
+    FPlanWaiting) then
+    Exit;
+  if FFindWaiting then
+  begin
+    FFindWaiting := False;
+    ShowFound;
+  end
+  else
+  begin
+    FPlanWaiting := False;
+    PrunePlan;
+    ShowPlan;
+  end;
+end;
+
+procedure TRepoFrame.ShowAnswersAsync(Data: PtrInt);
+begin
+  ShowAnswers;
+end;
+
+procedure TRepoFrame.ShowFound;
+const
+  { What the list gives the caption and the detail, at its widest. }
+  FindRoom = 360;
+  WhyRoom = 170;
+var
+  Item, Why: string;
+  i: integer;
+  P: TPoint;
+  C: TCanvas;
+begin
   FFindPopup.Clear;
-  FFindPopup.AddHeader(Format(rsFindHeader, [Job.Question]));
+  FFindPopup.AddHeader(Format(rsFindHeader, [FFindQuestion]));
   C := MeasureCanvas(Font);
   for i := 0 to High(FFoundFiles) do
   begin
@@ -464,9 +500,11 @@ end;
 
 procedure TRepoFrame.AbandonFindJob;
 begin
+  FFindWaiting := False;
   if FFindJob = nil then
     Exit;
   FFindJob.Stop(False);
+  FStatus.EndBusy(FFindJob);
   FBlameZombies.Add(FFindJob);
   FFindJob := nil;
 end;
@@ -488,7 +526,7 @@ begin
     FOperation = 'rebasing', B);
   FConflictJob.OnDone := @ConflictJobDone;
   FConflictJob.Start;
-  FStatus.ShowBusy(Format(rsResolvingAI, [AgentName, B.Line, FCurrentPath]), HintSparkle);
+  FStatus.ShowBusyFor(FConflictJob, Format(rsResolvingAI, [AgentName, B.Line, FCurrentPath]), HintSparkle);
 end;
 
 { Whether ARelPath, a path in the repository, is the file open to
@@ -511,7 +549,7 @@ begin
   FConflictJob := nil;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
-  FStatus.ShowMessage('', stNormal, 0);
+  FStatus.EndBusy(Job);
   if not Job.Ok then
     BannerError(Format(rsResolveAIFailed, [Job.AgentName]), Job.Error)
   else if EditingRepoPath(Job.Path) then
@@ -526,6 +564,7 @@ begin
   if FConflictJob = nil then
     Exit;
   FConflictJob.Stop(False);
+  FStatus.EndBusy(FConflictJob);
   FBlameZombies.Add(FConflictJob);
   FConflictJob := nil;
 end;
@@ -581,7 +620,6 @@ begin
   if FSplitJob <> nil then
   begin
     AbandonSplitJob;
-    FStatus.ShowMessage('', stNormal, 0);
     UpdateSplitItem;
     Exit;
   end;
@@ -609,12 +647,12 @@ begin
   end;
   FSplitJob.OnDone := @SplitJobDone;
   FSplitJob.Start;
-  FStatus.ShowBusy(Format(rsSplitting, [AgentName]), HintSparkle);
+  FStatus.ShowBusyFor(FSplitJob, Format(rsSplitting, [AgentName]), HintSparkle);
   UpdateSplitItem;
 end;
 
-{ One commit is ticked and described at once; more are a list to pick
-  the first from. }
+{ The plan is a list to pick from, one commit too: what the user has
+  ticked and written stays until a commit is picked. }
 procedure TRepoFrame.SplitJobDone(Sender: TObject);
 var
   Job: TGittanSplitJob;
@@ -625,7 +663,7 @@ begin
   FSplitJob := nil;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
-  FStatus.ShowMessage('', stNormal, 0);
+  FStatus.EndBusy(Job);
   if not Job.Ok then
     BannerError(Format(rsSplitFailed, [Job.AgentName]), Job.Error)
   else
@@ -633,23 +671,24 @@ begin
     FCommitPlan := Job.Plan;
     FPlanAgent := Job.AgentName;
     PrunePlan;
-    if Length(FCommitPlan) = 1 then
+    if FCommitPlan <> nil then
     begin
-      ApplyPlannedCommit(0);
-      StatusNote(Format(rsPlanOne, [Job.AgentName]));
-      FCommitPlan := nil;
-    end
-    else if FCommitPlan <> nil then
-      ShowPlan;
+      if Length(FCommitPlan) = 1 then
+        StatusNote(Format(rsPlanOne, [Job.AgentName]));
+      FPlanWaiting := True;
+      ShowAnswers;
+    end;
   end;
   UpdateSplitItem;
 end;
 
 procedure TRepoFrame.AbandonSplitJob;
 begin
+  FPlanWaiting := False;
   if FSplitJob = nil then
     Exit;
   FSplitJob.Stop(False);
+  FStatus.EndBusy(FSplitJob);
   FBlameZombies.Add(FSplitJob);
   FSplitJob := nil;
 end;
@@ -791,7 +830,6 @@ begin
     if FFixKey = FindingKey(Finding) then
     begin
       AbandonFixJob;
-      FStatus.ShowMessage('', stNormal, 0);
       Edit.Invalidate;
       FEditOld.Invalidate;
     end
@@ -805,7 +843,7 @@ begin
   FFixJob := TGittanFixJob.Create(FRepo.Root, FAI, FRepo.Base, Finding);
   FFixJob.OnDone := @FixJobDone;
   FFixJob.Start;
-  FStatus.ShowBusy(Format(rsFixing, [AgentName, Finding.Line, Finding.Path]), HintSparkle);
+  FStatus.ShowBusyFor(FFixJob, Format(rsFixing, [AgentName, Finding.Line, Finding.Path]), HintSparkle);
   Edit.Invalidate;
   FEditOld.Invalidate;
 end;
@@ -826,7 +864,7 @@ begin
   FFixKey := '';
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
-  FStatus.ShowMessage('', stNormal, 0);
+  FStatus.EndBusy(Job);
   Agent := Job.AgentName;
   Why := Job.Why;
   if not Job.Ok then
@@ -862,6 +900,7 @@ begin
   if FFixJob = nil then
     Exit;
   FFixJob.Stop(False);
+  FStatus.EndBusy(FFixJob);
   FBlameZombies.Add(FFixJob);
   FFixJob := nil;
   FFixKey := '';
@@ -931,7 +970,6 @@ begin
   if FWhyJob <> nil then
   begin
     AbandonWhyJob;
-    FStatus.ShowMessage('', stNormal, 0);
     UpdateAIReviewItems;
     Exit;
   end;
@@ -971,7 +1009,7 @@ begin
     ToLine);
   FWhyJob.OnDone := @WhyJobDone;
   FWhyJob.Start;
-  FStatus.ShowBusy(Format(rsWhyLooking, [AgentName, FromLine, ToLine, FCurrentPath]),
+  FStatus.ShowBusyFor(FWhyJob, Format(rsWhyLooking, [AgentName, FromLine, ToLine, FCurrentPath]),
     HintSparkle);
   UpdateAIReviewItems;
 end;
@@ -993,7 +1031,7 @@ begin
   FWhyJob := nil;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
-  FStatus.ShowMessage('', stNormal, 0);
+  FStatus.EndBusy(Job);
   if not Job.Ok then
   begin
     BannerError(Format(rsWhyFailed, [Job.AgentName]), Job.Error);
@@ -1035,6 +1073,7 @@ begin
   if FWhyJob = nil then
     Exit;
   FWhyJob.Stop(False);
+  FStatus.EndBusy(FWhyJob);
   FBlameZombies.Add(FWhyJob);
   FWhyJob := nil;
 end;
@@ -1093,7 +1132,6 @@ begin
   begin
     AbandonSummaryJob;
     FAINotice.Close;
-    FStatus.ShowMessage('', stNormal, 0);
     UpdateAIReviewItems;
   end
   else
@@ -1120,7 +1158,7 @@ begin
   end;
   FSummaryJob.OnDone := @SummaryJobDone;
   FSummaryJob.Start;
-  FStatus.ShowBusy(Format(rsSummarizing, [AgentName]), HintSparkle);
+  FStatus.ShowBusyFor(FSummaryJob, Format(rsSummarizing, [AgentName]), HintSparkle);
   ShowAIBusy(Format(rsSummarizingTitle, [AgentName]), @MenuSummarizeClick);
   UpdateAIReviewItems;
 end;
@@ -1135,7 +1173,7 @@ begin
   FSummaryJob := nil;
   FBlameZombies.Add(Job);
   Application.QueueAsyncCall(@FreeBlameJobsAsync, 0);
-  FStatus.ShowMessage('', stNormal, 0);
+  FStatus.EndBusy(Job);
   if Job.Ok then
     ShowAIAnswer(Format(rsSummaryTitle, [Job.AgentName]), Job.Markdown, Job.Text)
   else
@@ -1151,6 +1189,7 @@ begin
   if FSummaryJob = nil then
     Exit;
   FSummaryJob.Stop(False);
+  FStatus.EndBusy(FSummaryJob);
   FBlameZombies.Add(FSummaryJob);
   FSummaryJob := nil;
 end;

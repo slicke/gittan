@@ -31,10 +31,10 @@ type
     procedure Alert(const AName, AText: string); virtual;
     {** confirm(): a yes/no question, from the extension AName. }
     function Confirm(const AName, AText: string): boolean; virtual;
-    {** prompt(): a line of text; False when cancelled. }
-    function Prompt(const ACaption, AText, ADefault: string; out AValue: string): boolean; virtual;
-    {** select(): one of AOptions, its index, -1 when cancelled. }
-    function Select(const ACaption, AText: string; const AOptions: array of string): integer; virtual;
+    {** prompt(): a line of text, for the extension AName; False when cancelled. }
+    function Prompt(const AName, ACaption, AText, ADefault: string; out AValue: string): boolean; virtual;
+    {** select(): one of AOptions, for the extension AName; its index, -1 when cancelled. }
+    function Select(const AName, ACaption, AText: string; const AOptions: array of string): integer; virtual;
     {** Gittan.ui.message(): ATitle over AText from the extension AName,
       with AKind's icon and the buttons AButtons (OK when there is none);
       Return presses ADefault, Escape and the close box ACancel. The index
@@ -75,8 +75,8 @@ type
     {** A line in the status bar for ASeconds, until cleared when 0; an
       empty AText clears it. }
     procedure SetStatus(const ARoot, AText: string; ASeconds: integer); virtual;
-    {** A banner, an error's when AError. }
-    procedure Notify(const ARoot, ATitle, ADetail: string; AError: boolean); virtual;
+    {** A banner from the extension AName, an error's when AError. }
+    procedure Notify(const ARoot, AName, ATitle, ADetail: string; AError: boolean); virtual;
     {** Shows APath of ARoot in the change view at ALine (0 for the
       top). }
     procedure OpenFile(const ARoot, APath: string; ALine: integer); virtual;
@@ -130,14 +130,14 @@ begin
   Result := False;
 end;
 
-function TGittanExtHost.Prompt(const ACaption, AText, ADefault: string;
+function TGittanExtHost.Prompt(const AName, ACaption, AText, ADefault: string;
   out AValue: string): boolean;
 begin
   AValue := '';
   Result := False;
 end;
 
-function TGittanExtHost.Select(const ACaption, AText: string;
+function TGittanExtHost.Select(const AName, ACaption, AText: string;
   const AOptions: array of string): integer;
 begin
   Result := -1;
@@ -202,7 +202,7 @@ procedure TGittanExtHost.SetStatus(const ARoot, AText: string; ASeconds: integer
 begin
 end;
 
-procedure TGittanExtHost.Notify(const ARoot, ATitle, ADetail: string; AError: boolean);
+procedure TGittanExtHost.Notify(const ARoot, AName, ATitle, ADetail: string; AError: boolean);
 begin
 end;
 

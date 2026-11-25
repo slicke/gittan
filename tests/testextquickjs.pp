@@ -1038,16 +1038,16 @@ begin
   WriteTextFile(FileModuleRoot + DirectorySeparator + 'lib' + DirectorySeparator + 'util.js',
     'export const twice = (n) => n * 2;');
   WriteTextFile(entry,
-    'import T, { data } from "gittan";' + LineEnding +
+    'import T, { repo } from "gittan";' + LineEnding +
     'import { twice } from "./lib/util";' + LineEnding +   // extension-less on purpose
     'function hidden() { return 1; }' + LineEnding +
-    'export function clockView() { return "v" + twice(21) + T.tag + data.tag; }' + LineEnding +
+    'export function clockView() { return "v" + twice(21) + T.tag + repo.tag; }' + LineEnding +
     'export const notAFunction = 5;');
   try
     JS_SetModuleLoaderFunc(FRuntime, @FileModuleNormalizer, @FileModuleLoader, nil);
     // Stand-in for the engine's Trndi object.
     JS_FreeValue(FContext, JS_Eval(FContext,
-      'globalThis.Gittan = { tag: "!", data: { tag: "?" } };', 'setup.js', JS_EVAL_TYPE_GLOBAL));
+      'globalThis.Gittan = { tag: "!", repo: { tag: "?" } };', 'setup.js', JS_EVAL_TYPE_GLOBAL));
 
     v := JS_Eval(FContext, ModuleBootstrapScript(entry), 'main.js', JS_EVAL_TYPE_GLOBAL);
     try

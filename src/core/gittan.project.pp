@@ -46,9 +46,11 @@ type
   TGittanProjectChecks = array of TGittanProjectCheck;
 
   {** How the page paints a cell: plain text, dimmed, bold, in the link
-    color, in the ok, warning or error color, or as a button (with a
-    Command; the page runs it as the Commands page would). }
-  TGittanProjectStyle = (psText, psDim, psStrong, psLink, psOk, psWarn, psError, psButton);
+    color, in the ok, warning or error color, as a button (with a
+    Command; the page runs it as the Commands page would), or as a
+    badge: the text on a rounded fill. }
+  TGittanProjectStyle = (psText, psDim, psStrong, psLink, psOk, psWarn, psError, psButton,
+    psBadge);
 
   {** A cell of a table or a fact's value. Url makes it a link that
     opens in the browser, Command a button that runs the shell line
@@ -304,7 +306,8 @@ procedure ResolveDependencies(var ADependencies: TGittanDependencies;
   const ALocked: TGittanDependencies; AKind: TGittanProjectKindClass = nil);
 
 {** How ANew's dependencies differ from AOld's, by name and group: the
-  ones added and changed in ANew's order, then the ones removed. }
+  ones added and changed in ANew's order, then the ones removed. One
+  locked on one side alone is compared by what is asked for. }
 function DependencyChanges(const AOld, ANew: TGittanDependencies;
   AKind: TGittanProjectKindClass = nil): TGittanDependencyChanges;
 
@@ -314,10 +317,16 @@ function DependencyChanges(const AOld, ANew: TGittanDependencies;
 function ReadDependencies(AKind: TGittanProjectKindClass; AContext: TGittanProjectContext;
   out ADependencies: TGittanDependencies; out AChanges: TGittanDependencyChanges): boolean;
 
+{** Whether the lock file's AResolved is past the version AAsked names:
+  4.21.2 for "^4.17.0". Only for a single constraint with a floor ("^",
+  "~", "~=", ">=", "=", "==" or none before a version); a range, a
+  wildcard, a tag or a URL names no one version to be past. }
+function ResolvedPastAsked(const AAsked, AResolved: string; ASemver: boolean): boolean;
+
 {** The table of dependencies: the name (a link to the registry), what
-  is asked for, what is resolved, and the change since the tag at the
-  right; the groups under subheadings, the removed ones at their group's
-  end. }
+  is asked for, what is resolved (a badge when it is past what is asked
+  for, ResolvedPastAsked), and the change since the tag at the right;
+  the groups under subheadings, the removed ones at their group's end. }
 function DependencyTable(AKind: TGittanProjectKindClass; const ASince: string;
   const ADependencies: TGittanDependencies; const AChanges: TGittanDependencyChanges):
   TGittanProjectBlock;
@@ -345,6 +354,20 @@ function FilesWithExt(const ARoot, AExt: string): TStringArray;
   the shell reads, in single quotes for sh (a quote in it as '\''), in
   double quotes on Windows. }
 function ShellName(const AName: string): string;
+{** The note of a kind picked by hand whose file AFileName is not there. }
+function PickedNoFileNote(const AFileName: string): TGittanProjectBlock;
+{** Whether a name a repository's file gives can go on a command line
+  through ShellName as itself. Not one that starts with - or @, which a
+  tool takes for an option (fpc for a file of them), with a control
+  character (a line feed starts a second command in sh, a NUL ends the
+  line on Windows) or with a \, which fish, the login shell of some,
+  reads inside single quotes; on Windows not with a " or a % either,
+  which cmd reads inside its quotes. }
+function PlainName(const AName: string): boolean;
+{** A button that runs ACommandLine, or an empty cell when AName, which
+  goes on it, is no PlainName. }
+function ProjectNameButton(const AName, AText, ACommandName,
+  ACommandLine: string): TGittanProjectCell;
 
 implementation
 
@@ -364,6 +387,7 @@ resourcestring
   rsRemoved = 'removed';
   rsChangedHint = '%s was %s at %s';
   rsAddedHint = '%s is new since %s';
+  rsPastAskedHint = '%s is locked at %s, past the %s asked for';
   rsRemovedHint = '%s was %s at %s and is gone';
   rsGroupDev = 'Development';
   rsGroupBuild = 'Build';
@@ -1036,6 +1060,34 @@ begin
   Result := Length(Alternatives) = 0;
 end;
 
+function ResolvedPastAsked(const AAsked, AResolved: string; ASemver: boolean): boolean;
+var
+  Text, Op: string;
+  i: integer;
+begin
+  Result := False;
+  Text := Trim(AAsked);
+  if (AResolved = '') or (Text = '') then
+    Exit;
+  for i := 1 to Length(Text) do
+    if Text[i] in [' ', ',', '|', '*', ':', '/', '<'] then
+      Exit;
+  i := 1;
+  while (i <= Length(Text)) and (Text[i] in ['>', '=', '!', '~', '^']) do
+    Inc(i);
+  Op := Copy(Text, 1, i - 1);
+  if (Op <> '') and (Op <> '^') and (Op <> '~') and (Op <> '~=') and (Op <> '>=') and
+    (Op <> '=') and (Op <> '==') then
+    Exit;
+  { npm's "v1.2". }
+  if (i <= Length(Text)) and (Text[i] = 'v') then
+    Inc(i);
+  Text := Copy(Text, i, MaxInt);
+  if (Text = '') or not (Text[1] in ['0'..'9']) or (Pos('.x', LowerCase(Text)) > 0) then
+    Exit;
+  Result := CompareVersions(AResolved, Text, ASemver) > 0;
+end;
+
 function KeyOf(AKind: TGittanProjectKindClass; const AName: string): string;
 begin
   if AKind = nil then
@@ -1126,7 +1178,14 @@ begin
       if Same(AOld[j], ANew[i]) then
       begin
         Found := True;
-        if DependencyShown(AOld[j]) <> DependencyShown(ANew[i]) then
+        { Locked on one side alone (no lock file at the tag, or none now),
+          what is asked for is what can be compared. }
+        if (AOld[j].Resolved = '') <> (ANew[i].Resolved = '') then
+        begin
+          if AOld[j].Version <> ANew[i].Version then
+            Add(ANew[i].Name, ANew[i].Group, AOld[j].Version, ANew[i].Version, dcChanged);
+        end
+        else if DependencyShown(AOld[j]) <> DependencyShown(ANew[i]) then
           Add(ANew[i].Name, ANew[i].Group, DependencyShown(AOld[j]), DependencyShown(ANew[i]),
             dcChanged);
         Break;
@@ -1227,8 +1286,8 @@ var
   Groups: TStringArray;
   g, i, k: integer;
   D: TGittanDependency;
-  Note: TGittanProjectCell;
-  Resolved, Url: string;
+  Note, Locked: TGittanProjectCell;
+  Url: string;
 
   procedure AddGroup(const AGroup: string);
   var
@@ -1273,13 +1332,16 @@ begin
           end;
       { The resolved version when it differs from what is asked for
         (go.mod asks for the exact one). }
-      if D.Resolved <> D.Version then
-        Resolved := D.Resolved
+      if D.Resolved = D.Version then
+        Locked := ProjectCell('')
+      else if ResolvedPastAsked(D.Version, D.Resolved, AKind.SemverRanges) then
+        Locked := ProjectCell(D.Resolved, psBadge, Format(rsPastAskedHint, [D.Name, D.Resolved,
+          D.Version]))
       else
-        Resolved := '';
+        Locked := ProjectCell(D.Resolved);
       Url := AKind.PackageUrl(D.Name);
       AddRow(Result, ProjectRow([ProjectCell(D.Name, psStrong, Url, Url),
-        ProjectCell(D.Version, psDim), ProjectCell(Resolved), Note]));
+        ProjectCell(D.Version, psDim), Locked, Note]));
     end;
     for i := 0 to High(AChanges) do
       if (AChanges[i].Kind = dcRemoved) and (AChanges[i].Group = Groups[g]) then
@@ -1304,6 +1366,9 @@ begin
   FSince := ASince;
   FTracked := TStringList.Create;
   FTracked.CaseSensitive := True;
+  { By bytes, which TrackedUnder's search by prefix goes by; a locale may
+    put Lib/a after lib/. }
+  FTracked.UseLocale := False;
   if ATracked <> nil then
     FTracked.AddStrings(ATracked);
   FTracked.Sorted := True;
@@ -1522,11 +1587,13 @@ begin
     Result.Detail := rsPicked;
   Result.StateStyle := psDim;
   DepFile := DependencyFile(AContext.Root);
+  if (AManifest = '') and (DepFile = '') and (Length(DependencyFileNames) > 0) then
+    DepFile := DependencyFileNames[0];
   { A kind picked with no file of its own has nothing to read, but the
     checks that need no such file still hold. }
   if (DepFile <> '') and not HasFile(AContext.Root, DepFile) then
   begin
-    AddBlock(Result, ProjectNote(Format(rsPickedNoFile, [DepFile])));
+    AddBlock(Result, PickedNoFileNote(DepFile));
     AddBlock(Result, ChecksBlock(Checks(AContext)));
     Exit;
   end;
@@ -1645,12 +1712,41 @@ begin
   end;
 end;
 
+function PickedNoFileNote(const AFileName: string): TGittanProjectBlock;
+begin
+  Result := ProjectNote(Format(rsPickedNoFile, [AFileName]));
+end;
+
+function PlainName(const AName: string): boolean;
+var
+  i: integer;
+begin
+  if (AName = '') or (AName[1] in ['-', '@']) then
+    Exit(False);
+  for i := 1 to Length(AName) do
+    if (AName[i] < ' ') or (AName[i] in [#127, '\'])
+      {$IFDEF WINDOWS} or (AName[i] in ['"', '%']){$ENDIF} then
+      Exit(False);
+  Result := True;
+end;
+
+function ProjectNameButton(const AName, AText, ACommandName,
+  ACommandLine: string): TGittanProjectCell;
+begin
+  if PlainName(AName) then
+    Result := ProjectButton(AText, ACommandName, ACommandLine)
+  else
+    Result := ProjectCell('');
+end;
+
 function ShellName(const AName: string): string;
 var
   i: integer;
 begin
+  { zsh reads a leading = as the path of the command after it. }
   for i := 1 to Length(AName) do
-    if not (AName[i] in ['A'..'Z', 'a'..'z', '0'..'9', '_', '-', '.', '/', '+', '=', ':', ',']) then
+    if not (AName[i] in ['A'..'Z', 'a'..'z', '0'..'9', '_', '-', '.', '/', '+', '=', ':', ',']) or
+      ((i = 1) and (AName[i] = '=')) then
       {$IFDEF WINDOWS}
       { cmd.exe reads no \" (a name like x" & calc & " ran calc): a quote
         is doubled, which turns cmd's quoting off and on again and is one

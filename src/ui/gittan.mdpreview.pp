@@ -36,7 +36,7 @@ type
 
   TGittanMarkdownPreview = class(TInkPage)
   private
-    FFileName, FText, FOldText: string;
+    FFileName, FText, FOldText, FRoot: string;
     FCompare: boolean;
     FSvgSerial, FSvgZoom: integer;
     FBack, FFore, FDim, FLink: TColor;
@@ -48,6 +48,7 @@ type
     procedure ShowSvg(const AText: string);
     procedure ShowSvgChange;
     procedure ShowRichDiff;
+    function MayRead(const APath: string): boolean;
     procedure PageResource(Sender: TObject; const URL: string; Destination: TStream;
       var Handled: boolean);
     procedure PageLinkActivate(Sender: TObject; const Link: TInkLinkInfo;
@@ -74,6 +75,9 @@ type
       code are measured from. }
     procedure SetFontSize(ASize: integer);
     property FileName: string read FFileName;
+    {** The repository's folder. A page reads images and style sheets
+      below it and below its own folder, and nothing else. }
+    property Root: string read FRoot write FRoot;
     property OnOpenFile: TGittanOpenFileEvent read FOnOpenFile write FOnOpenFile;
   end;
 
@@ -93,7 +97,8 @@ implementation
 
 uses
   LCLIntf, URIParser, Math, BGRABitmap, BGRABitmapTypes, BGRASVG, BGRACanvas2D,
-  InkMarkdown, gittan.imagediff, gittan.richdiff, gittan.theme, gittan.git;
+  InkMarkdown, gittan.imagediff, gittan.richdiff, gittan.theme, gittan.git,
+  gittan.repofiles, gittan.svgguard, gittan.textfile, gittan.reviews;
 
 resourcestring
   rsCannotReadSvg = 'The SVG cannot be read.';
@@ -153,14 +158,14 @@ var
   Svg: TBGRASVG;
 begin
   Result := PointF(0, 0);
-  if AText = '' then
+  if (AText = '') or XmlTooDeep(AText) then
     Exit;
   try
     Svg := TBGRASVG.CreateFromString(AText);
     try
       Result := SvgSize(Svg);
       { Too large to draw: shown as one that cannot be read. }
-      if ImageTooLarge(Result.X, Result.Y) then
+      if ImageTooLarge(Result.X, Result.Y) or SvgTooHeavy(Svg) then
         Result := PointF(0, 0);
     finally
       Svg.Free;
@@ -171,7 +176,8 @@ begin
 end;
 
 { AText, an SVG, drawn AZoom times its size; nil when it cannot be read,
-  has no size or would be over MaxImagePixels. }
+  has no size or is too heavy to draw. Smaller when it would be over
+  MaxImagePixels: a page that shows it at 1x is not empty at 2x. }
 function SvgBitmap(const AText: string; AZoom: single): TBGRABitmap;
 var
   Svg: TBGRASVG;
@@ -180,12 +186,16 @@ var
 begin
   Result := nil;
   Svg := nil;
+  if XmlTooDeep(AText) then
+    Exit;
   try
     try
       Svg := TBGRASVG.CreateFromString(AText);
       Size := SvgSize(Svg);
-      if (Size.X < 1) or (Size.Y < 1) or ImageTooLarge(Size.X * AZoom, Size.Y * AZoom) then
+      if (Size.X < 1) or (Size.Y < 1) or ImageTooLarge(Size.X, Size.Y) or SvgTooHeavy(Svg) then
         Exit;
+      while ImageTooLarge(Size.X * AZoom, Size.Y * AZoom) do
+        AZoom := AZoom * 0.8;
       Result := TBGRABitmap.Create(Ceil(Size.X * AZoom), Ceil(Size.Y * AZoom));
       C2d := TBGRACanvas2D.Create(Result);
       try
@@ -281,6 +291,7 @@ begin
   { A README's badges and <details> are HTML; the text is the user's
     own repository, not something from the web. }
   MarkdownRawHTML := True;
+  KeepHistory := False;
   ImageFit := iifWidth;
   OnLinkActivate := @PageLinkActivate;
   OnResource := @PageResource;
@@ -387,8 +398,7 @@ begin
   else if IsHtmlPath(FFileName) then
     LoadHTML(FText, FilenameToURI(FFileName))
   else
-    LoadMarkdown(FText, FilenameToURI(FFileName));
-  ClearHistory;
+    LoadMarkdown(TameMarkdown(FText), FilenameToURI(FFileName));
 end;
 
 { The SVG centered on a page of its own, at its size or, a small one, a
@@ -509,8 +519,8 @@ begin
     LoadHTML(MarkRichDiff(FOldText, FText), FilenameToURI(FFileName));
     Exit;
   end;
-  Html := MarkRichDiff(MarkdownToHTML(FOldText, [imoRawHTML]),
-    MarkdownToHTML(FText, [imoRawHTML]));
+  Html := MarkRichDiff(MarkdownToHTML(TameMarkdown(FOldText), [imoRawHTML]),
+    MarkdownToHTML(TameMarkdown(FText), [imoRawHTML]));
   p := Pos('<head>', Html);
   if p > 0 then
     Insert('<style>' + MarkdownSheet + StyleSheet.Text + '</style>', Html,
@@ -518,10 +528,21 @@ begin
   LoadHTML(Html, FilenameToURI(FFileName));
 end;
 
+{ Whether the page may read the file APath: one of the repository's, or
+  in the folder of the page's file. A page of a cloned repository names
+  any path, and on Windows looking one up on //host/share signs in to
+  that host. }
+function TGittanMarkdownPreview.MayRead(const APath: string): boolean;
+begin
+  Result := LiesInFolder(FRoot, APath) or
+    LiesInFolder(ExtractFileDir(FFileName), APath);
+end;
+
 { The SVG file shown, both sides of a changed one, and an SVG image of a
   page, drawn as a PNG: the file at the screen's pixels at the width
   ShowSvg or ShowSvgChange set, an image at its own size, since the
-  page draws it at the PNG's. }
+  page draws it at the PNG's. A file the page may not read is handled
+  with nothing in it, since LazInk would open it by itself. }
 procedure TGittanMarkdownPreview.PageResource(Sender: TObject; const URL: string;
   Destination: TStream; var Handled: boolean);
 var
@@ -536,7 +557,14 @@ begin
       Handled := RenderSvg(FText, FSvgZoom * GetCanvasScaleFactor, Destination);
     Exit;
   end;
-  if not URIToFilename(URL, Path) or not FileExists(Path) then
+  if not URIToFilename(URL, Path) then
+    Exit;
+  if not MayRead(Path) then
+  begin
+    Handled := True;
+    Exit;
+  end;
+  if not FileExists(Path) then
     Exit;
   if not IsSvgPath(Path) then
   begin
@@ -580,7 +608,6 @@ begin
   begin
     Y := ScrollY;
     ShowRichDiff;
-    ClearHistory;
     ScrollTo(Y);
   end;
 end;
@@ -626,6 +653,9 @@ begin
   end;
   if URIToFilename(Url, Path) then
   begin
+    { No file on another host either. }
+    if (Copy(Path, 1, 2) = PathDelim + PathDelim) and not MayRead(Path) then
+      Exit;
     if Assigned(FOnOpenFile) and FileExists(Path) then
       FOnOpenFile(Self, Path);
     Exit;

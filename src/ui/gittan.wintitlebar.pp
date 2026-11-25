@@ -129,14 +129,15 @@ begin
   end;
 end;
 
-{ Whether the item marked in the menu of the window AMenuWnd opens a
-  submenu, which Right then opens. }
-function MarkedHasSubmenu(AMenuWnd: HWND): boolean;
+{ Whether an item is marked in the menu of the window AMenuWnd, and
+  whether it opens a submenu, which Right then opens. }
+function MarkedItem(AMenuWnd: HWND; out AHasSubmenu: boolean): boolean;
 var
   M: HMENU;
   i: integer;
 begin
   Result := False;
+  AHasSubmenu := False;
   if AMenuWnd = 0 then
     Exit;
   M := HMENU(SendMessageW(AMenuWnd, MnGetHMenu, 0, 0));
@@ -144,7 +145,10 @@ begin
     Exit;
   for i := 0 to GetMenuItemCount(M) - 1 do
     if GetMenuState(M, i, MF_BYPOSITION) and MF_HILITE <> 0 then
-      Exit(GetSubMenu(M, i) <> 0);
+    begin
+      AHasSubmenu := GetSubMenu(M, i) <> 0;
+      Exit(True);
+    end;
 end;
 
 { The menu's modal loop: Left in the strip's menu itself and Right on an
@@ -155,7 +159,8 @@ function MenuFilter(Code: longint; WParam: WPARAM; LParam: LPARAM): LRESULT; std
 var
   Msg: PMsg;
   Deepest: HWND;
-  Step: boolean;
+  Count: integer;
+  Step, HasSubmenu: boolean;
 begin
   if (Code = MsgfMenu) and (HookStrip <> nil) then
   begin
@@ -170,8 +175,10 @@ begin
         end
         else if Msg^.wParam = VK_RIGHT then
         begin
-          OpenMenuWindows(Deepest);
-          if not MarkedHasSubmenu(Deepest) then
+          { A submenu opened by the mouse resting on its item has no item
+            marked until Right goes into it. }
+          Count := OpenMenuWindows(Deepest);
+          if (MarkedItem(Deepest, HasSubmenu) or (Count <= 1)) and not HasSubmenu then
             Step := HookStrip.StepMenu(1);
         end;
       WM_MOUSEMOVE:

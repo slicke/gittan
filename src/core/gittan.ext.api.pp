@@ -271,6 +271,16 @@ begin
   Result := TGittanExtEngine(JS_GetContextOpaque(ctx));
 end;
 
+function ExtNameOf(ctx: JSContext): string;
+var
+  Eng: TGittanExtEngine;
+begin
+  Result := '';
+  Eng := EngineOf(ctx);
+  if Eng <> nil then
+    Result := Eng.ExtensionNameForContext(ctx);
+end;
+
 function ExtIdOf(ctx: JSContext): string;
 var
   Eng: TGittanExtEngine;
@@ -545,6 +555,16 @@ begin
     res^ := JS_ThrowError(ctx, RawUtf8(AWho + ': ' + Format(rsBadExtKey, [AKey])));
 end;
 
+{ A reaction an extension queued can run after its context was dropped
+  (a failed load, an unload), when it has no id: what it stores or shows
+  would be nobody's, and clearing cards with no id clears everyone's. }
+function CheckLoaded(res: PJSValue; ctx: JSContext; const AWho: string): boolean;
+begin
+  Result := ExtIdOf(ctx) <> '';
+  if not Result then
+    res^ := JS_ThrowError(ctx, RawUtf8(AWho + ': this extension is not loaded'));
+end;
+
 procedure JSStorageGet(res: PJSValue; ctx: JSContext; this_val: PJSValue;
   argc: integer; argv: PJSValues; magic: integer);
 var
@@ -554,7 +574,8 @@ begin
   if (ApiSettings = nil) or (argc < 1) then
     Exit;
   Key := Arg(ctx, argc, argv, 0);
-  if not CheckExtKey(res, ctx, 'Gittan.storage.get', Key) then
+  if not CheckLoaded(res, ctx, 'Gittan.storage.get') or
+    not CheckExtKey(res, ctx, 'Gittan.storage.get', Key) then
     Exit;
   Value := ApiSettings.ExtValue(ExtIdOf(ctx), Key);
   if Value <> '' then
@@ -570,7 +591,8 @@ begin
   if (ApiSettings = nil) or (argc < 1) then
     Exit;
   Key := Arg(ctx, argc, argv, 0);
-  if not CheckExtKey(res, ctx, 'Gittan.storage.set', Key) then
+  if not CheckLoaded(res, ctx, 'Gittan.storage.set') or
+    not CheckExtKey(res, ctx, 'Gittan.storage.set', Key) then
     Exit;
   ApiSettings.SetExtValue(ExtIdOf(ctx), Key, Arg(ctx, argc, argv, 1));
 end;
@@ -599,7 +621,7 @@ var
 begin
   res^ := JS_UNDEFINED;
   Eng := EngineOf(ctx);
-  if (Eng = nil) or (argc < 1) then
+  if (Eng = nil) or (argc < 1) or not CheckLoaded(res, ctx, 'Gittan.settings.define') then
     Exit;
   try
     Data := GetJSONLimited(Arg(ctx, argc, argv, 0));
@@ -837,10 +859,20 @@ procedure JSNotify(res: PJSValue; ctx: JSContext; this_val: PJSValue;
   argc: integer; argv: PJSValues; magic: integer);
 var
   IsError: boolean;
+  Title, Detail: string;
+  Wait: TJSWait;
 begin
   res^ := JS_UNDEFINED;
   IsError := (argc > 2) and (JS_ToBool(ctx, argv^[2]) = 1);
-  ExtHost.Notify(ExtHost.ActiveRoot, Arg(ctx, argc, argv, 0), Arg(ctx, argc, argv, 1), IsError);
+  Title := Arg(ctx, argc, argv, 0);
+  Detail := Arg(ctx, argc, argv, 1);
+  { A dialog in the forge view, which has no banner. }
+  Wait := JSWaitBegin;
+  try
+    ExtHost.Notify(ExtHost.ActiveRoot, ExtNameOf(ctx), Title, Detail, IsError);
+  finally
+    JSWaitEnd(Wait);
+  end;
 end;
 
 procedure JSStatus(res: PJSValue; ctx: JSContext; this_val: PJSValue;
@@ -881,7 +913,7 @@ var
 begin
   res^ := JS_UNDEFINED;
   Eng := EngineOf(ctx);
-  if (Eng = nil) or (argc < 1) then
+  if (Eng = nil) or (argc < 1) or not CheckLoaded(res, ctx, 'Gittan.ui.addCard') then
     Exit;
   try
     Data := GetJSONLimited(Arg(ctx, argc, argv, 0));
@@ -1078,7 +1110,8 @@ procedure JSClearCards(res: PJSValue; ctx: JSContext; this_val: PJSValue;
   argc: integer; argv: PJSValues; magic: integer);
 begin
   res^ := JS_UNDEFINED;
-  ExtHost.ClearCards(Arg(ctx, argc, argv, 0), ExtIdOf(ctx));
+  if CheckLoaded(res, ctx, 'Gittan.ui.clearCards') then
+    ExtHost.ClearCards(Arg(ctx, argc, argv, 0), ExtIdOf(ctx));
 end;
 
 { ---------------------------------------------------------------------------

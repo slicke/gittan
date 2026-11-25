@@ -279,6 +279,7 @@ begin
   FCollapsed := AValue;
   { A row under the mouse is gone with the rows. }
   FHot := -1;
+  UpdateCursor;
   if FHotToggle then
   begin
     if FCollapsed then
@@ -351,6 +352,7 @@ begin
   FHidden[AIndex] := not AVisible;
   if FHot = AIndex then
     FHot := -1;
+  UpdateCursor;
   FitHeight;
   Invalidate;
 end;

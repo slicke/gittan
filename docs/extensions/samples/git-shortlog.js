@@ -3,7 +3,7 @@
 @copyright (c) Gittan samples
 @version 1.0
 @description Who wrote what, from the Extensions menu, and a file's last commit as a card from the file tree's menu.
-@perms exec
+@perms exec, data
 */
 Gittan.commands.register({
   id: "shortlog",

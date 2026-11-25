@@ -236,6 +236,7 @@ end;
 procedure TProjLazarusTest.TestFindPackages;
 var
   F: TStringArray;
+  Complete: boolean;
 begin
   Put('vendor/a/pkg/a_package.lpk', '<CONFIG/>');
   Put('lib/x86_64-linux/b.lpk', '<CONFIG/>');
@@ -243,7 +244,8 @@ begin
   Put('.hidden/d.lpk', '<CONFIG/>');
   Put('one/two/three/four/five/six/e.lpk', '<CONFIG/>');
   Put('mine.lpk', '<CONFIG/>');
-  F := FindLazPackages(FDir);
+  F := FindLazPackages(FDir, Complete);
+  AssertTrue('all of it seen', Complete);
   AssertEquals('mine.lpk vendor/a/pkg/a_package.lpk', string.Join(' ', F));
   {$IFDEF UNIX}
   { Committed links: to . (walked again at every level before) and to
@@ -252,7 +254,7 @@ begin
   AssertEquals(0, fpSymlink('..', PChar(FDir + PathDelim + 'vendor' + PathDelim + 'up')));
   AssertEquals(0, fpSymlink('mine.lpk', PChar(FDir + PathDelim + 'linked.lpk')));
   try
-    F := FindLazPackages(FDir);
+    F := FindLazPackages(FDir, Complete);
     AssertEquals('mine.lpk vendor/a/pkg/a_package.lpk', string.Join(' ', F));
   finally
     { Before TearDown's RemoveTree, which would follow them. }
@@ -296,7 +298,10 @@ type
 
 function TFakeContext.Submodules: TGittanSubmodules;
 begin
-  SetLength(Result, 1);
+  { The second one is left in .gitmodules alone, which is no submodule. }
+  SetLength(Result, 2);
+  Result[1] := Default(TGittanSubmodule);
+  Result[1].Path := 'vendor/gone';
   Result[0] := Default(TGittanSubmodule);
   Result[0].Path := 'vendor/a';
   Result[0].Url := 'https://example.com/a.git';
