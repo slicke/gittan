@@ -511,9 +511,11 @@ const
 var
   { The writes so far, which name each one's temporary file. }
   WriteCount: longint = 0;
-{$IFDEF UNIX}
+{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
   { The private folder PrivateTempDir settled on, '' before the first. }
   PrivateTemp: string = '';
+  { The jobs' threads ask for temporary files too. }
+  PrivateTempLock: TRTLCriticalSection;
 {$ENDIF}
 
 { AFileName, or the file the symbolic link there leads to, through a
@@ -561,7 +563,7 @@ begin
   Result := (AIndex >= 0) and (AIndex < ALines.Count) and (ALines.Objects[AIndex] = NoNewlineMark);
 end;
 
-{$IFDEF UNIX}
+{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
 { Whether ADir is a folder (not a link to one) of this user that no one
   else may enter. }
 function OwnPrivateDir(const ADir: string): boolean;
@@ -611,8 +613,13 @@ end;
 
 function TempFileName(const APrefix: string): string;
 begin
-  {$IFDEF UNIX}
-  Result := PrivateTempDir;
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
+  EnterCriticalSection(PrivateTempLock);
+  try
+    Result := PrivateTempDir;
+  finally
+    LeaveCriticalSection(PrivateTempLock);
+  end;
   {$ELSE}
   Result := IncludeTrailingPathDelimiter(GetTempDir);
   {$ENDIF}
@@ -664,5 +671,13 @@ begin
   if not Result then
     DeleteFile(Temp);
 end;
+
+{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
+initialization
+  InitCriticalSection(PrivateTempLock);
+
+finalization
+  DoneCriticalSection(PrivateTempLock);
+{$ENDIF}
 
 end.

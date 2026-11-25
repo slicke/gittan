@@ -25,6 +25,8 @@ procedure TTrustKeysTest.TestApiBase;
 begin
   AssertEquals('https://api.github.com', GitHubApiBase('github.com'));
   AssertEquals('https://api.github.com', GitHubApiBase(''));
+  AssertEquals('github.com', GitHubWebHost('ssh.github.com'));
+  AssertEquals('ghe.example.invalid', GitHubWebHost('ghe.example.invalid'));
   AssertEquals('https://ghe.example.invalid/api/v3', GitHubApiBase('ghe.example.invalid'));
 end;
 

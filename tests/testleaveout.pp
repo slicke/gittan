@@ -168,6 +168,9 @@ begin
   { CRLF lines, the old last one bare: put back without a CR either. }
   Lines(['-a', '-b', '\', '+A', '+B']);
   AssertEquals('A'#13#10'b', Text('A'#13#10'B'#13#10, [Pair('b', 'B', 2)]));
+  { Followed by a line that stays, it ends as the file's lines do. }
+  Lines(['-end', '\', '+end', '+more']);
+  AssertEquals('end'#13#10'more'#13#10, Text('end'#13#10'more'#13#10, [Pair('end', 'end', 1)]));
 end;
 
 procedure TLeaveOutTest.TestNotFound;

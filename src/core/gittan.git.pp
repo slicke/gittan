@@ -1640,7 +1640,7 @@ function ProcessArg(const S: string): string;
 implementation
 
 uses
-  {$ifdef unix}BaseUnix,{$endif}
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}BaseUnix,{$ENDIF}
   Pipes, md5, StrUtils, DateUtils, gittan.textfile;
 
 constructor TGittanDeadline.Create(ASeconds: integer);
@@ -1766,6 +1766,7 @@ var
     Age: longint;
     Size: int64;
     Own: boolean;
+    Asked: QWord;
   end;
   GConflictLock: TRTLCriticalSection;
 
@@ -4126,7 +4127,7 @@ end;
   it as the link it is rather than through it. Windows keeps links as
   files in git by default and is left as it was. }
 function ReadLinkAt(const AFull: string; out ATarget: string): boolean;
-{$ifdef unix}
+{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
 var
   Info: Stat;
 begin
@@ -4157,7 +4158,7 @@ var
   Output, Entry, Path, Id, ListFile, Target: string;
   Fields, Chosen, Paths, InHead, Restore, Remove: TStringList;
   i: integer;
-  {$ifdef unix}
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
   Info: Stat;
   {$endif}
 
@@ -4229,7 +4230,7 @@ begin
         if not RunGit(FRoot, ['hash-object', '-w', '--no-filters', '--', Path], Id) then
           Exit(False);
         Id := Trim(Id);
-        {$ifdef unix}
+        {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
         { The mode too: a new script, or a change that was a chmod +x
           alone, would come back without it. }
         if fpStat(FullPath(Path), Info) = 0 then
@@ -4289,7 +4290,7 @@ begin
     end;
     if Target <> '' then
     begin
-      {$ifdef unix}
+      {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
       if FileExists(FullPath(Path)) or IsLinkAt(FullPath(Path)) then
         DeleteFile(FullPath(Path));
       ForceDirectories(ExtractFileDir(FullPath(Path)));
@@ -4325,7 +4326,7 @@ begin
         raise EInOutError.CreateFmt('Could not remove the link %s.', [Path]);
       ForceDirectories(ExtractFileDir(FullPath(Path)));
       WriteBytes(FullPath(Path), Data);
-      {$ifdef unix}
+      {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
       if (Mode >= 0) and (fpChmod(FullPath(Path), Mode) <> 0) then
         raise EInOutError.CreateFmt('Could not set the permissions of %s.', [Path]);
       {$endif}
@@ -5223,9 +5224,14 @@ begin
   end;
 end;
 
-{ Whether the repository at ARoot sets merge.conflictStyle itself, from
-  what is remembered while its config file is unchanged, else asked of
-  git and remembered. }
+const
+  { How long an answer is kept, as it may come from the user's config or
+    a file either includes, which have no stamp here. }
+  ConflictStyleKeepMs = 30000;
+
+{ Whether merge.conflictStyle is set for the repository at ARoot, in any
+  config, from what is remembered while its own config file is unchanged
+  and for a while, else asked of git and remembered. }
 function OwnConflictStyle(const ARoot: string): boolean;
 var
   Output, Err, Path: string;
@@ -5241,7 +5247,8 @@ begin
     try
       for i := 0 to High(GConflictOwn) do
         if (GConflictOwn[i].Root = ARoot) and (GConflictOwn[i].ConfigPath = Path) and
-          (GConflictOwn[i].Age = Age) and (GConflictOwn[i].Size = Size) then
+          (GConflictOwn[i].Age = Age) and (GConflictOwn[i].Size = Size) and
+          (GetTickCount64 - GConflictOwn[i].Asked < ConflictStyleKeepMs) then
           Exit(GConflictOwn[i].Own);
     finally
       LeaveCriticalSection(GConflictLock);
@@ -5267,6 +5274,7 @@ begin
     GConflictOwn[At].Age := Age;
     GConflictOwn[At].Size := Size;
     GConflictOwn[At].Own := Result;
+    GConflictOwn[At].Asked := GetTickCount64;
   finally
     LeaveCriticalSection(GConflictLock);
   end;

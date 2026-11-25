@@ -99,7 +99,7 @@ function RemoveLfsTrack(const AFileName, APattern: string): boolean;
 implementation
 
 uses
-  {$IFDEF UNIX}BaseUnix,{$ENDIF}
+  {$IF DEFINED(UNIX) OR DEFINED(HAIKU)}BaseUnix,{$ENDIF}
   gittan.textfile;
 
 { Adds every file under ADir (a full path) to AList as ARel + its name,
@@ -108,7 +108,7 @@ uses
 function IsLinkPath(const APath: string): boolean;
 var
   Name: string;
-{$IFDEF UNIX}
+{$IF DEFINED(UNIX) OR DEFINED(HAIKU)}
   Info: Stat;
 begin
   { lstat: FileGetSymLinkTarget raises for a link whose target is

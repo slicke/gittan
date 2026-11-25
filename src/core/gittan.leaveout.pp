@@ -55,14 +55,21 @@ var
   Found: array of boolean;
   Cr: string;
   i, k, Old, Next, Left, Emitted, NewLine, Seen: integer;
-  FinalNewline, EndNewline: boolean;
+  FinalNewline, EndNewline, BareCr: boolean;
 
   { ALine goes into the result; ABare when no newline may follow it,
     as the last line of a side git marks so. }
   procedure Emit(const ALine: string; ABare: boolean);
   begin
     if Emitted > 0 then
+    begin
+      { A line put back with no newline of its own is not the last after
+        all: it ends as the file's lines do. }
+      if BareCr then
+        Out.Append(Cr);
       Out.Append(#10);
+    end;
+    BareCr := False;
     Out.Append(ALine);
     Inc(Emitted);
     EndNewline := not ABare;
@@ -73,6 +80,7 @@ var
   procedure EmitFileLine;
   begin
     Emit(FileLines[Next], (Next = FileLines.Count - 1) and not FinalNewline);
+    BareCr := not EndNewline;
   end;
 
   { The file's next line, which must be the added line ANew; it is put
@@ -114,6 +122,7 @@ begin
       Cr := #13;
     Next := 0;
     Emitted := 0;
+    BareCr := False;
     NewLine := 1;
     Seen := 0;
     EndNewline := True;
@@ -147,10 +156,13 @@ begin
           Left := Match[i + Old + k];
         if (Left >= 0) <> AOthers then
         begin
-          { A bare last line gets no CR either: it ends the file. }
+          { A bare last line gets no CR either while it ends the file. }
           if Pairs[k].HasOld then
             if HasNoNewline(ALines, i + k) then
-              Emit(Pairs[k].Old, True)
+            begin
+              Emit(Pairs[k].Old, True);
+              BareCr := True;
+            end
             else
               Emit(Pairs[k].Old + Cr, False);
           if Pairs[k].HasNew and not Take(Pairs[k].New, False) then

@@ -439,7 +439,8 @@ begin
       Old := 0;
       while (i + Old < ALines.Count) and (ALines[i + Old][1] = '-') do
         Inc(Old);
-      SetLength(OldNos, Old);
+      { A place for each old line of the block, wherever it stands. }
+      SetLength(OldNos, Length(Pairs));
       for k := 0 to High(Pairs) do
       begin
         if Pairs[k].HasOld then
