@@ -65,6 +65,9 @@ type
     FOnFolderChange: TNotifyEvent;
     function LinkAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
+    {** The link under the mouse as the content was laid out anew: its
+      index, the cursor and the hint. }
+    procedure UpdateHot;
     procedure AddLink(const ARect: TRect; const AUrl: string);
     function Cached(const AFolder: string; out AList: TGittanTreeEntries): boolean;
     procedure LoadFolder(const AFolder: string);
@@ -260,6 +263,7 @@ begin
   H := Max(FContentHeight, Constraints.MinHeight);
   if Height <> H then
     Height := H;
+  UpdateHot;
   Invalidate;
 end;
 
@@ -324,6 +328,18 @@ begin
     if PtInRect(FLinkRects[i], Point(X, Y)) then
       Exit(i);
   Result := -1;
+end;
+
+procedure TGittanFilesPage.UpdateHot;
+var
+  P: TPoint;
+begin
+  { Nothing was hovered, also when FHot was cleared without SetHot. }
+  if (FHot < 0) and (Cursor = crDefault) then
+    Exit;
+  P := ScreenToClient(Mouse.CursorPos);
+  FHot := -2;
+  SetHot(LinkAt(P.X, P.Y));
 end;
 
 procedure TGittanFilesPage.SetHot(AValue: integer);
@@ -431,7 +447,7 @@ begin
   Style.SingleLine := False;
   Style.Alignment := taLeftJustify;
   Style.Layout := tlTop;
-  DrawText(FC.Handle, PChar(AText), Length(AText), R, DT_CALCRECT or DT_WORDBREAK);
+  DrawText(FC.Handle, PChar(AText), Length(AText), R, DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
   R.Right := Width - Px(Pad);
   FC.TextRect(R, R.Left, R.Top, AText, Style);
   Y := R.Bottom;

@@ -217,6 +217,9 @@ type
     function CurSection: TGittanForgeSection;
     function SectionKeysOf(ASection: TGittanForgeSection): string;
     procedure SetHot(AValue: integer);
+    {** The link under the mouse as the content was laid out anew: its
+      index, the cursor and the hint. }
+    procedure UpdateHot;
     procedure SetMineFilters(const AValue: string);
     procedure SetReviewFilters(const AValue: string);
     procedure SetIgnoredChecks(AValue: TStringList);
@@ -1425,6 +1428,7 @@ begin
   H := Max(FContentHeight, Constraints.MinHeight);
   if Height <> H then
     Height := H;
+  UpdateHot;
   Invalidate;
 end;
 
@@ -1443,6 +1447,18 @@ begin
     if PtInRect(FLinkRects[i], Point(X, Y)) then
       Exit(i);
   Result := -1;
+end;
+
+procedure TGittanForgePage.UpdateHot;
+var
+  P: TPoint;
+begin
+  { Nothing was hovered, also when FHot was cleared without SetHot. }
+  if (FHot < 0) and (Cursor = crDefault) and (Hint = '') then
+    Exit;
+  P := ScreenToClient(Mouse.CursorPos);
+  FHot := -2;
+  SetHot(LinkAt(P.X, P.Y));
 end;
 
 procedure TGittanForgePage.SetHot(AValue: integer);
@@ -1684,7 +1700,7 @@ begin
   Style.SingleLine := False;
   Style.Alignment := taLeftJustify;
   Style.Layout := tlTop;
-  DrawText(FC.Handle, PChar(AText), Length(AText), R, DT_CALCRECT or DT_WORDBREAK);
+  DrawText(FC.Handle, PChar(AText), Length(AText), R, DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
   R.Right := ARight;
   FC.TextRect(R, R.Left, R.Top, AText, Style);
   Y := R.Bottom;
@@ -1707,7 +1723,7 @@ begin
   TextH := FC.TextHeight('Xg');
   G := Px(EmptyGlyph);
   TR := Rect(ALeft + Px(CardPadX), 0, ARight - Px(CardPadX), 0);
-  DrawText(FC.Handle, PChar(AText), Length(AText), TR, DT_CALCRECT or DT_WORDBREAK);
+  DrawText(FC.Handle, PChar(AText), Length(AText), TR, DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
   H := 2 * Px(EmptyPadY) + G + Px(Gap) + TR.Bottom;
   if ATitle <> '' then
     Inc(H, TextH + 4);

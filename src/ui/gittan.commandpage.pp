@@ -91,6 +91,9 @@ type
     FOnStop, FOnTrust, FOnEditFile, FOnEditPersonal, FOnCopyOutput: TNotifyEvent;
     function LinkAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
+    {** The link under the mouse as the content was laid out anew: its
+      index, the cursor and the hint. }
+    procedure UpdateHot;
     procedure AddLink(const ARect: TRect; const AUrl: string; const AHint: string = '');
     procedure PaintHeading(var Y: integer; const ATitle, ADetail, AState: string;
       AStateColor: TColor);
@@ -410,6 +413,7 @@ begin
   H := Max(FContentHeight, Constraints.MinHeight);
   if Height <> H then
     Height := H;
+  UpdateHot;
   Invalidate;
 end;
 
@@ -427,6 +431,18 @@ begin
     if PtInRect(FLinkRects[i], Point(X, Y)) then
       Exit(i);
   Result := -1;
+end;
+
+procedure TGittanCommandPage.UpdateHot;
+var
+  P: TPoint;
+begin
+  { Nothing was hovered, also when FHot was cleared without SetHot. }
+  if (FHot < 0) and (Cursor = crDefault) and (Hint = '') then
+    Exit;
+  P := ScreenToClient(Mouse.CursorPos);
+  FHot := -2;
+  SetHot(LinkAt(P.X, P.Y));
 end;
 
 procedure TGittanCommandPage.SetHot(AValue: integer);
@@ -553,7 +569,7 @@ begin
   Style.SingleLine := False;
   Style.Alignment := taLeftJustify;
   Style.Layout := tlTop;
-  DrawText(FC.Handle, PChar(AText), Length(AText), R, DT_CALCRECT or DT_WORDBREAK);
+  DrawText(FC.Handle, PChar(AText), Length(AText), R, DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
   R.Right := Width - Px(Pad);
   FC.TextRect(R, R.Left, R.Top, AText, Style);
   Y := R.Bottom;
@@ -578,7 +594,7 @@ begin
   Style.Alignment := taLeftJustify;
   Style.Layout := tlTop;
   R := Rect(Inner.Left, Inner.Top + TextH + 4, Inner.Right, Inner.Top + TextH + 4);
-  DrawText(FC.Handle, PChar(rsTrustText), Length(rsTrustText), R, DT_CALCRECT or DT_WORDBREAK);
+  DrawText(FC.Handle, PChar(rsTrustText), Length(rsTrustText), R, DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
   B := Rect(Inner.Left, R.Bottom + Px(Gap), Inner.Left + FC.TextWidth(rsTrustButton) +
     2 * Px(ButtonPadX), R.Bottom + Px(Gap) + TextH + 2 * Px(ButtonPadY));
   Y := B.Bottom + Px(CardPad);

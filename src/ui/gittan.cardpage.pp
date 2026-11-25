@@ -39,6 +39,9 @@ type
     procedure AddLink(const ARect: TRect; const AUrl: string);
     function LinkAt(X, Y: integer): integer;
     procedure SetHot(AValue: integer);
+    {** The link under the mouse as the content was laid out anew: its
+      index, the cursor and the hint. }
+    procedure UpdateHot;
     function PillWidth(const AText: string; AExt: boolean = False): integer;
     {** A button as a pill, its text at ALeft, ATop: APrimary in the link
       color, else outlined; AExt with the puzzle piece before the text; a
@@ -123,6 +126,18 @@ begin
     if PtInRect(FLinkRects[i], Point(X, Y)) then
       Exit(i);
   Result := -1;
+end;
+
+procedure TGittanCardPage.UpdateHot;
+var
+  P: TPoint;
+begin
+  { Nothing was hovered, also when FHot was cleared without SetHot. }
+  if (FHot < 0) and (Cursor = crDefault) and (Hint = '') then
+    Exit;
+  P := ScreenToClient(Mouse.CursorPos);
+  FHot := -2;
+  SetHot(LinkAt(P.X, P.Y));
 end;
 
 procedure TGittanCardPage.SetHot(AValue: integer);
@@ -261,7 +276,7 @@ var
   R: TRect;
 begin
   R := Rect(0, 0, AWidth, 0);
-  DrawText(FC.Handle, PChar(AText), Length(AText), R, DT_CALCRECT or DT_WORDBREAK);
+  DrawText(FC.Handle, PChar(AText), Length(AText), R, DT_CALCRECT or DT_WORDBREAK or DT_NOPREFIX);
   Result := Max(R.Bottom, FC.TextHeight('Xg'));
 end;
 
@@ -279,6 +294,7 @@ begin
   H := Max(FContentHeight, Constraints.MinHeight);
   if Height <> H then
     Height := H;
+  UpdateHot;
   Invalidate;
 end;
 

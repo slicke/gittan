@@ -2086,10 +2086,17 @@ begin
     begin
       Inc(X, Canvas.TextWidth(FBase) + Px(ChevronWidth) div 2 + 1);
       DrawChevron(Canvas, X, TextY + BodyHeight div 2, FDim);
-    end;
+      Inc(X, Px(ChevronWidth) div 2 + Px(ChipPadX));
+    end
+    else
+      Inc(X, Canvas.TextWidth(FBase));
+    Inc(X, Px(Gap));
   end;
+  { The action where the names before it leave it room: over the branch
+    chip it would take the chip's click. }
   FActionRect := Rect(0, 0, 0, 0);
-  if (FAction <> '') and ((Length(FStats) > 0) or (FBase <> '')) then
+  if (FAction <> '') and ((Length(FStats) > 0) or (FBase <> '')) and
+    (Width - Px(Pad) - Canvas.TextWidth(FAction) >= X) then
   begin
     TextY := Y + TitleHeight - BodyHeight - 3;
     Canvas.Font.Color := FLink;
@@ -2640,6 +2647,9 @@ var
   Y, i, First, Last, MaxChange: integer;
   Clip: TRect;
 begin
+  { Read before anything is painted: the notes' markdown turns the
+    clipping off, and Qt then gives an empty rectangle. }
+  Clip := Canvas.ClipRect;
   Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := FBack;
   Canvas.FillRect(ClientRect);
@@ -2668,7 +2678,6 @@ begin
   for i := 0 to High(FStats) do
     if (i > High(FRowTexts)) or (FRowTexts[i] = '') then
       MaxChange := Max(MaxChange, FStats[i].Added + FStats[i].Deleted);
-  Clip := Canvas.ClipRect;
   First := Max(0, (Clip.Top - FRowsTop) div Px(RowHeight));
   Last := Min(ShownRows - 1, (Clip.Bottom - FRowsTop) div Px(RowHeight));
   for i := First to Last do

@@ -594,7 +594,8 @@ begin
   if NoWork <> FCommitIdle then
   begin
     FCommitIdle := NoWork;
-    if Idle and FCommitHeader.Expanded then
+    { Nor is it folded with the caret in it, to hide what is typed. }
+    if Idle and FCommitHeader.Expanded and not FCommitMemo.Focused then
     begin
       FCommitAutoFolded := True;
       FCommitHeader.Expanded := False;

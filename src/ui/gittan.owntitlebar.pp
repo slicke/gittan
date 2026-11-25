@@ -479,7 +479,14 @@ begin
   end;
   FTabActive := AActive;
   if FHotIndex > High(FCaptions) then
-    SetHot(tpNone, -1);
+    SetHot(tpNone, -1)
+  { Another tab may be under the mouse now, with a tip of its own. }
+  else if (FHotIndex >= 0) and (FHotPart in [tpTab, tpTabClose]) and
+    (Hint <> FHints[FHotIndex]) then
+  begin
+    Hint := FHints[FHotIndex];
+    Application.CancelHint;
+  end;
   Layout;
   Invalidate;
 end;
@@ -1699,7 +1706,12 @@ procedure TGittanMenuStrip.OpenItem(AIndex: integer);
 var
   Src: TMenuItem;
 begin
-  if (FOpen >= 0) or (AIndex < 0) or (AIndex > High(FItems)) then
+  if FOpen >= 0 then
+    Exit;
+  { The menu may be another frame's since the strip was painted, the
+    items of the one before freed. }
+  Collect;
+  if (AIndex < 0) or (AIndex > High(FItems)) then
     Exit;
   Src := FItems[AIndex];
   if not Src.Enabled then
@@ -1789,6 +1801,7 @@ begin
   Result := False;
   if (FOpen < 0) or not HandleAllocated then
     Exit;
+  Collect;
   P := ScreenToClient(AScreen);
   Index := IndexAt(P.X, P.Y);
   if (Index < 0) or (Index = FOpen) or not FItems[Index].Enabled then
@@ -1802,6 +1815,7 @@ var
   N, Index: integer;
 begin
   inherited KeyDown(Key, Shift);
+  Collect;
   N := Length(FItems);
   if (Key = 0) or (N = 0) then
     Exit;
